@@ -88,7 +88,9 @@ export function replayHistoricalResults(results = [], options = {}) {
     pendingUpdates = [];
   };
   for (const row of sorted) {
-    const rowTime = String(row.startTime || row.dateKey || '');
+    // Start order does not establish when a result became available. Never
+    // feed an earlier-starting same-day game's final into a later kickoff.
+    const rowTime = String(row.dateKey || String(row.startTime || '').slice(0, 10));
     if (pendingTime && rowTime !== pendingTime) applyPendingUpdates();
     pendingTime = rowTime;
     const profile = sportProfile({ leagueKey: row.leagueKey, sportGroup: row.sportGroup });
@@ -147,8 +149,8 @@ export function replayHistoricalResults(results = [], options = {}) {
       });
     }
 
-    // Time-integrity boundary: all events with the same start timestamp are
-    // predicted before any result from that timestamp is applied.
+    // Conservative prior-date research boundary; true available-at times are
+    // still missing, so this replay is not prospective promotion evidence.
     pendingUpdates.push({ away, home, row, profile, homeAdvantage });
   }
   applyPendingUpdates();
@@ -158,7 +160,7 @@ export function replayHistoricalResults(results = [], options = {}) {
     asOfDateKey: cutoffDateKey,
     resultCount: sorted.length,
     predictionCount: predictions.length,
-    timeIntegrity: 'Each prediction uses only games strictly earlier in replay order; the current final is applied afterward.',
+    timeIntegrity: 'Only earlier dateKey results are used. Actual historical result-availability times remain unverified; research replay is not prospective promotion evidence.',
     overall: scoreCandidates(predictions),
     sports: Object.fromEntries([...new Set(predictions.map((row) => row.sport))].map((sport) => [sport, scoreCandidates(predictions.filter((row) => row.sport === sport))])),
     predictions

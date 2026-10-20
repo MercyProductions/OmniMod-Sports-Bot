@@ -49,6 +49,37 @@ export function markPregameRefreshes(slate = {}, due = [], refreshedAt = new Dat
   return { ...slate, pregameRefreshes, lastPregameRefreshAt: refreshedAt };
 }
 
+/** Mark only a freshly obtained summary plus a new pregame forecast as completed. */
+export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due = [], attemptedAt, completedAt) {
+  const began = finiteTime(attemptedAt), ended = finiteTime(completedAt);
+  if (began === null || ended === null || ended < began) throw new Error('Invalid pregame refresh attempt timestamps.');
+  const games = new Map((rebuilt.games || []).map(game => [String(game.id), game]));
+  const predictions = new Map((rebuilt.predictions || []).map(row => [String(row.gameId), row]));
+  const completed = [], rejected = [];
+  for (const row of due) {
+    const game = games.get(row.gameId), prediction = predictions.get(row.gameId);
+    const fetched = finiteTime(game?.autoEnrichment?.fetchedAt), generated = finiteTime(prediction?.predictionGeneratedAt), start = finiteTime(game?.startTime);
+    const valid = game?.statusKey === 'scheduled' && start !== null && ended < start
+      && ['network', 'revalidated'].includes(game?.autoEnrichment?.cacheState)
+      && fetched !== null && fetched >= began && fetched <= ended
+      && prediction?.predictionMode === 'pregame' && generated !== null && generated >= fetched && generated <= ended;
+    if (valid) completed.push(row);
+    else rejected.push({ gameId: row.gameId, reason: 'fresh_summary_and_new_pregame_forecast_not_verified' });
+  }
+  const failed = new Set(rejected.map(row => row.gameId));
+  const previousGames = new Map((previous.games || []).map(game => [String(game.id), game]));
+  const previousPredictions = new Map((previous.predictions || []).map(row => [String(row.gameId), row]));
+  const candidate = { ...rebuilt,
+    games: (rebuilt.games || []).map(game => failed.has(String(game.id)) ? previousGames.get(String(game.id)) || game : game),
+    predictions: (rebuilt.predictions || []).map(row => failed.has(String(row.gameId)) ? previousPredictions.get(String(row.gameId)) || row : row),
+    pregameRefreshes: previous.pregameRefreshes || {},
+    lastPregameRefreshAt: previous.lastPregameRefreshAt || '',
+    lastPregameRefreshAttemptAt: completedAt,
+    lastPregameRefreshAttempt: { attempted: due.length, completed: completed.length, rejected },
+    pregameRefreshDeliveryPending: completed.length > 0 || previous.pregameRefreshDeliveryPending === true };
+  return { slate: completed.length ? markPregameRefreshes(candidate, completed, completedAt) : candidate, completed, rejected };
+}
+
 export function nextPregameRefresh(slate = {}, now = new Date(), options = {}) {
   const nowMs = finiteTime(now) ?? Date.now();
   const windows = parseRefreshWindows(options.windows);
@@ -61,7 +92,12 @@ export function nextPregameRefresh(slate = {}, now = new Date(), options = {}) {
     for (const window of windows) {
       if (completed[String(window)]) continue;
       const dueAt = startMs - window * 60_000;
-      if (dueAt < nowMs) continue;
+      if (dueAt < nowMs) {
+        const overdueWindows = windows.filter((value) => !completed[String(value)] && startMs - value * 60_000 < nowMs);
+        if (!best || nowMs < best.dueAtMs) best = { gameId: String(game.id), window: Math.min(...overdueWindows),
+          dueAtMs: nowMs, dueAt: new Date(nowMs).toISOString(), overdue: true };
+        continue;
+      }
       if (!best || dueAt < best.dueAtMs) best = { gameId: String(game.id), window, dueAtMs: dueAt, dueAt: new Date(dueAt).toISOString() };
     }
   }

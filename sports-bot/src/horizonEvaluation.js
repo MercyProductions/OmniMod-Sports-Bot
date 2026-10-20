@@ -19,6 +19,7 @@ function normalizedPrediction(row = {}) {
 }
 
 export function predictionHorizon(row = {}) {
+  if (['Daily', 'T-90', 'T-30', 'T-10'].includes(row.horizon)) return row.horizon;
   const stage = String(row.snapshotStage || row.stage || '').toLowerCase();
   if (/t-?10\b/.test(stage)) return 'T-10';
   if (/t-?30\b/.test(stage)) return 'T-30';
@@ -114,9 +115,13 @@ function seasonPhase(row = {}) {
   return 'regular';
 }
 
-export function evaluatePredictionHorizons(predictions = [], markets = []) {
+export function evaluatePredictionHorizons(predictions = [], markets = [], options = {}) {
   const deduped = new Map();
+  const versions = [...new Set(predictions.map(row => row.modelVersion || 'legacy-unversioned'))]
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  const selectedVersion = options.modelVersion || versions.find(version => version !== 'legacy-unversioned') || 'legacy-unversioned';
   for (const row of predictions) {
+    if ((row.modelVersion || 'legacy-unversioned') !== selectedVersion) continue;
     if (row.quoteRefreshOnly) continue;
     if (!['away', 'home', 'draw'].includes(row.actualSide)) continue;
     if (row.predictionMode !== 'pregame') continue;
@@ -124,7 +129,7 @@ export function evaluatePredictionHorizons(predictions = [], markets = []) {
     const startTime = new Date(row.startTime || '').getTime();
     if (!Number.isFinite(generatedAt) || !Number.isFinite(startTime) || generatedAt >= startTime) continue;
     const horizon = predictionHorizon(row);
-    const key = `${row.guildId || ''}:${row.gameId}:${horizon}`;
+    const key = `${row.guildId || ''}:${row.leagueKey || row.league || ''}:${row.gameId}:${selectedVersion}:${horizon}`;
     const prior = deduped.get(key);
     if (!prior || String(row.predictionGeneratedAt || '') > String(prior.predictionGeneratedAt || '')) deduped.set(key, row);
   }
@@ -157,10 +162,19 @@ export function evaluatePredictionHorizons(predictions = [], markets = []) {
     });
   }
   const group = (key) => Object.fromEntries([...new Set(scored.map((row) => row[key]))].sort().map((value) => [value, summarize(scored.filter((row) => row[key] === value))]));
+  const latestByGame = new Map();
+  for (const scoredRow of scored) {
+    const row = scoredRow.row, key = [row.guildId || '', row.leagueKey || row.league || '', row.gameId].join(':');
+    const prior = latestByGame.get(key);
+    if (!prior || Date.parse(row.predictionGeneratedAt) > Date.parse(prior.row.predictionGeneratedAt)) latestByGame.set(key, scoredRow);
+  }
   return {
     generatedAt: new Date().toISOString(),
-    methodology: 'One latest frozen prediction per game/horizon; 95% intervals use deterministic bootstrap resampling.',
-    overall: summarize(scored),
+    methodology: 'One declared model version; overall uses latest frozen pregame forecast per game. Horizon groups are separate correlated populations. Intervals use game-IID bootstrap, not day/league-cluster validation.',
+    modelVersion: selectedVersion,
+    versionsAvailable: versions,
+    scoreDefinition: 'Full-outcome Brier (mean over outcome coordinates) and multinomial log loss; distinct from selected-outcome binary scores.',
+    overall: summarize([...latestByGame.values()]),
     byHorizon: group('horizon'),
     byLeague: group('league'),
     bySeasonPhase: group('seasonPhase'),

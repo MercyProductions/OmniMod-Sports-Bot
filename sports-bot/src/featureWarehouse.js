@@ -3,6 +3,7 @@ import { dataDir } from './config.js';
 import { warehousePlayRows } from './playByPlay.js';
 import { readJson, writeJson } from './storage.js';
 import { finalOutcomeSide } from './dataValidation.js';
+import { predictionHorizon } from './horizonEvaluation.js';
 
 const WAREHOUSE_VERSION = 2;
 const warehouseFile = path.join(dataDir, 'feature-warehouse.json');
@@ -161,6 +162,9 @@ function publicPrediction(prediction = {}, slate = {}, game = {}) {
     sportProfile: prediction.sportProfile,
     startTime: prediction.startTime,
     predictionGeneratedAt: prediction.predictionGeneratedAt || slate.generatedAt || '',
+    modelVersion: prediction.modelVersion || '',
+    snapshotPolicy: 'first_issue_immutable_v1',
+    recordedAt: new Date().toISOString(),
     modelAsOf: prediction.modelAsOf || prediction.predictionGeneratedAt || slate.generatedAt || '',
     quoteRefreshOnly: prediction.quoteRefreshOnly === true,
     snapshotStage: prediction.snapshotStage || 'daily',
@@ -170,6 +174,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}) {
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
     candidateProbabilities: prediction.candidateProbabilities,
+    referenceBaselines: prediction.referenceBaselines || null,
     championModel: prediction.championModel,
     mlFeatureVector: prediction.mlFeatureVector || null,
     featureContributions: (prediction.factors || []).slice(0, 30).map((row) => ({
@@ -318,7 +323,8 @@ export async function recordSlateSnapshot(slate = {}) {
     const existing = new Map(current.predictions.map((row) => [predictionKey(row), row]));
     const frozenRows = rows.map((row) => {
       const prior = existing.get(predictionKey(row));
-      return prior?.valueAnalysis ? { ...row, valueAnalysis: prior.valueAnalysis } : row;
+      // Grades may change later; the issued forecast and point-in-time inputs may not.
+      return prior || row;
     });
     const predictions = mergeRows(current.predictions, frozenRows, predictionKey, LIMITS.predictions, 'predictionGeneratedAt')
       .map((row) => {
@@ -392,6 +398,13 @@ export async function warehouseCandidateRowsBefore(dateKey = '') {
       sport: row.sportProfile,
       leagueKey: row.leagueKey,
       startTime: row.startTime,
+      modelVersion: row.modelVersion || '',
+      snapshotStage: row.snapshotStage || 'daily',
+      horizon: predictionHorizon(row),
+      predictionGeneratedAt: row.predictionGeneratedAt || '',
+      recordedAt: row.recordedAt || '',
+      resolvedAt: row.resolvedAt || '',
+      snapshotPolicy: row.snapshotPolicy || '',
       actualSide: row.actualSide,
       candidateProbabilities: row.candidateProbabilities,
       mlFeatureVector: row.mlFeatureVector,

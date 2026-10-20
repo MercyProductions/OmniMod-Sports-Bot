@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { config, dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
+import { selectCandidateCohort, validCandidateVector } from './candidateCohorts.js';
 
 const modelFile = path.join(dataDir, 'local-ml-models.json');
 const MODEL_VERSION = 1;
@@ -172,6 +173,8 @@ export async function readLocalMlModels() {
 }
 
 export function trainLocalMlModels(rows = [], options = {}) {
+  const selected = selectCandidateCohort(rows);
+  rows = selected.rows.filter(row => validCandidateVector(row.candidateProbabilities?.evidence));
   const minimum = Math.max(60, Number(options.minimum ?? config.localMlMinSamples) || 150);
   const groups = new Map();
   for (const row of rows) {
@@ -189,7 +192,12 @@ export function trainLocalMlModels(rows = [], options = {}) {
     const validation = sorted.slice(split);
     const validationModel = fitStumps(training, 22);
     const evaluation = scoreRows(validation, validationModel);
-    const accepted = sorted.length >= minimum && validation.length >= 30 && evaluation.brierImprovement > 0.0015 && evaluation.logLossImprovement >= -0.003;
+    const firstValidationForecast = Math.min(...validation.map(row => Date.parse(row.predictionGeneratedAt || '')));
+    const labelsAvailableBeforeHoldout = Number.isFinite(firstValidationForecast) && training.every(row =>
+      Number.isFinite(Date.parse(row.resolvedAt || '')) && Date.parse(row.resolvedAt) < firstValidationForecast);
+    const chronologyVerified = selected.cohort.prospectiveRecordsVerified && labelsAvailableBeforeHoldout;
+    const accepted = chronologyVerified && sorted.length >= minimum && validation.length >= 30
+      && evaluation.brierImprovement > 0.0015 && evaluation.logLossImprovement >= -0.003;
     const finalModel = fitStumps(sorted, 28);
     sports[sport] = {
       modelId: `local-gbdt-hierarchical-${sport}-v1`,
@@ -199,6 +207,8 @@ export function trainLocalMlModels(rows = [], options = {}) {
       trainingSampleSize: training.length,
       validationSampleSize: validation.length,
       accepted,
+      chronologyVerified,
+      labelsAvailableBeforeHoldout,
       evaluation,
       featureNames: FEATURE_NAMES,
       stumps: finalModel.stumps,
@@ -216,7 +226,7 @@ export function trainLocalMlModels(rows = [], options = {}) {
       }
     }
   }
-  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows };
+  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows, cohort: selected.cohort };
 }
 
 export async function trainAndPersistLocalMlModels(rows = [], options = {}) {

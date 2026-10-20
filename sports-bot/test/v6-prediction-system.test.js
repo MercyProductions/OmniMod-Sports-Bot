@@ -46,9 +46,12 @@ function mlRows(count = 320) {
     const home = index % 4 < 2;
     const signal = home ? 1 : -1;
     const evidence = home ? { away: 0.48, home: 0.52, draw: 0 } : { away: 0.52, home: 0.48, draw: 0 };
+    const dateKey = `2099-${String(1 + Math.floor(index / 28)).padStart(2, '0')}-${String(1 + index % 28).padStart(2, '0')}`;
     return {
-      dateKey: `2099-${String(1 + Math.floor(index / 28)).padStart(2, '0')}-${String(1 + index % 28).padStart(2, '0')}`,
-      startTime: new Date(Date.UTC(2099, 0, 1, index)).toISOString(),
+      dateKey,
+      startTime: `${dateKey}T20:00:00Z`,
+      predictionGeneratedAt: `${dateKey}T08:00:00Z`, recordedAt: `${dateKey}T08:01:00Z`, resolvedAt: `${dateKey}T23:00:00Z`,
+      snapshotPolicy: 'first_issue_immutable_v1', modelVersion: 'OmniMod Evidence Ensemble v6.0.1', source: 'frozen-production',
       gameId: String(index),
       leagueKey: 'nba',
       sport: 'basketball',
@@ -176,10 +179,11 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
   const prediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active' } } },
+    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+      evaluation: { cohort: { prospectiveRecordsVerified: true, key: 'production|OmniMod Evidence Ensemble v6.0.1|Daily' } } } } },
     localMlModels: { sports: { basketball: model } }
   });
-  assert.match(prediction.modelVersion, /v6\.0\.0/);
+  assert.match(prediction.modelVersion, /v6\.0\.1/);
   assert.equal(prediction.localMlModel.active, true);
   assert.ok(prediction.candidateProbabilities.ml);
   assert.ok(prediction.factors.some((factor) => factor.label === 'Projected participation' && factor.present));
@@ -188,7 +192,8 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
   const rejectedPrediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active' } } },
+    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+      evaluation: { cohort: { prospectiveRecordsVerified: true, key: 'production|OmniMod Evidence Ensemble v6.0.1|Daily' } } } } },
     localMlModels: { sports: { basketball: { ...model, accepted: false } } }
   });
   assert.equal(rejectedPrediction.localMlModel.active, false);

@@ -3,7 +3,8 @@ import { config } from './config.js';
 import { normalizeEntityName, readIntelligenceStore } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { readFeatureWarehouse } from './featureWarehouse.js';
-import { evaluatePredictionHorizons } from './horizonEvaluation.js';
+import { evaluatePredictionHorizons, predictionHorizon } from './horizonEvaluation.js';
+import { CURRENT_MODEL_VERSION, EVALUATION_VERSION } from './modelIdentity.js';
 import { finiteNumber, finalOutcomeSide, scoreOutcome } from './dataValidation.js';
 
 const EPSILON = 0.001;
@@ -95,25 +96,30 @@ export function evaluatePredictionRows(rows = []) {
   };
 }
 
-export function collectGradedRows(caches = []) {
-  const rows = [];
-  const seen = new Set();
+export function collectGradedRows(caches = [], options = {}) {
+  const rows = new Map();
   for (const cache of caches) {
     for (const prediction of cache?.slate?.predictions ?? []) {
       if (prediction.quoteRefreshOnly) continue;
       if (prediction.predictionCorrect !== true && prediction.predictionCorrect !== false) continue;
       if (prediction.eligibleForCalibration === false || (prediction.predictionMode && prediction.predictionMode !== 'pregame')) continue;
       if (!eligibleModelVersion(prediction.modelVersion)) continue;
-      const key = `${cache.dateKey}:${prediction.gameId}:${prediction.modelVersion || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       const game = (cache?.slate?.games || []).find((row) => String(row.id) === String(prediction.gameId));
       const generated = Date.parse(prediction.predictionGeneratedAt || cache?.slate?.generatedAt || '');
       const start = Date.parse(prediction.startTime || game?.startTime || '');
-      if (Number.isFinite(generated) && Number.isFinite(start) && generated >= start) continue;
+      if (!Number.isFinite(generated) || !Number.isFinite(start) || generated >= start) continue;
       if (game && !outcomeSide(game)) continue;
-      rows.push({
+      const horizon = predictionHorizon({ ...prediction, minutesToStart: (start - generated) / 60_000 });
+      if (options.modelVersion && prediction.modelVersion !== options.modelVersion) continue;
+      if (options.horizon && horizon !== options.horizon) continue;
+      const key = [cache.slate?.guildId || '', prediction.leagueKey || prediction.league || '', cache.dateKey,
+        prediction.gameId, prediction.modelVersion, horizon].join(':');
+      const prior = rows.get(key);
+      if (prior && Date.parse(prior.prediction.predictionGeneratedAt || '') >= generated) continue;
+      rows.set(key, {
         dateKey: cache.dateKey,
+        modelVersion: prediction.modelVersion,
+        horizon,
         correct: prediction.predictionCorrect,
         prediction,
         game,
@@ -121,11 +127,11 @@ export function collectGradedRows(caches = []) {
       });
     }
   }
-  return rows;
+  return [...rows.values()];
 }
 
-export function collectFeatureRows(caches = []) {
-  return collectGradedRows(caches)
+export function collectFeatureRows(caches = [], options = {}) {
+  return collectGradedRows(caches, options)
     .filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && Array.isArray(row.prediction?.factors) && row.prediction.factors.length)
     .map((row) => ({
       dateKey: row.dateKey,
@@ -424,11 +430,12 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
   const caches = options.asOfDateKey
     ? loadedCaches.filter((cache) => String(cache.dateKey) < String(options.asOfDateKey))
     : loadedCaches;
-  const rows = collectGradedRows(caches);
+  const cohort = { modelVersion: options.modelVersion || CURRENT_MODEL_VERSION, horizon: options.horizon || 'Daily' };
+  const rows = collectGradedRows(caches, cohort);
   const beforeCutoff = (row) => !options.asOfDateKey || (row.dateKey && String(row.dateKey).slice(0, 10) < String(options.asOfDateKey));
   const historicalIntelligence = { ...intelligence, results: Object.fromEntries(Object.entries(intelligence.results || {}).filter(([, row]) => beforeCutoff(row))) };
   const externalResults = (options.externalResults || []).filter(beforeCutoff);
-  const featureRows = collectFeatureRows(caches);
+  const featureRows = collectFeatureRows(caches, cohort);
   const overall = evaluatePredictionRows(rows);
   const bySport = {};
   for (const key of [...new Set(rows.map((row) => profileKey(row.prediction)))]) {
@@ -436,7 +443,7 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
   }
   return {
     intelligence,
-    history: { overall, bySport, rows: rows.length },
+    history: { overall, bySport, rows: rows.length, cohort, evaluationVersion: EVALUATION_VERSION },
     calibration: buildCalibrationModel(rows),
     outcomeValidation: buildOutcomeValidation(rows),
     featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows) : {},
@@ -449,8 +456,10 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
 
 export async function evaluateGuildModel(guildId = '', days = 365) {
   const [caches, warehouse] = await Promise.all([listDailyCaches(days, guildId), readFeatureWarehouse()]);
-  const rows = collectGradedRows(caches);
-  const featureRows = collectFeatureRows(caches);
+  const allRows = collectGradedRows(caches);
+  const cohort = { modelVersion: CURRENT_MODEL_VERSION, horizon: 'Daily' };
+  const rows = collectGradedRows(caches, cohort);
+  const featureRows = collectFeatureRows(caches, cohort);
   const overall = evaluatePredictionRows(rows);
   const bySport = {};
   for (const key of [...new Set(rows.map((row) => profileKey(row.prediction)))]) {
@@ -460,12 +469,18 @@ export async function evaluateGuildModel(guildId = '', days = 365) {
     days,
     cacheCount: caches.length,
     overall,
+    cohort,
+    evaluationVersion: EVALUATION_VERSION,
+    scoreDefinition: 'Binary selected-outcome Brier/log loss; full-outcome horizon scores are separate.',
+    byVersionAndHorizon: Object.fromEntries([...new Set(allRows.map(row => `${row.modelVersion}|${row.horizon}`))]
+      .map(key => [key, evaluatePredictionRows(allRows.filter(row => `${row.modelVersion}|${row.horizon}` === key))])),
     bySport,
     featureLearning: buildWalkForwardFeatureModels(featureRows),
     drift: buildDriftReport(rows),
     horizons: evaluatePredictionHorizons(
       warehouse.predictions.filter((row) => String(row.guildId || '') === String(guildId || '')),
-      warehouse.markets.filter((row) => String(row.guildId || '') === String(guildId || ''))
+      warehouse.markets.filter((row) => String(row.guildId || '') === String(guildId || '')),
+      { modelVersion: CURRENT_MODEL_VERSION }
     )
   };
 }

@@ -37,7 +37,7 @@ function integerListEnv(name, fallback = []) {
 
 export const config = {
   discordToken: process.env.DISCORD_TOKEN || '',
-  clientId: process.env.DISCORD_CLIENT_ID || '1522283367767212255',
+  clientId: process.env.DISCORD_CLIENT_ID || '',
   guildId: process.env.DISCORD_GUILD_ID || '',
   sportsChannelId: process.env.SPORTS_CHANNEL_ID || '',
   resultsChannelId: process.env.SPORTS_RESULTS_CHANNEL_ID || '',
@@ -50,6 +50,7 @@ export const config = {
   dailyPostHour: intEnv('DAILY_POST_HOUR', 8, 0, 23),
   dailyPostMinute: intEnv('DAILY_POST_MINUTE', 0, 0, 59),
   finalCheckMinutes: intEnv('FINAL_CHECK_MINUTES', 10, 2, 180),
+  finalLookbackDays: intEnv('FINAL_LOOKBACK_DAYS', 7, 1, 30),
   postOnStart: boolEnv('POST_ON_START', true),
   registerCommands: boolEnv('REGISTER_COMMANDS', true),
   maxGamesPerPost: intEnv('MAX_GAMES_PER_POST', 75, 1, 200),
@@ -93,4 +94,5 @@ export function requireRuntimeConfig() {
   if (!config.discordToken) {
     throw new Error('DISCORD_TOKEN is missing. Copy .env.example to .env or run scripts/setup-env.ps1.');
   }
+  if (!config.clientId) throw new Error('DISCORD_CLIENT_ID is missing. Set your own Discord application ID in the local .env.');
 }

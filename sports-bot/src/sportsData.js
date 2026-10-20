@@ -12,6 +12,7 @@ import { readLocalMlModels, trainAndPersistLocalMlModels } from './localMl.js';
 import { readModelRegistry, refreshModelRegistry } from './modelRegistry.js';
 import { MODEL_VERSION, predictGame } from './predictionEngine.js';
 import { cachedFetchJson } from './providerCache.js';
+import { recordPredictionJournal } from './predictionJournal.js';
 import { sportProfile } from './sportProfiles.js';
 import { americanToProbability, finiteNumber, finalOutcomeSide, validScore } from './dataValidation.js';
 
@@ -787,7 +788,9 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     game.autoHistory = {
       awayGames: Number(awayAuto?.sampleSize || 0),
       homeGames: Number(homeAuto?.sampleSize || 0),
-      fetchedAt: awayAuto?.updatedAt || homeAuto?.updatedAt || '',
+      fetchedAt: awayAuto?.sourceFetchedAt && homeAuto?.sourceFetchedAt
+        ? [awayAuto.sourceFetchedAt, homeAuto.sourceFetchedAt].sort()[0] : '',
+      fetchedAtBySide: { away: awayAuto?.sourceFetchedAt || '', home: homeAuto?.sourceFetchedAt || '' },
       cacheState: awayAuto?.sourceCacheState === 'stale' || homeAuto?.sourceCacheState === 'stale'
         ? 'stale'
         : awayAuto?.sourceCacheState || homeAuto?.sourceCacheState || 'unknown',
@@ -868,7 +871,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         results: replay.resultCount,
         predictions: replay.predictionCount,
         asOfDateKey: replay.asOfDateKey,
-        timeIntegrity: true
+        timeIntegrity: replay.timeIntegrity
       } : null,
       localMl: Object.fromEntries(Object.entries(localMlModels.sports || {}).map(([sport, row]) => [sport, {
         modelId: row.modelId,
@@ -934,6 +937,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     channelId: options.cachedSlate?.channelId || '',
     finalReplies
   };
+  await recordPredictionJournal(slate);
   if (config.featureWarehouseEnabled) await recordSlateSnapshot(slate);
   return slate;
 }
@@ -949,21 +953,24 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
   const finals = [];
   const predictions = (cachedSlate.predictions ?? []).map((oldPrediction) => {
     const cachedGame = (cachedSlate.games ?? []).find((game) => game.id === oldPrediction.gameId);
-    const freshGame = freshById.get(oldPrediction.gameId) || freshGames.find((game) => cachedGame && gamesMatch(game, cachedGame));
+    const freshGame = freshById.get(oldPrediction.gameId) || freshGames.find((game) => cachedGame && gamesMatch(game, cachedGame))
+      || (cachedGame?.statusKey === 'final' ? cachedGame : null);
     if (!freshGame || freshGame.statusKey !== 'final') return oldPrediction;
     const graded = attachFinalGrade(freshGame, oldPrediction);
     const alreadyReplied = Boolean(cachedSlate.finalReplies?.[oldPrediction.gameId]);
     if (!alreadyReplied && typeof graded.predictionCorrect === 'boolean') finals.push({ game: freshGame, prediction: graded });
     return graded;
   });
-  const games = (cachedSlate.games ?? []).map((cachedGame) => freshById.get(cachedGame.id) || freshGames.find((game) => gamesMatch(game, cachedGame)) || cachedGame);
-  return {
-    ...cachedSlate,
-    refreshedAt: new Date().toISOString(),
-    games,
-    predictions,
+  const games = (cachedSlate.games ?? []).map((cachedGame) => {
+    const fresh = freshById.get(cachedGame.id) || freshGames.find((game) => gamesMatch(game, cachedGame));
+    return !fresh ? cachedGame : String(fresh.id) === String(cachedGame.id) ? fresh
+      : { ...fresh, id: cachedGame.id, upstreamEventId: fresh.id };
+  });
+  const refreshed = { ...cachedSlate, refreshedAt: new Date().toISOString(), games, predictions,
     diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.'],
-    alerts: [],
-    newFinals: finals
-  };
+    alerts: [], newFinals: finals };
+  // Save outcomes before Discord delivery: a transport failure cannot erase the result observation.
+  await recordPredictionJournal(refreshed);
+  if (config.featureWarehouseEnabled) await recordSlateSnapshot(refreshed);
+  return refreshed;
 }

@@ -145,7 +145,8 @@ test('evaluation reports proper scoring and calibration metrics', () => {
 test('legacy heuristic caches cannot contaminate v3/v4 calibration', () => {
   const rows = collectGradedRows([{ dateKey: '2099-01-01', slate: { predictions: [
     { gameId: 'old', confidenceValue: 80, predictionCorrect: true, modelVersion: 'OmniMod Sports source-model parity v2' },
-    { gameId: 'new', confidenceValue: 60, predictionCorrect: false, modelVersion: 'OmniMod Evidence Ensemble v3.0.0', predictionMode: 'pregame', eligibleForCalibration: true }
+    { gameId: 'new', confidenceValue: 60, predictionCorrect: false, modelVersion: 'OmniMod Evidence Ensemble v3.0.0', predictionMode: 'pregame', eligibleForCalibration: true,
+      predictionGeneratedAt: '2099-01-01T08:00:00Z', startTime: '2099-01-01T20:00:00Z' }
   ] } }]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].prediction.gameId, 'new');
@@ -157,6 +158,7 @@ test('walk-forward home-away learning treats a soccer draw as neutral evidence',
     predictions: [{
       gameId: 'draw', predictionCorrect: false, eligibleForCalibration: true, predictionMode: 'pregame',
       modelVersion: 'OmniMod Evidence Ensemble v4.0.0', sportProfile: 'soccer',
+      predictionGeneratedAt: '2099-01-01T08:00:00Z', startTime: '2099-01-01T20:00:00Z',
       factors: [{ label: 'Elo strength', value: 0.1 }]
     }]
   } }];

@@ -319,7 +319,8 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
     games: [{ id, statusKey: 'final', leagueKey: 'nba', sportGroup: 'Basketball', away: { name: 'A', score: 90 }, home: { name: 'H', score: 100 } }],
     predictions: [{
       gameId: id, predictionCorrect: true, eligibleForCalibration: true, predictionMode: 'pregame',
-      modelVersion: 'OmniMod Evidence Ensemble v4.0.0', predictionProbability: 0.7,
+      modelVersion: 'OmniMod Evidence Ensemble v6.0.1', predictionProbability: 0.7,
+      predictionGeneratedAt: `${dateKey}T08:00:00Z`, startTime: `${dateKey}T20:00:00Z`,
       sportProfile: 'basketball', factors: [{ label: 'Power', value: 0.2 }]
     }]
   });

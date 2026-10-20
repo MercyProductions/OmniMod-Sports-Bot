@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { config, dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
+import { selectCandidateCohort, validCandidateVector } from './candidateCohorts.js';
+import { CURRENT_MODEL_VERSION } from './modelIdentity.js';
 
 const registryFile = path.join(dataDir, 'model-registry.json');
 const MODELS = {
@@ -25,7 +27,7 @@ function vectorValue(vector, side) {
 }
 
 function scoreModel(rows, model) {
-  const eligible = rows.filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && row.candidateProbabilities?.[model]);
+  const eligible = rows.filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && validCandidateVector(row.candidateProbabilities?.[model]));
   if (!eligible.length) return { sampleSize: 0, brierScore: null, logLoss: null };
   let brier = 0;
   let logLoss = 0;
@@ -39,13 +41,17 @@ function scoreModel(rows, model) {
 }
 
 export function evaluateCandidateModels(rows = []) {
+  const selected = selectCandidateCohort(rows);
+  rows = selected.rows;
   const modelNames = ['evidence', 'hybrid', 'ml'];
   const models = Object.fromEntries(modelNames.map((name) => [name, scoreModel(rows, name)]));
   const evidence = models.evidence;
   const hybrid = models.hybrid;
   const comparisons = {};
   for (const candidate of modelNames.filter((name) => name !== 'evidence')) {
-    const matched = rows.filter((row) => row.candidateProbabilities?.evidence && row.candidateProbabilities?.[candidate]);
+    const matched = rows.filter((row) => validCandidateVector(row.candidateProbabilities?.evidence)
+      && validCandidateVector(row.candidateProbabilities?.[candidate])
+      && (Number(row.candidateProbabilities.evidence.draw || 0) > 0) === (Number(row.candidateProbabilities[candidate].draw || 0) > 0));
     const baseline = scoreModel(matched, 'evidence');
     const challenger = scoreModel(matched, candidate);
     comparisons[candidate] = {
@@ -61,6 +67,7 @@ export function evaluateCandidateModels(rows = []) {
     .sort((a, b) => Number(b[1].brierImprovement) - Number(a[1].brierImprovement));
   const bestChallenger = ranked[0]?.[0] || 'hybrid';
   return {
+    cohort: selected.cohort,
     models,
     evidence,
     hybrid,
@@ -110,13 +117,20 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
     sampleSize: recentEvaluation.evidence?.sampleSize || 0,
     brierImprovement: recentEvaluation.brierImprovement
   } : null);
-  const promotable = Number(fullComparison.sampleSize || 0) >= minimum &&
+  const provenanceEligible = !options.requireProspectiveRecords || evaluation.cohort?.prospectiveRecordsVerified === true;
+  const promotable = provenanceEligible && Number(fullComparison.sampleSize || 0) >= minimum &&
     Number(fullComparison.brierImprovement) > 0.0025 &&
     Number(fullComparison.logLossImprovement) >= -0.003 &&
     Number(recentComparison.brierImprovement ?? -1) > -0.004;
   const rollback = existing.champion !== 'evidence' && Number(championRecentComparison?.sampleSize || 0) >= 30 &&
     Number(championRecentComparison?.brierImprovement) < -0.009;
-  if (existing.champion === 'evidence' && proposed !== 'evidence' && promotable) {
+  if (!provenanceEligible && existing.champion !== 'evidence') {
+    existing.champion = 'evidence';
+    existing.championModelId = MODELS.evidence;
+    existing.status = 'provenance_revalidation_required';
+    existing.rolledBackAt = now;
+    action = 'rolled_back_unverified_provenance';
+  } else if (existing.champion === 'evidence' && proposed !== 'evidence' && promotable) {
     existing.champion = proposed;
     existing.championModelId = MODELS[proposed] || proposed;
     existing.challenger = 'evidence';
@@ -137,7 +151,8 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
   } else {
     existing.challenger = proposed;
     existing.challengerModelId = MODELS[proposed] || proposed;
-    existing.status = Number(fullComparison.sampleSize || 0) >= minimum ? 'challenger_not_better' : 'collecting';
+    existing.status = !provenanceEligible ? 'research_only_provenance_unverified'
+      : Number(fullComparison.sampleSize || 0) >= minimum ? 'challenger_not_better' : 'collecting';
   }
   existing.evaluation = evaluation;
   existing.recentEvaluation = recentEvaluation;
@@ -154,7 +169,10 @@ export async function readModelRegistry() {
 }
 
 export function modelDecisionForSport(registry = {}, sport = 'default') {
-  const row = registry.sports?.[sport] || defaultSportEntry(sport);
+  let row = registry.sports?.[sport] || defaultSportEntry(sport);
+  if (row.champion !== 'evidence' && (!row.evaluation?.cohort?.prospectiveRecordsVerified
+    || !String(row.evaluation.cohort.key || '').includes(`|${CURRENT_MODEL_VERSION}|`)))
+    row = { ...defaultSportEntry(sport), status: 'provenance_revalidation_required' };
   return {
     champion: row.champion || 'evidence',
     championModelId: row.championModelId || MODELS.evidence,
@@ -171,7 +189,7 @@ export async function refreshModelRegistry(rows = [], options = {}) {
   const grouped = new Map();
   const dedupedRows = new Map();
   for (const row of rows) {
-    const key = `${row.source || 'replay'}:${row.dateKey}:${row.gameId}:${row.sport || row.sportProfile}`;
+    const key = `${row.source || 'replay'}:${row.modelVersion || 'legacy'}:${row.snapshotStage || 'daily'}:${row.dateKey}:${row.gameId}:${row.sport || row.sportProfile}`;
     dedupedRows.set(key, row);
   }
   for (const row of dedupedRows.values()) {
@@ -185,7 +203,8 @@ export async function refreshModelRegistry(rows = [], options = {}) {
       const sorted = [...sportRows].sort((a, b) => String(a.dateKey || '').localeCompare(String(b.dateKey || '')));
       const evaluation = evaluateCandidateModels(sorted);
       const recentEvaluation = evaluateCandidateModels(sorted.slice(-Math.min(75, Math.max(30, Math.floor(sorted.length / 3)))));
-      const { entry: existing, action } = applyCandidateDecision(registry.sports[sport], sport, evaluation, recentEvaluation, { minimum });
+      const { entry: existing, action } = applyCandidateDecision(registry.sports[sport], sport, evaluation, recentEvaluation,
+        { minimum, requireProspectiveRecords: true });
       registry.sports[sport] = existing;
       if (action) registry.audit.push({ at: existing.evaluatedAt, sport, action, evaluation, recentEvaluation });
     }
