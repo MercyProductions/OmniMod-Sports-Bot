@@ -316,7 +316,10 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const awayXwoba = sideMetric('away');
       const homeXwoba = sideMetric('home');
       if (awayXwoba !== null || homeXwoba !== null) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'MLB Baseball Savant', awayLineupXwoba: awayXwoba, homeLineupXwoba: homeXwoba, lineupXwobaDifference: (homeXwoba || 0) - (awayXwoba || 0) };
+        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'MLB Baseball Savant',
+          awayLineupXwoba: awayXwoba, homeLineupXwoba: homeXwoba,
+          lineupXwobaCoverage: awayXwoba !== null && homeXwoba !== null ? 'both_sides' : 'partial',
+          lineupXwobaDifference: awayXwoba !== null && homeXwoba !== null ? homeXwoba - awayXwoba : null };
         matched += 1;
       }
       continue;

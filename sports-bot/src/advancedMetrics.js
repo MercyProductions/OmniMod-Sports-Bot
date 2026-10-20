@@ -3,14 +3,14 @@ import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, summarizeTeamParticipation } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
+import { finiteNumber } from './dataValidation.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function finite(value, fallback = null) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  return finiteNumber(value, fallback);
 }
 
 function mean(values) {
@@ -87,11 +87,15 @@ function athleteStatMap(group, athleteRow) {
 }
 
 function metric(stats, ...names) {
+  return optionalMetric(stats, ...names) ?? 0;
+}
+
+function optionalMetric(stats, ...names) {
   for (const name of names) {
     const value = finite(stats?.[statKey(name)]);
     if (value !== null) return value;
   }
-  return 0;
+  return null;
 }
 
 function teamKey(league, team) {
@@ -496,14 +500,19 @@ function specializedTeamMetrics(profileKey, stats, score, opponentScore, playByP
     };
   }
   if (profileKey === 'soccer') {
-    const directXg = metric(stats, 'expectedGoals', 'xg');
-    const shotsOnTarget = metric(stats, 'shotsOnTarget');
-    const shots = metric(stats, 'totalShots');
+    const directXg = optionalMetric(stats, 'expectedGoals', 'xg');
+    const shotsOnTarget = optionalMetric(stats, 'shotsOnTarget');
+    const shots = optionalMetric(stats, 'totalShots');
+    const proxy = shotsOnTarget !== null || shots !== null
+      ? (shotsOnTarget || 0) * 0.24 + Math.max(0, (shots || 0) - (shotsOnTarget || 0)) * 0.055 : null;
+    const expectedGoals = directXg ?? proxy;
     return {
       ...playMetrics,
-      expectedGoals: directXg || (shotsOnTarget * 0.24 + Math.max(0, shots - shotsOnTarget) * 0.055) || score,
-      shotsOnTarget: shotsOnTarget || null,
-      shotQuality: shots ? (directXg || score) / shots : null
+      expectedGoals,
+      reportedXgCoverage: directXg !== null ? 1 : 0,
+      shotProxyCoverage: directXg === null && proxy !== null ? 1 : 0,
+      shotsOnTarget,
+      shotQuality: shots > 0 && expectedGoals !== null ? expectedGoals / shots : null
     };
   }
   if (profileKey === 'baseball') {
