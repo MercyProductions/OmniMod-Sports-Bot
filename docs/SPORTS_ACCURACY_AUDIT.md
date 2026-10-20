@@ -85,18 +85,18 @@ Model-versus-consensus difference is not automatically realizable edge. The mode
 
 ## Source entry points on the repair branch
 
-- [providerCache.js:58](../sports-bot/src/providerCache.js#L58) — inspect the repair-branch diff for the changes discussed above.
-- [modelEvaluation.js:99](../sports-bot/src/modelEvaluation.js#L99) — inspect the repair-branch diff for the changes discussed above.
-- [horizonEvaluation.js:21](../sports-bot/src/horizonEvaluation.js#L21) — inspect the repair-branch diff for the changes discussed above.
-- [candidateCohorts.js:2](../sports-bot/src/candidateCohorts.js#L2) — inspect the repair-branch diff for the changes discussed above.
-- [featureWarehouse.js:312](../sports-bot/src/featureWarehouse.js#L312) — inspect the repair-branch diff for the changes discussed above.
-- [modelRegistry.js:100](../sports-bot/src/modelRegistry.js#L100) — inspect the repair-branch diff for the changes discussed above.
-- [localMl.js:175](../sports-bot/src/localMl.js#L175) — inspect the repair-branch diff for the changes discussed above.
-- [historicalReplay.js:59](../sports-bot/src/historicalReplay.js#L59) — inspect the repair-branch diff for the changes discussed above.
-- [pregameRefresh.js:53](../sports-bot/src/pregameRefresh.js#L53) — inspect the repair-branch diff for the changes discussed above.
-- [predictionEngine.js:490](../sports-bot/src/predictionEngine.js#L490) — inspect the repair-branch diff for the changes discussed above.
-- [advancedDatasets.js:21](../sports-bot/src/advancedDatasets.js#L21) — inspect the repair-branch diff for the changes discussed above.
-- [advancedMetrics.js:202](../sports-bot/src/advancedMetrics.js#L202) — inspect the repair-branch diff for the changes discussed above.
-- [predictionJournal.js:88](../sports-bot/src/predictionJournal.js#L88) — inspect the repair-branch diff for the changes discussed above.
-- [finalReconciliation.js:2](../sports-bot/src/finalReconciliation.js#L2) — inspect the repair-branch diff for the changes discussed above.
-- [sportsData.js:741](../sports-bot/src/sportsData.js#L741) — inspect the repair-branch diff for the changes discussed above.
+- [providerCache.js:58](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/providerCache.js#L58) — inspect the repair-branch diff for the changes discussed above.
+- [modelEvaluation.js:99](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/modelEvaluation.js#L99) — inspect the repair-branch diff for the changes discussed above.
+- [horizonEvaluation.js:21](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/horizonEvaluation.js#L21) — inspect the repair-branch diff for the changes discussed above.
+- [candidateCohorts.js:2](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/candidateCohorts.js#L2) — inspect the repair-branch diff for the changes discussed above.
+- [featureWarehouse.js:312](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/featureWarehouse.js#L312) — inspect the repair-branch diff for the changes discussed above.
+- [modelRegistry.js:100](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/modelRegistry.js#L100) — inspect the repair-branch diff for the changes discussed above.
+- [localMl.js:175](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/localMl.js#L175) — inspect the repair-branch diff for the changes discussed above.
+- [historicalReplay.js:59](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/historicalReplay.js#L59) — inspect the repair-branch diff for the changes discussed above.
+- [pregameRefresh.js:53](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/pregameRefresh.js#L53) — inspect the repair-branch diff for the changes discussed above.
+- [predictionEngine.js:490](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/predictionEngine.js#L490) — inspect the repair-branch diff for the changes discussed above.
+- [advancedDatasets.js:21](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/advancedDatasets.js#L21) — inspect the repair-branch diff for the changes discussed above.
+- [advancedMetrics.js:202](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/advancedMetrics.js#L202) — inspect the repair-branch diff for the changes discussed above.
+- [predictionJournal.js:88](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/predictionJournal.js#L88) — inspect the repair-branch diff for the changes discussed above.
+- [finalReconciliation.js:2](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/finalReconciliation.js#L2) — inspect the repair-branch diff for the changes discussed above.
+- [sportsData.js:741](https://github.com/MercyProductions/OmniMod-Sports-Bot/blob/docs/setup-and-prediction-audit-2026-10-20/sports-bot/src/sportsData.js#L741) — inspect the repair-branch diff for the changes discussed above.
