@@ -1,0 +1,91 @@
+{
+  "teams": [
+    {
+      "name": "Example Home",
+      "league": "NBA",
+      "aliases": ["EXH"],
+      "powerRating": 72,
+      "elo": 1575,
+      "offense": 74,
+      "defense": 70,
+      "form": 66,
+      "coaching": 73,
+      "chemistry": 78,
+      "notes": "Replace with sourced league-relative ratings."
+    },
+    {
+      "name": "Example Away",
+      "league": "NBA",
+      "aliases": ["EXA"],
+      "powerRating": 61,
+      "elo": 1510,
+      "offense": 64,
+      "defense": 59,
+      "form": 54,
+      "coaching": 62,
+      "chemistry": 65,
+      "notes": "Replace with sourced league-relative ratings."
+    }
+  ],
+  "players": [
+    {
+      "name": "Example Starter",
+      "team": "Example Home",
+      "league": "NBA",
+      "role": "primary scorer",
+      "impact": 7.5,
+      "availability": 75,
+      "status": "probable",
+      "starter": true,
+      "form": 70,
+      "stats": {
+        "minutes": 34,
+        "plusMinus": 4.2
+      },
+      "notes": "Replace with verified status and timestamp."
+    }
+  ],
+  "contexts": [
+    {
+      "gameId": "replace-with-provider-game-id",
+      "factors": {
+        "homeRestDays": 2,
+        "awayRestDays": 1,
+        "homeTravelKm": 0,
+        "awayTravelKm": 900,
+        "homeMotivation": 0.1,
+        "awayMotivation": 0,
+        "weatherSeverity": 0
+      },
+      "notes": "Replace with current game-day context.",
+      "expiresAt": "2099-01-03T06:00:00Z"
+    }
+  ],
+  "games": [
+    {
+      "id": "manual-example-2099-01-02",
+      "dateKey": "2099-01-02",
+      "startTime": "2099-01-02T19:00:00-06:00",
+      "league": "NBA",
+      "leagueKey": "nba",
+      "sportGroup": "Basketball",
+      "awayTeam": "Example Away",
+      "homeTeam": "Example Home",
+      "venue": "Example Arena",
+      "neutralSite": false
+    }
+  ],
+  "results": [
+    {
+      "dateKey": "2098-12-20",
+      "league": "NBA",
+      "leagueKey": "nba",
+      "sportGroup": "Basketball",
+      "awayTeam": "Example Away",
+      "homeTeam": "Example Home",
+      "awayScore": 101,
+      "homeScore": 108,
+      "neutralSite": false
+    }
+  ]
+}

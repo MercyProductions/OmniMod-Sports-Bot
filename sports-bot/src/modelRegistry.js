@@ -1,0 +1,201 @@
+import path from 'node:path';
+import { config, dataDir } from './config.js';
+import { readJson, writeJson } from './storage.js';
+
+const registryFile = path.join(dataDir, 'model-registry.json');
+const MODELS = {
+  evidence: 'evidence-ensemble-v6',
+  hybrid: 'sport-specialist-hybrid-v2',
+  ml: 'local-gbdt-hierarchical-v1'
+};
+let writeChain = Promise.resolve();
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function emptyRegistry() {
+  return { version: 1, updatedAt: '', sports: {}, audit: [] };
+}
+
+function vectorValue(vector, side) {
+  const value = Number(vector?.[side]);
+  if (!Number.isFinite(value)) return 0;
+  return value > 1 ? value / 100 : value;
+}
+
+function scoreModel(rows, model) {
+  const eligible = rows.filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && row.candidateProbabilities?.[model]);
+  if (!eligible.length) return { sampleSize: 0, brierScore: null, logLoss: null };
+  let brier = 0;
+  let logLoss = 0;
+  for (const row of eligible) {
+    const vector = row.candidateProbabilities[model];
+    const sides = row.actualSide === 'draw' || vectorValue(vector, 'draw') > 0 ? ['away', 'home', 'draw'] : ['away', 'home'];
+    brier += sides.reduce((sum, side) => sum + (vectorValue(vector, side) - Number(side === row.actualSide)) ** 2, 0) / sides.length;
+    logLoss += -Math.log(clamp(vectorValue(vector, row.actualSide), 0.001, 0.999));
+  }
+  return { sampleSize: eligible.length, brierScore: brier / eligible.length, logLoss: logLoss / eligible.length };
+}
+
+export function evaluateCandidateModels(rows = []) {
+  const modelNames = ['evidence', 'hybrid', 'ml'];
+  const models = Object.fromEntries(modelNames.map((name) => [name, scoreModel(rows, name)]));
+  const evidence = models.evidence;
+  const hybrid = models.hybrid;
+  const comparisons = {};
+  for (const candidate of modelNames.filter((name) => name !== 'evidence')) {
+    const matched = rows.filter((row) => row.candidateProbabilities?.evidence && row.candidateProbabilities?.[candidate]);
+    const baseline = scoreModel(matched, 'evidence');
+    const challenger = scoreModel(matched, candidate);
+    comparisons[candidate] = {
+      baseline,
+      challenger,
+      sampleSize: challenger.sampleSize,
+      brierImprovement: baseline.brierScore === null || challenger.brierScore === null ? null : baseline.brierScore - challenger.brierScore,
+      logLossImprovement: baseline.logLoss === null || challenger.logLoss === null ? null : baseline.logLoss - challenger.logLoss
+    };
+  }
+  const ranked = Object.entries(comparisons)
+    .filter(([, row]) => row.brierImprovement !== null)
+    .sort((a, b) => Number(b[1].brierImprovement) - Number(a[1].brierImprovement));
+  const bestChallenger = ranked[0]?.[0] || 'hybrid';
+  return {
+    models,
+    evidence,
+    hybrid,
+    ml: models.ml,
+    comparisons,
+    bestChallenger,
+    bestBrierImprovement: comparisons[bestChallenger]?.brierImprovement ?? null,
+    bestLogLossImprovement: comparisons[bestChallenger]?.logLossImprovement ?? null,
+    brierImprovement: comparisons.hybrid?.brierImprovement ?? null,
+    logLossImprovement: comparisons.hybrid?.logLossImprovement ?? null
+  };
+}
+
+function defaultSportEntry(sport) {
+  return {
+    sport,
+    champion: 'evidence',
+    championModelId: MODELS.evidence,
+    challenger: 'hybrid',
+    challengerModelId: MODELS.hybrid,
+    specialistWeight: 0.38,
+    status: 'collecting',
+    promotedAt: '',
+    rolledBackAt: '',
+    evaluation: null,
+    recentEvaluation: null
+  };
+}
+
+export function applyCandidateDecision(current = {}, sport = 'default', evaluation = {}, recentEvaluation = {}, options = {}) {
+  const minimum = Math.max(30, Number(options.minimum) || 75);
+  const now = options.now || new Date().toISOString();
+  const existing = { ...defaultSportEntry(sport), ...current };
+  let action = '';
+  const proposed = evaluation.bestChallenger || 'hybrid';
+  const fullComparison = evaluation.comparisons?.[proposed] || {
+    sampleSize: evaluation[proposed]?.sampleSize || evaluation.evidence?.sampleSize || 0,
+    brierImprovement: proposed === 'hybrid' ? evaluation.brierImprovement : null,
+    logLossImprovement: proposed === 'hybrid' ? evaluation.logLossImprovement : null
+  };
+  const recentComparison = recentEvaluation.comparisons?.[proposed] || {
+    sampleSize: recentEvaluation[proposed]?.sampleSize || recentEvaluation.evidence?.sampleSize || 0,
+    brierImprovement: proposed === 'hybrid' ? recentEvaluation.brierImprovement : null,
+    logLossImprovement: proposed === 'hybrid' ? recentEvaluation.logLossImprovement : null
+  };
+  const championRecentComparison = recentEvaluation.comparisons?.[existing.champion] || (existing.champion === 'hybrid' ? {
+    sampleSize: recentEvaluation.evidence?.sampleSize || 0,
+    brierImprovement: recentEvaluation.brierImprovement
+  } : null);
+  const promotable = Number(fullComparison.sampleSize || 0) >= minimum &&
+    Number(fullComparison.brierImprovement) > 0.0025 &&
+    Number(fullComparison.logLossImprovement) >= -0.003 &&
+    Number(recentComparison.brierImprovement ?? -1) > -0.004;
+  const rollback = existing.champion !== 'evidence' && Number(championRecentComparison?.sampleSize || 0) >= 30 &&
+    Number(championRecentComparison?.brierImprovement) < -0.009;
+  if (existing.champion === 'evidence' && proposed !== 'evidence' && promotable) {
+    existing.champion = proposed;
+    existing.championModelId = MODELS[proposed] || proposed;
+    existing.challenger = 'evidence';
+    existing.challengerModelId = MODELS.evidence;
+    existing.promotedAt = now;
+    existing.status = 'promoted';
+    action = `promoted_${proposed}`;
+  } else if (rollback) {
+    existing.champion = 'evidence';
+    existing.championModelId = MODELS.evidence;
+    existing.challenger = 'hybrid';
+    existing.challengerModelId = MODELS.hybrid;
+    existing.rolledBackAt = now;
+    existing.status = 'rolled_back';
+    action = 'rolled_back_to_evidence';
+  } else if (existing.champion !== 'evidence') {
+    existing.status = 'champion_active';
+  } else {
+    existing.challenger = proposed;
+    existing.challengerModelId = MODELS[proposed] || proposed;
+    existing.status = Number(fullComparison.sampleSize || 0) >= minimum ? 'challenger_not_better' : 'collecting';
+  }
+  existing.evaluation = evaluation;
+  existing.recentEvaluation = recentEvaluation;
+  existing.evaluatedAt = now;
+  existing.championModelId = MODELS[existing.champion] || existing.championModelId;
+  existing.challengerModelId = MODELS[existing.challenger] || existing.challengerModelId;
+  return { entry: existing, action };
+}
+
+export async function readModelRegistry() {
+  const stored = await readJson(registryFile, null, { throwOnError: true });
+  if (stored && stored.version !== 1) throw new Error('Unsupported sports model registry version; existing state was preserved.');
+  return stored?.version === 1 ? { ...emptyRegistry(), ...stored } : emptyRegistry();
+}
+
+export function modelDecisionForSport(registry = {}, sport = 'default') {
+  const row = registry.sports?.[sport] || defaultSportEntry(sport);
+  return {
+    champion: row.champion || 'evidence',
+    championModelId: row.championModelId || MODELS.evidence,
+    challenger: row.challenger || 'hybrid',
+    challengerModelId: row.challengerModelId || MODELS.hybrid,
+    specialistWeight: clamp(Number(row.specialistWeight) || 0.38, 0.15, 0.55),
+    status: row.status || 'collecting',
+    sampleSize: row.evaluation?.models?.[row.champion]?.sampleSize || row.evaluation?.evidence?.sampleSize || 0
+  };
+}
+
+export async function refreshModelRegistry(rows = [], options = {}) {
+  const minimum = Math.max(30, Number(options.minimum ?? config.challengerMinSamples) || 75);
+  const grouped = new Map();
+  const dedupedRows = new Map();
+  for (const row of rows) {
+    const key = `${row.source || 'replay'}:${row.dateKey}:${row.gameId}:${row.sport || row.sportProfile}`;
+    dedupedRows.set(key, row);
+  }
+  for (const row of dedupedRows.values()) {
+    const sport = String(row.sport || row.sportProfile || 'default').toLowerCase();
+    if (!grouped.has(sport)) grouped.set(sport, []);
+    grouped.get(sport).push(row);
+  }
+  const operation = writeChain.then(async () => {
+    const registry = await readModelRegistry();
+    for (const [sport, sportRows] of grouped) {
+      const sorted = [...sportRows].sort((a, b) => String(a.dateKey || '').localeCompare(String(b.dateKey || '')));
+      const evaluation = evaluateCandidateModels(sorted);
+      const recentEvaluation = evaluateCandidateModels(sorted.slice(-Math.min(75, Math.max(30, Math.floor(sorted.length / 3)))));
+      const { entry: existing, action } = applyCandidateDecision(registry.sports[sport], sport, evaluation, recentEvaluation, { minimum });
+      registry.sports[sport] = existing;
+      if (action) registry.audit.push({ at: existing.evaluatedAt, sport, action, evaluation, recentEvaluation });
+    }
+    registry.audit = registry.audit.slice(-100);
+    registry.updatedAt = new Date().toISOString();
+    await writeJson(registryFile, registry, { backup: true, mode: 0o600 });
+    return registry;
+  });
+  writeChain = operation.catch(() => {});
+  return operation;
+}
+
+export { MODELS, registryFile as modelRegistryFile };

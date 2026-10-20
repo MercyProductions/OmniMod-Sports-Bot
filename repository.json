@@ -1,0 +1,334 @@
+{
+  "bot": "sports",
+  "primaryProject": "sports-bot",
+  "snapshotDate": "2026-10-20",
+  "sourceSnapshotSha256": "612fef71aea1cbce031c4d4876059fb17256efb55302b50eec830f0734e1718a",
+  "sourceFiles": [
+    {
+      "path": "sports-bot/.env.example",
+      "sha256": "3be4ea11289c71151d68ad273996d5ef0b7c358f0c0b3d7143f0895bae079528",
+      "bytes": 2697
+    },
+    {
+      "path": "sports-bot/.gitignore",
+      "sha256": "45e43e3647ac15024b32f52db479af7428cee909c2b3cbba7d68e65b9b293007",
+      "bytes": 41
+    },
+    {
+      "path": "sports-bot/.npmignore",
+      "sha256": "64fc5b3e97e51f25b9d62d3703c07b1e3ff5ee639715ca89330aed26a4fb4b29",
+      "bytes": 46
+    },
+    {
+      "path": "sports-bot/app.cjs",
+      "sha256": "20d81504cf8da8cec969f76ce92b887fe129d75fdafe87a1001779cb12e32dd7",
+      "bytes": 3844
+    },
+    {
+      "path": "sports-bot/app.js",
+      "sha256": "b84b0d1bf403239497623d876e61829f9ff4f064228d289d669a467b5a12c4c8",
+      "bytes": 3799
+    },
+    {
+      "path": "sports-bot/docs/DATA.md",
+      "sha256": "a107d2a9bebc3a6fefbf7ab466abc30ce13f613830d7641a617dfd9c28b00076",
+      "bytes": 11594
+    },
+    {
+      "path": "sports-bot/docs/MODEL.md",
+      "sha256": "a462bbf83ddba71afdf942df1f641b33558e03be4a416f5ae7fde41e87a0c1dc",
+      "bytes": 29435
+    },
+    {
+      "path": "sports-bot/examples/intelligence.example.json",
+      "sha256": "cb291b018f40e20839b8333ae08deae8c61a6c5a5f8c187290d355969e8a8d9d",
+      "bytes": 2086
+    },
+    {
+      "path": "sports-bot/examples/players.csv",
+      "sha256": "88923c38caeac86c77b36125539266b0058737212fd200b1fb50d5c07267959a",
+      "bytes": 228
+    },
+    {
+      "path": "sports-bot/examples/teams.csv",
+      "sha256": "81198b7be24077bca6b3d951c368cc05c39a6bc919059713133147198c8a60b0",
+      "bytes": 264
+    },
+    {
+      "path": "sports-bot/package-lock.json",
+      "sha256": "4594fff959918303225fa5bf77673d5d6fcb196b108997ad2ca12de1a45a292e",
+      "bytes": 12255
+    },
+    {
+      "path": "sports-bot/package.json",
+      "sha256": "b32bbc64e39c470a4e8712072c44a7c2f07b365e1ab5860ed2701e4fa1d5569a",
+      "bytes": 2624
+    },
+    {
+      "path": "sports-bot/README.md",
+      "sha256": "971fda999dc53f48b70002563d579c20a8a02c70cee2415a9155df86c501b9e1",
+      "bytes": 28649
+    },
+    {
+      "path": "sports-bot/scripts/recolor-final-results.js",
+      "sha256": "e70c3098b25c47f6089528ab1cce8719a81bc262709ef9df11cd51083d510ea6",
+      "bytes": 3710
+    },
+    {
+      "path": "sports-bot/scripts/setup-env.ps1",
+      "sha256": "27c012b23dc6b3037c0c376689cebf7e23afd8847fa4251a7990524eb52903e5",
+      "bytes": 2186
+    },
+    {
+      "path": "sports-bot/src/advancedDatasets.js",
+      "sha256": "4ab49ed10ad69440bd6750c6dd0ee219c6ff7395f48dd6357b4dac9541b8ef5e",
+      "bytes": 21185
+    },
+    {
+      "path": "sports-bot/src/advancedMetrics.js",
+      "sha256": "461625ec77df0fd16b40d9363de769e7bb26fc450ebce3b6e79da9b0582d32a8",
+      "bytes": 33783
+    },
+    {
+      "path": "sports-bot/src/autoEnrichment.js",
+      "sha256": "0551b1de8d7f35c935a241e9b12db93b43f84b7e9b7df6d26631471c0a2dcf97",
+      "bytes": 40069
+    },
+    {
+      "path": "sports-bot/src/commands.js",
+      "sha256": "b8a819f45098300c0071b12c6569f141e281b49acd72b1e44758cc4ac705f8a7",
+      "bytes": 19195
+    },
+    {
+      "path": "sports-bot/src/config.js",
+      "sha256": "96464711df6ce339e4e9dbe0678aee508722179ae54b52dc3f98054777a97b11",
+      "bytes": 5042
+    },
+    {
+      "path": "sports-bot/src/dataCommandHandler.js",
+      "sha256": "7567477583b9a80903f2890fe9ab074f86d49fe2a25ac16641c8039db27b3543",
+      "bytes": 18346
+    },
+    {
+      "path": "sports-bot/src/dataValidation.js",
+      "sha256": "1703a2582e91223a96ab8f59833e42681e457978e41139286add355432eaac54",
+      "bytes": 1689
+    },
+    {
+      "path": "sports-bot/src/discordPublisher.js",
+      "sha256": "ab29348f65c2ed770eee4049dca0c6d3ca2a0170e1cfb9d2781ce7e268ee569a",
+      "bytes": 21459
+    },
+    {
+      "path": "sports-bot/src/featureWarehouse.js",
+      "sha256": "b6ce50b6f5517cf04c1ef723a90c055f614fca20016fa06105108ef771c94afe",
+      "bytes": 18779
+    },
+    {
+      "path": "sports-bot/src/guildSettings.js",
+      "sha256": "f254c8fb8979eebe555c4ebee26c193fe6bac094a76b32c7edb004b21b227151",
+      "bytes": 4963
+    },
+    {
+      "path": "sports-bot/src/historicalReplay.js",
+      "sha256": "840da6bd2da6e75042cfe773ed7d8da53be2c8ffe9f10dbc309361cb8df7f594",
+      "bytes": 8212
+    },
+    {
+      "path": "sports-bot/src/horizonEvaluation.js",
+      "sha256": "75b82284700f4fe8b1dd6e087fe6f4dc572db2ad3cd40c92f1c2dc3d6804a4b3",
+      "bytes": 8042
+    },
+    {
+      "path": "sports-bot/src/index.js",
+      "sha256": "91c09d735d3d0e5f85c245448fe71b94f2a48318143a553d06fdbc9ecac90a3e",
+      "bytes": 76445
+    },
+    {
+      "path": "sports-bot/src/intelligenceStore.js",
+      "sha256": "b6a800018b02e9f430d47064bcef2bac1e68f3b5e325ab01f34b7fdbd0b4a82c",
+      "bytes": 19166
+    },
+    {
+      "path": "sports-bot/src/localMl.js",
+      "sha256": "fefe9ac56c73feccfda91fc36812a070a5e6471e65ca7fb27ef27e9c7084f15a",
+      "bytes": 11239
+    },
+    {
+      "path": "sports-bot/src/modelEvaluation.js",
+      "sha256": "2cff2cfbdf36f152666136ae74ef1dd375f237d436db682eebeef642dc1c063d",
+      "bytes": 20468
+    },
+    {
+      "path": "sports-bot/src/modelRegistry.js",
+      "sha256": "ac28cc218f9eb746907c714197bfed7284c789d6d0cb54a0ab6b0a0efcc4b941",
+      "bytes": 9229
+    },
+    {
+      "path": "sports-bot/src/oddsValue.js",
+      "sha256": "151a571b19c5b99d3ae416754090c2632c9446bf1bf0a9c426a4bd0982046772",
+      "bytes": 10762
+    },
+    {
+      "path": "sports-bot/src/officialSources.js",
+      "sha256": "5a23d1c8baad611cdf4f2fec94bd6846a35e641520d5d9e8da2facc994da2548",
+      "bytes": 8326
+    },
+    {
+      "path": "sports-bot/src/participationProjection.js",
+      "sha256": "05087e598f2b1c0ecac0fed5591d06bb4d05fe6c47d0ddef5234e3795db2f9e6",
+      "bytes": 7205
+    },
+    {
+      "path": "sports-bot/src/playByPlay.js",
+      "sha256": "29c343d0111d9116506b99b15c67db303e1b700ad1251c2944bd1ef70f4aced7",
+      "bytes": 6685
+    },
+    {
+      "path": "sports-bot/src/predictionEngine.js",
+      "sha256": "e6921e8b14de8ccbd8d0c88fc642da0c9e4dd99556004120927a6d1f228202ea",
+      "bytes": 54584
+    },
+    {
+      "path": "sports-bot/src/pregameRefresh.js",
+      "sha256": "430834078b9697a2fba9d6c66a8d2a2aec0757d303177fca2acec03b21292df3",
+      "bytes": 3011
+    },
+    {
+      "path": "sports-bot/src/preview.js",
+      "sha256": "e7beddd52aaa8bc00360e2fc8c2cef550bad1f85d247daee1432fe860f19958a",
+      "bytes": 1407
+    },
+    {
+      "path": "sports-bot/src/providerCache.js",
+      "sha256": "60252aea7a2fa968e7b3def894c44ea09b882593a99c87b69cece4ea2d08ce29",
+      "bytes": 6529
+    },
+    {
+      "path": "sports-bot/src/registerCommands.js",
+      "sha256": "0a5f0aaee645c08dff53a24d33b69d962f273f1f6712bb617fc8c7225578fddd",
+      "bytes": 727
+    },
+    {
+      "path": "sports-bot/src/situationalAutomation.js",
+      "sha256": "c9408ad474529761a1b31cd1fbb8a9ee2003750f2c95433f8be7369c98877e28",
+      "bytes": 10775
+    },
+    {
+      "path": "sports-bot/src/sourceIntelligence.js",
+      "sha256": "c249ee7a43f3f00406910a351f67dd7eb3d118c4026d5128c6c5d0edd90d8e4e",
+      "bytes": 8981
+    },
+    {
+      "path": "sports-bot/src/sportModels.js",
+      "sha256": "7c422a9f288e0ee1988109cf76dd00b8bf01fb7303cc89833eb89f20037ec888",
+      "bytes": 13860
+    },
+    {
+      "path": "sports-bot/src/sportProfiles.js",
+      "sha256": "2369a499b543c3a1880eb095e31c27ee34b83b3b232e7c3b6c8279d5fa253dc9",
+      "bytes": 3684
+    },
+    {
+      "path": "sports-bot/src/sportsData.js",
+      "sha256": "feb8f4b701c2eb5c5b0031eb88b248948b57b74f97698354432587fddc53f8a3",
+      "bytes": 51981
+    },
+    {
+      "path": "sports-bot/src/storage.js",
+      "sha256": "8c3fa5f1da503d924e4afa1bfe0b7307e8dfcb568e27cc823dd824be039be590",
+      "bytes": 8094
+    },
+    {
+      "path": "sports-bot/src/time.js",
+      "sha256": "16359bdf6b37c93834499eb026f89ee79a47386da548eb82cacdadb58cd669be",
+      "bytes": 1694
+    },
+    {
+      "path": "sports-bot/src/uncertainty.js",
+      "sha256": "eaaa87c019024d4b37bcad6e6a265b6f6365e4676ad46cdb1ef02aaa6b5274a3",
+      "bytes": 5689
+    },
+    {
+      "path": "sports-bot/src/valueQuoteRefresh.js",
+      "sha256": "b4ff2a0e18cd50a3e512ff3d5cb054440ee8e0fe77360ffd0c29d4a3458cb1b5",
+      "bytes": 9855
+    },
+    {
+      "path": "sports-bot/src/watchStore.js",
+      "sha256": "bcf8384e0eef36b54c67dd4a733ff9f7dd3fb085d5a1605f3aa029e187b5da42",
+      "bytes": 2577
+    },
+    {
+      "path": "sports-bot/test/accuracy-regressions.test.js",
+      "sha256": "f28c9d0e56a0092aeded957b765ce979810c3f072259d8dada7dad316f6c5dc6",
+      "bytes": 10723
+    },
+    {
+      "path": "sports-bot/test/advanced-model.test.js",
+      "sha256": "5012a028c806748abc95ac622d0c92e45952330c252c8c52be0fce160a129a0c",
+      "bytes": 17915
+    },
+    {
+      "path": "sports-bot/test/auto-enrichment.test.js",
+      "sha256": "3dcd339b8b92b78910c875db5b14c0fab7d76dc9c363cdc3b02d1c34779d7dee",
+      "bytes": 9444
+    },
+    {
+      "path": "sports-bot/test/daily-provider-cache.test.js",
+      "sha256": "404ba51e43eab4f8fa0d402decf9f1c8ef54df1140e9be8cd53b7caeb6c7d2db",
+      "bytes": 2909
+    },
+    {
+      "path": "sports-bot/test/discord-output.test.js",
+      "sha256": "b48b3fac2327c32d3b6bc954f78e6c879abe6ac2cbbc4bb286f3134971a12abc",
+      "bytes": 6526
+    },
+    {
+      "path": "sports-bot/test/odds-value.test.js",
+      "sha256": "2125d6338a24622542625f3cc2bb7e5c26053274f761ba711d19c2334143af56",
+      "bytes": 9292
+    },
+    {
+      "path": "sports-bot/test/offline-slate.test.js",
+      "sha256": "0dd2d885be0cb0d3eefd41c05c771771872f3e4a6d33880add209bf97620ecf8",
+      "bytes": 9614
+    },
+    {
+      "path": "sports-bot/test/posting-configuration.test.js",
+      "sha256": "7782236b05bbf86425f1be1edd4cc015460609b0b58c4f2b45087754ad8f77aa",
+      "bytes": 1169
+    },
+    {
+      "path": "sports-bot/test/prediction-engine.test.js",
+      "sha256": "730b5abb96e7e131abace533551a0cfd2699b851bf8c824660e3a81b8995c24b",
+      "bytes": 12204
+    },
+    {
+      "path": "sports-bot/test/setup.js",
+      "sha256": "0b8a3d73d9511b30602acbc816df39123cf52195175cd54b49cb6c7aa2bf1702",
+      "bytes": 754
+    },
+    {
+      "path": "sports-bot/test/time.test.js",
+      "sha256": "1c5c1eb5b795a584bd3ea606edac910cd9d660b101cf6c10f18d4407eb979828",
+      "bytes": 353
+    },
+    {
+      "path": "sports-bot/test/v5-prediction-system.test.js",
+      "sha256": "0e82fe20f49373eba0dc83eaa28f0ec3066ad527f5cfd8e013df4c41dadd7603",
+      "bytes": 8107
+    },
+    {
+      "path": "sports-bot/test/v6-prediction-system.test.js",
+      "sha256": "ce561ab25fdb2042e2a0a8d33c2913c2f3ba670da9f5beb8dfbe628afc90d12e",
+      "bytes": 13048
+    },
+    {
+      "path": "sports-bot/test/value-quote-refresh.test.js",
+      "sha256": "5736c97433d73aab94711ee7ba48fc4ffb0d605ff1d9e6373dae963604b16fc3",
+      "bytes": 10562
+    }
+  ],
+  "repositoryPurpose": "Standalone Sports Discord application; no six-market integration bundle required."
+}
