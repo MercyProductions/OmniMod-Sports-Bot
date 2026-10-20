@@ -1,36 +1,160 @@
 # OmniMod Sports Bot
 
-Standalone Discord application for sports schedules, pregame forecasts, final-result grading, source diagnostics and model evaluation. The application is in `sports-bot/`; `npm start` launches only Sports. This repository is separate from the older C++ Aegis Sports Betting AI project.
+Collect sports evidence, issue timestamped pregame outcome forecasts, compare available odds and grade final outcomes. `npm start` launches **only Sports**. Automated tests establish code behavior; current provider coverage and forward performance require separate evidence.
 
-## Setup
+## How it works
 
-Use Node.js 22.9 or newer and npm.
+1. Fetch supported schedules, historical finals, box scores and available player/lineup information using cached, capped requests, supported official corroboration and manual records.
+2. Build chronological Elo/team strength, rest/travel/context and sport-specific features. Football, basketball, baseball, hockey, soccer, tennis and combat have distinct model profiles.
+3. Compute full outcome probabilities, bounded optional market blending, calibration/uncertainty and shadow specialist/ML candidates. A leading team can remain visible even when a stronger recommendation is withheld.
+4. Refresh around T-90/T-30/T-10 and retain frozen forecasts. Feed quality, model probability and uncertainty are different measurements.
+5. Observe final scores and evaluate issued pregame forecasts with proper scores/calibration. An observed bookmaker price is not proof of independent value or an available wager.
+
+Highlights are not the full universe and watches are not automatically approved entries. Model probability, heuristic strength and data quality have different meanings. Zero results can mean a closed session, disabled provider, missing evidence, pending model or risk rejection.
+
+## Requirements and layout
+
+Use Git, **Node.js 22.9+** (the export was checked with Node 24), npm and your own Discord app/server. The primary project is [`sports-bot/`](sports-bot/). Sports is self-contained with its own source and tests.
+
+`repository.json` records the original export/source hashes. Later Git commits/tags are authoritative for subsequent changes. Dependencies remain locked in the existing project lockfiles.
+
+## Install from a clean checkout
 
 ```sh
+git clone https://github.com/MercyProductions/OmniMod-Sports-Bot.git
+cd OmniMod-Sports-Bot
 npm run bootstrap
 npm run info
 npm test
 npm run check
 ```
 
-Copy `sports-bot/.env.example` to `sports-bot/.env` locally and configure the bot's own Discord identity, channels and data settings. Never commit that file. Bootstrap uses the existing dependency lockfile with lifecycle scripts disabled.
+Bootstrap installs locked dependencies with lifecycle scripts disabled. It does not create a provider subscription. Tests use isolated fixture/mocked inputs.
 
-After configuration:
+Copy the template on Windows PowerShell:
+
+```powershell
+Copy-Item sports-bot/.env.example sports-bot/.env
+```
+
+Or on Linux/macOS:
+
+```sh
+cp sports-bot/.env.example sports-bot/.env
+```
+
+Edit that **local** `.env`; never copy the maintainer’s tokens or publish your file. [Every shipped template setting is listed here](docs/CONFIGURATION.md), with sensitive values replaced by instructions to supply your own.
+
+## Create your own Discord application
+
+1. In the [Developer Portal](https://discord.com/developers/applications), create your own application and bot user. Choose its name/avatar.
+2. Reset/copy its bot token into `DISCORD_TOKEN`; set the application ID as `DISCORD_CLIENT_ID`. They are different values. Each independently running bot needs its own application/token.
+3. Enable Discord Developer Mode and copy your server ID to `DISCORD_GUILD_ID`. Configure SPORTS_CHANNEL_ID; never reuse the owner’s destination IDs.
+4. Install it to your server with `bot` and `applications.commands` scopes. Allow View Channel, Send Messages, Embed Links and Read Message History in its channels. Setup that creates channels/roles needs the corresponding management permission.
+5. Register commands and start this application:
 
 ```sh
 npm run register
 npm start
 ```
 
-Registration updates this Discord application's commands; startup can publish configured messages. Neither action is performed by uploading this repository.
+Use `/sports setup` in your server to select destinations/roles. Registration/startup connects to your own Discord application and can publish messages. A connected gateway does not establish feed readiness.
 
-## Source and verification
+The identity skeleton is deliberately empty:
 
-- [Sports documentation](sports-bot/README.md)
-- [Data documentation](sports-bot/docs/DATA.md)
+```dotenv
+DISCORD_TOKEN=
+DISCORD_CLIENT_ID=
+DISCORD_GUILD_ID=
+```
+
+Add the project’s own destination/provider fields from its template. Do not share tokens in issues, screenshots or pull requests.
+
+## Free data and paid upgrades
+
+| Source | Role | Settings in local .env | Limits / prerequisites |
+| --- | --- | --- | --- |
+| Public/official evidence | Default keyless path | ODDS_API_KEY may stay empty; AUTO_ENRICH_ENABLED=true | Coverage varies; 403/stale cache is a data failure, not no games. |
+| Offline/manual inputs | Free research fallback | LOCAL_ONLY=true plus local/imported records | Cold caches may be empty; current facts must not be backfilled as historical knowledge. |
+| The Odds API v4 | Optional account-based odds | ODDS_API_KEY; ODDS_API_REGION=us | Plan credits vary; daily batch claims and explicit refresh budgets limit requests. |
+| Advanced public datasets | Optional supported enrichment | See the template | Missing specialist inputs must not be presented as measured evidence. |
+
+Review this mode skeleton; blank credentials intentionally do not authenticate:
+
+```dotenv
+ODDS_API_KEY=
+ODDS_API_REGION=us
+POST_ON_START=false
+REGISTER_COMMANDS=false
+PREGAME_REFRESH_ENABLED=true
+PREGAME_REFRESH_WINDOWS=90,30,10
+FEATURE_WAREHOUSE_ENABLED=true
+```
+
+The [configuration reference](docs/CONFIGURATION.md) lists all shipped variables. A key enables only the implemented adapters, not every endpoint sold by the provider. Read the primary project’s [existing technical guide](sports-bot/README.md) for deeper settings and market-specific workflows.
+
+## Configure an account step by step
+
+Start without an odds key for supported public evidence, or set `LOCAL_ONLY=true` for offline caches/imports. Set your own application ID; the repaired version no longer falls back to the maintainer’s ID. After Discord setup use `/sports refresh` for an initial scan if startup posting is disabled. For odds, obtain your own account key from The Odds API, store it in `ODDS_API_KEY` (or the administrator-only per-server API-key command), and select the intended `ODDS_API_REGION`. Existing daily batch claims persist across restarts; normal refresh does not claim unlimited new batches. Extra value refresh is an explicit administrator action and respects `SPORTS_VALUE_REFRESH_DAILY_CAP`. Monitor provider quota headers. A free single-book line may help context but does not clear the multi-book freshness/value checks.
+
+## Operation and diagnostics
+
+/sports help, /sports setup, /sports today, /sports game, /sports status, /sports results and /sportsdata evaluate. API-key/data-import operations are administrator-only.
+
+Additional commands from this repository root:
+
+```sh
+npm --prefix sports-bot run preview
+```
+
+Probes/scans can contact the configured provider; metered history or explicit odds refresh may consume your credits. Review request/cost caps first. Do not start duplicate workers against one Discord identity/data store.
+
+| Symptom | Check |
+| --- | --- |
+| No slash commands | Own token/client-ID pair, correct guild installation, registration and permissions. |
+| Connected but zero candidates | Selected source, discovery/screen counts, session, current inputs and rejected-gate reasons. |
+| HTTP 401/403 | Key validity, account region/permissions and endpoint entitlement; do not report it as no opportunities. |
+| HTTP 429 | Quota headers, cooldown/concurrency and duplicate workers sharing the same provider account. |
+| Watches without setups | Data age, model readiness, confirmation, catalyst evidence, explicit costs, emergency stop and risk limits. |
+| Unexpected result summary | Separate research/shadow observations, issued alerts, delivery and actual paper fills. Consult durable records. |
+| Stale records after restart | Actual data path/OS user, timezone, last successful request and old state; preserve the store when investigating. |
+
+Runtime stores can contain private server settings and credentials saved by admin commands. Keep them outside Git/public web roots, persist them across restarts and back them up privately before upgrades. Original hosting documents may describe older deployments; source publication does not configure cPanel or start a production service.
+
+## Sports audit and development status
+
+The source before this audit is preserved by the baseline tag below. The [technical audit](docs/SPORTS_ACCURACY_AUDIT.md), [prediction-record specification](docs/PREDICTION_RECORDS.md) and [implementation checklist](docs/AUDIT_CHECKLIST.md) describe the **v6.0.1 development branch**, `docs/setup-and-prediction-audit-2026-10-20`. Those behavior changes are under review, not deployed. On the main branch, documentation does not itself enable the new journal or audit command. Switch to the review branch to inspect/test that implementation.
+
+The repaired branch has 134 passing tests and adds immutable pregame probabilities, available odds/timestamps and linked final results, plus evaluation/provenance fixes. It does not prove improved prediction accuracy. Available local history is insufficient for a fair historical before/after comparison. `FINAL_LOOKBACK_DAYS` in the configuration reference is a development addition.
+
+## Baseline and contributing
+
+The pre-change version is preserved as [`baseline/pre-readme-sports-audit-2026-10-20`](https://github.com/MercyProductions/OmniMod-Sports-Bot/tree/baseline/pre-readme-sports-audit-2026-10-20), commit `1185e178f34c26ee0d2f80c2b06d6f293f4d0eed`. Inspect it without erasing later work:
+
+```sh
+git switch -c inspect-baseline baseline/pre-readme-sports-audit-2026-10-20
+```
+
+Fork, create a development branch and use your own local credentials. Add regression tests for confirmed defects. Freeze model/strategy versions, dates, horizons and costs before evaluating changes. Compare the same chronological out-of-sample game/trade populations, reporting proper scores/calibration, sample sizes, costs and unresolved outcomes. A few good days or more alerts do not establish improvement. Preserve source and private runtime evidence before model changes.
+
+`npm test` runs this primary project’s tests. `npm run check` runs configured syntax checks. `npm run test:all` is the standalone Sports suite. Submit the problem/change/checks/limits in your PR; share sanitized diagnostics rather than private state.
+
+## Source map
+
+- [Prediction engine](sports-bot/src/predictionEngine.js)
+- [Data lifecycle](sports-bot/src/sportsData.js)
+- [Outcome warehouse](sports-bot/src/featureWarehouse.js)
 - [Model documentation](sports-bot/docs/MODEL.md)
-- [Export verification](EXPORT_VERIFICATION.md)
+- [Data/imports](sports-bot/docs/DATA.md)
 
-The existing source is preserved, including prediction timing, uncertainty, result formatting, duplicate-post protection and optional odds-data handling. `repository.json` records SHA-256 hashes for the copied source files. Historical hosting instructions in the original documentation require review for your deployment; this export does not copy private cPanel configuration or change the production host.
+## Provider documentation
 
-Credentials, runtime data, cached schedules, Discord state, dependencies and logs are excluded. Tests verify code behavior, not current sports-feed access, predictive accuracy or profitable betting. This upload does not connect a wagering account or place a bet.
+- [Discord setup](https://docs.discord.com/developers/quick-start/getting-started)
+- [Alpaca coverage](https://docs.alpaca.markets/us/docs/about-market-data-api)
+- [CoinGecko Demo authentication](https://docs.coingecko.com/demo/reference/authentication)
+- [OANDA API access](https://developer.oanda.com/rest-live-v20/introduction/)
+- [Databento access](https://databento.com/docs/getting-started/build-first-app)
+- [Tradier sandbox/data differences](https://docs.tradier.com/docs/market-data)
+- [The Odds API v4](https://the-odds-api.com/liveapi/guides/v4/)
+
+References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
