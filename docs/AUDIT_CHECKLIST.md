@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | Preserve seven source baselines | Verified complete | Remote baseline tags plus private local Git bundles. |
 | Archive Sports runtime evidence | Verified complete | Private archive outside Git; no .env copied. |
-| Explain seven projects and independent provider setup | Verified complete locally | Seven root READMEs and configuration inventories; publication verification is separate. |
+| Explain seven projects and independent provider setup | Verified complete | Seven root READMEs and configuration inventories published on main; public README bytes and baseline tags verified via GitHub API. |
 | Audit confirmed correctness/provenance defects | Verified complete within documented scope | Technical report and reproduced regression fixtures. |
 | Implement immutable prediction/result evidence | Verified complete in development | Journal and evaluation fixtures; production runtime validation pending. |
 | Test repaired Sports code | Verified complete locally | 134 passing tests; configured syntax checks pass. |
