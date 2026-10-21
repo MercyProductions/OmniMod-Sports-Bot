@@ -778,7 +778,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   const modelContext = await loadModelContext(options.guildId || '', config.predictionHistoryDays, {
     intelligence,
     externalResults: automatic.historyResults,
-    asOfDateKey: dateKey
+    asOfDateKey: dateKey,
+    asOf: localDateKey(new Date()) === dateKey ? Date.now() : undefined
   });
   modelContext.modelRegistry = modelRegistry;
   modelContext.localMlModels = localMlModels;

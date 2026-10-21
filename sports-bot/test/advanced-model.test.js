@@ -336,9 +336,9 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
   await writeDailyCache('2099-03-03', makeSlate('2099-03-03', 'future'));
   const context = await loadModelContext('', 365, { asOfDateKey: '2099-03-02', intelligence: { teams: {}, players: {}, results: {} } });
   assert.equal(context.cacheCount, 1);
-  assert.equal(context.history.rows, 1);
-  assert.equal(context.featureLearning.basketball.sampleSize, 0);
-  assert.equal(context.featureLearning.basketball.excluded.outcome_chronology_unverified, 1);
+  assert.equal(context.history.rows, 0);
+  assert.equal(context.featureLearning.basketball, undefined);
+  assert.equal(context.learningInputAudit.calibrationRowsExcludedForAvailabilityOrDuplicateConflict, 1);
 });
 
 test('Elo ratings regress toward neutral when a new season begins', () => {

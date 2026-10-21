@@ -843,6 +843,7 @@ export function predictGame(game, index, modelContext = {}) {
     spreadLine: formatSpreadMarket(spread),
     totalLine: formatTotalMarket(totalMarket),
     modelVersion: MODEL_VERSION,
+    learningInputAudit: modelContext.learningInputAudit || null,
     championModel: mlActive ? mlCandidate.modelId : modelDecision.champion === 'ml' ? 'evidence-ensemble-v6-safety-fallback' : modelDecision.championModelId,
     challengerModel: modelDecision.challengerModelId,
     championStatus: modelDecision.status,

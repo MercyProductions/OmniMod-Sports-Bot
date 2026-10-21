@@ -98,7 +98,7 @@ export function evaluatePredictionRows(rows = []) {
 }
 
 export function collectGradedRows(caches = [], options = {}) {
-  const rows = new Map();
+  const rows = new Map(), conflicts = new Set();
   for (const cache of caches) {
     for (const prediction of cache?.slate?.predictions ?? []) {
       if (prediction.quoteRefreshOnly) continue;
@@ -110,13 +110,21 @@ export function collectGradedRows(caches = [], options = {}) {
       const start = Date.parse(prediction.startTime || game?.startTime || '');
       if (!Number.isFinite(generated) || !Number.isFinite(start) || generated >= start) continue;
       if (game && !outcomeSide(game)) continue;
+      if (options.availableBefore !== undefined) {
+        const observed = Date.parse(prediction.resultObservedAt || '');
+        if (!game || !outcomeSide(game) || !Number.isFinite(observed) || observed < start || observed >= options.availableBefore) continue;
+      }
       const horizon = predictionHorizon({ ...prediction, minutesToStart: (start - generated) / 60_000 });
       if (options.modelVersion && prediction.modelVersion !== options.modelVersion) continue;
       if (options.horizon && horizon !== options.horizon) continue;
-      const key = [cache.slate?.guildId || '', prediction.leagueKey || prediction.league || '', cache.dateKey,
-        prediction.gameId, prediction.modelVersion, horizon].join(':');
+      const key = options.uniqueGames
+        ? JSON.stringify([prediction.leagueKey || prediction.league || game?.leagueKey || '',prediction.gameId,start,prediction.modelVersion,horizon])
+        : [cache.slate?.guildId || '', prediction.leagueKey || prediction.league || '', cache.dateKey,
+          prediction.gameId, prediction.modelVersion, horizon].join(':');
       const prior = rows.get(key);
-      if (prior && Date.parse(prior.prediction.predictionGeneratedAt || '') >= generated) continue;
+      if (options.uniqueGames && prior && (prior.actualSide !== outcomeSide(game) || prior.correct !== prediction.predictionCorrect)) conflicts.add(key);
+      if (prior && (options.uniqueGames ? Date.parse(prior.prediction.predictionGeneratedAt || '') <= generated
+        : Date.parse(prior.prediction.predictionGeneratedAt || '') >= generated)) continue;
       rows.set(key, {
         dateKey: cache.dateKey,
         modelVersion: prediction.modelVersion,
@@ -128,7 +136,7 @@ export function collectGradedRows(caches = [], options = {}) {
       });
     }
   }
-  return [...rows.values()];
+  return [...rows].filter(([key]) => !conflicts.has(key)).map(([,row])=>row);
 }
 
 export function collectFeatureRows(caches = [], options = {}) {
@@ -434,36 +442,69 @@ export function lookupElo(ratings, league, team) {
   return Number(ratings?.[eloKey(league, team)] ?? 1500);
 }
 
+/** Filter learning evidence by actual recorded availability, never by schedule date alone. */
+export function learningInputsBefore(caches = [], intelligence = {}, externalResults = [], { cutoff, dateKey = null } = {}) {
+  if (!Number.isFinite(cutoff)) throw new Error('Learning context requires a valid information cutoff');
+  const excluded = {};
+  const exclude = reason => { excluded[reason] = (excluded[reason] || 0) + 1; return false; };
+  const priorDate = row => !dateKey || row.dateKey && String(row.dateKey).slice(0,10) < dateKey;
+  const available = (row,kind) => {
+    if (!priorDate(row)) return exclude(`${kind}:same_or_later_schedule_date`);
+    const times = [row.observedAt,row.recordedAt,row.updatedAt,row.sourceMeta?.fetchedAt].filter(value => value !== undefined && value !== null && value !== '').map(value => Date.parse(value));
+    const start = Date.parse(row.startTime || `${row.dateKey}T00:00:00Z`);
+    if (!times.length || !times.every(Number.isFinite) || !Number.isFinite(start) || Math.min(...times) < start) return exclude(`${kind}:availability_unknown_or_invalid`);
+    if (Math.max(...times) >= cutoff) return exclude(`${kind}:not_available_before_cutoff`);
+    return true;
+  };
+  const selectedCaches = caches.filter(priorDate);
+  const eloCaches = selectedCaches.map(cache => ({...cache,slate:{...cache.slate,games:(cache.slate?.games || []).filter(game => {
+    const prediction = (cache.slate?.predictions || []).find(row => String(row.gameId) === String(game.id));
+    return available({dateKey:cache.dateKey,startTime:game.startTime,
+      observedAt:prediction?.resultObservedAt},'cached_result');
+  })}}));
+  const teams = Object.fromEntries(Object.entries(intelligence.teams || {}).filter(([,row]) => {
+    const updated = Date.parse(row.updatedAt || '');
+    return Number.isFinite(updated) && updated < cutoff || exclude('team_seed:availability_unknown_or_after_cutoff');
+  }));
+  const results = Object.fromEntries(Object.entries(intelligence.results || {}).filter(([,row]) => available(row,'manual_result')));
+  return { caches:selectedCaches,eloCaches,intelligence:{...intelligence,teams,results},
+    externalResults:externalResults.filter(row => available(row,'external_result')),
+    audit:{schema:'sports-learning-cutoff-v1',cutoffAt:new Date(cutoff).toISOString(),scheduleDateExclusive:dateKey,
+      excluded,pointInTimeComplete:false,
+      limitations:['Latest mutable records are excluded when newer than the cutoff; earlier revisions are not reconstructed.',
+        'Receipt/record time establishes observed availability only, not exact source publication or official completion time.',
+        'This gate covers learning/calibration/Elo inputs; other current manual profiles and automatic features require separate provenance review.']}};
+}
+
 export async function loadModelContext(guildId = '', days = 365, options = {}) {
   const [intelligence, loadedCaches] = await Promise.all([
     options.intelligence ? Promise.resolve(options.intelligence) : readIntelligenceStore(guildId),
     listDailyCaches(days, guildId)
   ]);
-  // A historical rebuild may only learn from caches that existed before the
-  // prediction date. This makes calibration and feature training walk-forward.
-  const caches = options.asOfDateKey
-    ? loadedCaches.filter((cache) => String(cache.dateKey) < String(options.asOfDateKey))
-    : loadedCaches;
-  const cohort = { modelVersion: options.modelVersion || CURRENT_MODEL_VERSION, horizon: options.horizon || 'Daily' };
-  const rows = collectGradedRows(caches, cohort);
-  const beforeCutoff = (row) => !options.asOfDateKey || (row.dateKey && String(row.dateKey).slice(0, 10) < String(options.asOfDateKey));
-  const historicalIntelligence = { ...intelligence, results: Object.fromEntries(Object.entries(intelligence.results || {}).filter(([, row]) => beforeCutoff(row))) };
-  const externalResults = (options.externalResults || []).filter(beforeCutoff);
-  const featureRows = collectFeatureRows(caches, cohort);
+  const cutoff = options.asOf === undefined
+    ? options.asOfDateKey ? Date.parse(`${options.asOfDateKey}T00:00:00Z`) : Date.now()
+    : Number(options.asOf);
+  const inputs = learningInputsBefore(loadedCaches,intelligence,options.externalResults || [],{cutoff,dateKey:options.asOfDateKey || null});
+  const caches = inputs.caches;
+  const cohort = { modelVersion: options.modelVersion || CURRENT_MODEL_VERSION, horizon: options.horizon || 'Daily', availableBefore:cutoff,uniqueGames:true };
+  const rows = collectGradedRows(caches,cohort);
+  const featureRows = collectFeatureRows(caches,cohort);
   const overall = evaluatePredictionRows(rows);
   const bySport = {};
   for (const key of [...new Set(rows.map((row) => profileKey(row.prediction)))]) {
     bySport[key] = evaluatePredictionRows(rows.filter((row) => profileKey(row.prediction) === key));
   }
   return {
-    intelligence,
+    intelligence:inputs.intelligence,
+    learningInputAudit:{...inputs.audit,eligibleCalibrationRows:rows.length,
+      calibrationRowsExcludedForAvailabilityOrDuplicateConflict:collectGradedRows(caches,{modelVersion:cohort.modelVersion,horizon:cohort.horizon}).length-rows.length},
     history: { overall, bySport, rows: rows.length, cohort, evaluationVersion: EVALUATION_VERSION },
     calibration: buildCalibrationModel(rows),
     outcomeValidation: buildOutcomeValidation(rows),
-    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows, { asOf: options.asOfDateKey ? Date.parse(`${options.asOfDateKey}T00:00:00Z`) : Date.now() }) : {},
+    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows, { asOf:cutoff }) : {},
     drift: buildDriftReport(rows),
-    eloRatings: buildEloRatings(historicalIntelligence, caches, externalResults),
-    externalResults,
+    eloRatings: buildEloRatings(inputs.intelligence,inputs.eloCaches,inputs.externalResults),
+    externalResults:inputs.externalResults,
     cacheCount: caches.length
   };
 }
