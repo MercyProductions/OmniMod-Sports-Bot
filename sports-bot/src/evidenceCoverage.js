@@ -68,6 +68,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
         teamHistorySamples: finiteNumber(selectedTeams?.[side]?.sampleSize),
         players: players.map(row => ({ playerId: String(row.sourceAthleteId || row.id || ''), source: row.source || 'manual_or_unknown',
           updatedAt: timestamp(row.updatedAt), historicalParticipationSamples: finiteNumber(row.stats?.historicalParticipationSamples),
+          historicalPerformanceSamples: finiteNumber(row.stats?.historicalPerformanceSamples),
+          historicalStatConflicts: row.historicalStatConflicts || [], historicalFormEvidence: row.historicalFormEvidence || 'unknown',
           historicalParticipationEvidence: row.participationProjection?.historicalParticipationEvidence || 'unknown', availabilityObserved: finiteNumber(row.availability) !== null && row.availabilityEvidence !== 'role_prior_not_injury_clearance',
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },

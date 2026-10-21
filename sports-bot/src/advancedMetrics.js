@@ -28,26 +28,24 @@ function standardDeviation(values) {
 }
 
 function statKey(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const text = String(value || '').trim().toLowerCase();
+  return text === '+/-' ? 'plusminus' : text.replaceAll('%', 'pct').replace(/[^a-z0-9]+/g, '');
 }
 
 function parseClock(value) {
   const match = String(value || '').match(/^(\d+):(\d{2})$/);
-  return match ? Number(match[1]) + Number(match[2]) / 60 : null;
+  return match && Number(match[2]) < 60 ? Number(match[1]) + Number(match[2]) / 60 : null;
 }
 
 function addStat(target, rawName, rawValue) {
   const key = statKey(rawName);
   if (!key) return;
-  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
-    target[key] = rawValue;
-    return;
-  }
   const text = String(rawValue ?? '').trim();
   // Baseball innings use .1/.2 to mean one/two outs, not decimal tenths.
   // Normalize before generic numeric parsing so pitcher workload is accurate.
-  if (['ip', 'inningspitched'].includes(key) && /^\d+\.[012]$/.test(text)) {
-    const [innings, outs] = text.split('.').map(Number);
+  if (['ip', 'inningspitched'].includes(key)) {
+    if (!/^\d+(?:\.[012])?$/.test(text)) return;
+    const [innings, outs = 0] = text.split('.').map(Number);
     target[key] = innings + outs / 3;
     return;
   }
@@ -62,11 +60,11 @@ function addStat(target, rawName, rawValue) {
     const second = Number(pair[2]);
     target[`${key}made`] = first;
     target[`${key}attempted`] = second;
-    target[key] = second ? first / second : 0;
+    target[key] = second > 0 ? first / second : null;
     return;
   }
-  const number = Number.parseFloat(text.replace(/[%,$]/g, ''));
-  if (Number.isFinite(number)) target[key] = number;
+  const number = finite(text.replace(/[%,$]/g, ''));
+  if (number !== null) target[key] = ['svpct','savepct'].includes(key) && text.endsWith('%') ? number / 100 : number;
 }
 
 function statMap(rows = []) {
@@ -109,62 +107,73 @@ function playerKey(league, team, id, name) {
 }
 
 function performanceScore(profileKey, groupName, stats) {
+  let complete = true;
+  const observedMetric = (values, ...names) => {
+    const value = optionalMetric(values, ...names);
+    if (value === null) complete = false;
+    return value ?? 0;
+  };
+  const score = performanceFormula(profileKey, groupName, stats, observedMetric);
+  return complete ? score : null;
+}
+
+function performanceFormula(profileKey, groupName, stats, observedMetric) {
   const group = String(groupName || '').toLowerCase();
   if (profileKey === 'basketball') {
     return clamp(
-      metric(stats, 'PTS', 'points') * 0.11 + metric(stats, 'REB', 'rebounds') * 0.055 +
-      metric(stats, 'AST', 'assists') * 0.075 + metric(stats, 'STL', 'steals') * 0.18 +
-      metric(stats, 'BLK', 'blocks') * 0.16 - metric(stats, 'TO', 'turnovers') * 0.09 +
-      metric(stats, '+/-', 'plusMinus') * 0.025,
+      observedMetric(stats, 'PTS', 'points') * 0.11 + observedMetric(stats, 'REB', 'rebounds') * 0.055 +
+      observedMetric(stats, 'AST', 'assists') * 0.075 + observedMetric(stats, 'STL', 'steals') * 0.18 +
+      observedMetric(stats, 'BLK', 'blocks') * 0.16 - observedMetric(stats, 'TO', 'turnovers') * 0.09 +
+      observedMetric(stats, '+/-', 'plusMinus') * 0.025,
       -2, 7
     );
   }
   if (profileKey === 'baseball') {
     if (/pitch/.test(group)) {
       return clamp(
-        metric(stats, 'IP', 'inningsPitched') * 0.32 + metric(stats, 'K', 'strikeouts') * 0.11 -
-        metric(stats, 'ER', 'earnedRuns') * 0.34 - metric(stats, 'BB', 'walks') * 0.08 -
-        metric(stats, 'HR', 'homeRuns') * 0.18,
+        observedMetric(stats, 'IP', 'inningsPitched') * 0.32 + observedMetric(stats, 'K', 'strikeouts') * 0.11 -
+        observedMetric(stats, 'ER', 'earnedRuns') * 0.34 - observedMetric(stats, 'BB', 'walks') * 0.08 -
+        observedMetric(stats, 'HR', 'homeRuns') * 0.18,
         -2, 6
       );
     }
     return clamp(
-      metric(stats, 'TB', 'totalBases') * 0.19 + metric(stats, 'RBI', 'RBIs') * 0.13 +
-      metric(stats, 'BB', 'walks') * 0.09 + metric(stats, 'HR', 'homeRuns') * 0.28 -
-      metric(stats, 'K', 'strikeouts') * 0.045,
+      observedMetric(stats, 'TB', 'totalBases') * 0.19 + observedMetric(stats, 'RBI', 'RBIs') * 0.13 +
+      observedMetric(stats, 'BB', 'walks') * 0.09 + observedMetric(stats, 'HR', 'homeRuns') * 0.28 -
+      observedMetric(stats, 'K', 'strikeouts') * 0.045,
       -1.5, 5
     );
   }
   if (profileKey === 'football') {
     return clamp(
-      metric(stats, 'YDS', 'passingYards', 'rushingYards', 'receivingYards') * 0.006 +
-      metric(stats, 'TD', 'passingTouchdowns', 'rushingTouchdowns', 'receivingTouchdowns') * 0.48 -
-      metric(stats, 'INT', 'interceptions') * 0.5 + metric(stats, 'SACKS', 'sacks') * 0.22 +
-      metric(stats, 'QBR') * 0.012,
+      observedMetric(stats, 'YDS', 'passingYards', 'rushingYards', 'receivingYards') * 0.006 +
+      observedMetric(stats, 'TD', 'passingTouchdowns', 'rushingTouchdowns', 'receivingTouchdowns') * 0.48 -
+      observedMetric(stats, 'INT', 'interceptions') * 0.5 + observedMetric(stats, 'SACKS', 'sacks') * 0.22 +
+      observedMetric(stats, 'QBR') * 0.012,
       -2, 7
     );
   }
   if (profileKey === 'hockey') {
     if (/goalie/.test(group)) {
-      return clamp((metric(stats, 'SV%', 'savePct') - 0.9) * 22 + metric(stats, 'SV', 'saves') * 0.025, -2, 5);
+      return clamp((observedMetric(stats, 'SV%', 'savePct') - 0.9) * 22 + observedMetric(stats, 'SV', 'saves') * 0.025, -2, 5);
     }
     return clamp(
-      metric(stats, 'G', 'goals') * 1.15 + metric(stats, 'A', 'assists') * 0.65 +
-      metric(stats, 'S', 'shots') * 0.07 + metric(stats, '+/-', 'plusMinus') * 0.12 +
-      metric(stats, 'TK', 'takeaways') * 0.06 - metric(stats, 'GV', 'giveaways') * 0.05,
+      observedMetric(stats, 'G', 'goals') * 1.15 + observedMetric(stats, 'A', 'assists') * 0.65 +
+      observedMetric(stats, 'S', 'shots') * 0.07 + observedMetric(stats, '+/-', 'plusMinus') * 0.12 +
+      observedMetric(stats, 'TK', 'takeaways') * 0.06 - observedMetric(stats, 'GV', 'giveaways') * 0.05,
       -2, 6
     );
   }
   if (profileKey === 'soccer') {
     return clamp(
-      metric(stats, 'goals', 'G') * 1.35 + metric(stats, 'assists', 'A') * 0.72 +
-      metric(stats, 'shotsOnTarget') * 0.1 + (metric(stats, 'rating') - 6.5) * 0.35,
+      observedMetric(stats, 'goals', 'G') * 1.35 + observedMetric(stats, 'assists', 'A') * 0.72 +
+      observedMetric(stats, 'shotsOnTarget') * 0.1 + (observedMetric(stats, 'rating') - 6.5) * 0.35,
       -2, 6
     );
   }
-  if (profileKey === 'tennis') return clamp(metric(stats, 'aces') * 0.08 - metric(stats, 'doubleFaults') * 0.08, -2, 5);
-  if (profileKey === 'combat') return clamp(metric(stats, 'significantStrikes') * 0.025 + metric(stats, 'takedowns') * 0.18, -2, 5);
-  return 0;
+  if (profileKey === 'tennis') return clamp(observedMetric(stats, 'aces') * 0.08 - observedMetric(stats, 'doubleFaults') * 0.08, -2, 5);
+  if (profileKey === 'combat') return clamp(observedMetric(stats, 'significantStrikes') * 0.025 + observedMetric(stats, 'takedowns') * 0.18, -2, 5);
+  return null;
 }
 
 function participationScore(profileKey, groupName, stats) {
@@ -186,16 +195,26 @@ function mergePlayerRow(map, row) {
   const key = `${normalizeEntityName(row.team)}__${row.athleteId || normalizeEntityName(row.name)}`;
   const existing = map.get(key);
   if (!existing) {
-    map.set(key, row);
+    map.set(key, { ...row, statConflicts: [], statGroups: [{ name: row.groupName || row.role || '', stats: { ...row.stats } }] });
     return;
   }
+  const statConflicts = new Set(existing.statConflicts || []);
+  const combinedStats = { ...existing.stats, ...row.stats };
+  const groupFamily = name => String(name || '').toLowerCase().match(/passing|rushing|receiving|pitching|batting/)?.[0];
+  const incomingFamily = groupFamily(row.groupName);
+  const semanticConflict = incomingFamily && existing.statGroups.some(group => groupFamily(group.name) && groupFamily(group.name) !== incomingFamily);
+  for (const [stat, value] of Object.entries(row.stats || {})) {
+    if (Object.hasOwn(existing.stats || {}, stat) && (existing.stats[stat] !== value || semanticConflict)) statConflicts.add(stat);
+  }
+  for (const stat of statConflicts) combinedStats[stat] = null;
   map.set(key, {
     ...existing,
     ...row,
     starter: existing.starter || row.starter,
     active: existing.active !== false && row.active !== false,
     appeared: existing.appeared || row.appeared,
-    stats: { ...existing.stats, ...row.stats },
+    stats: combinedStats, statConflicts: [...statConflicts].sort(),
+    statGroups: [...existing.statGroups, { name: row.groupName || row.role || '', stats: { ...row.stats } }],
     role: row.role || existing.role
   });
 }
@@ -257,6 +276,7 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
     participation: participationScore(profile.key, row.groupName || row.role, row.stats),
     participationContract: 'observed-workload-v1',
     performance: performanceScore(profile.key, row.groupName || row.role, row.stats),
+    performanceContract: 'complete-player-performance-v1',
     source: 'ESPN historical box score'
   }));
   const plays = Array.isArray(summary?.plays) ? summary.plays : [];
@@ -307,13 +327,18 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       : row.participationContract === 'observed-workload-v1' ? finite(row.participation) : null)
       .filter(value => value !== null && value >= 0 && value <= 1);
     const participation = participationRows.length ? mean(participationRows) : null;
-    const performance = mean(rows.map((row) => row.performance));
-    const recentPerformance = mean(recent.map((row) => row.performance));
+    const observedPerformance = row => row.stats && typeof row.stats === 'object'
+      ? performanceScore(sportProfile(row).key, row.groupName || row.role, row.stats)
+      : row.performanceContract === 'complete-player-performance-v1' ? finite(row.performance) : null;
+    const performanceValues = rows.map(observedPerformance).filter(Number.isFinite);
+    const recentValues = recent.map(observedPerformance).filter(Number.isFinite);
+    const performance = performanceValues.length ? mean(performanceValues) : null;
+    const recentPerformance = recentValues.length ? mean(recentValues) : null;
     const starterRate = mean(rows.map((row) => row.starter ? 1 : 0));
     const reliability = participationRows.length / (participationRows.length + 3);
     const profile = sportProfile(latest);
     const participationPrior = roleParticipationPrior(profile.key, latest.role);
-    const rawImpact = 0.8 + (participation ?? participationPrior) * 3.7 + starterRate * 1.1 + clamp(performance, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
+    const rawImpact = 0.8 + (participation ?? participationPrior) * 3.7 + starterRate * 1.1 + clamp(performance ?? 0, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
     const impact = clamp(1.1 + (rawImpact - 1.1) * (0.4 + reliability * 0.6), 0.6, 8.5);
     profiles[key] = {
       id: `auto-player__${key}`,
@@ -324,13 +349,15 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       leagueKey: latest.leagueKey,
       role: latest.role,
       impact,
-      form: clamp(50 + (recentPerformance - performance) * 6, 28, 76),
+      form: performance !== null && recentPerformance !== null ? clamp(50 + (recentPerformance - performance) * 6, 28, 76) : 50,
+      formEvidence: performance !== null && recentPerformance !== null ? 'complete_performance_proxy' : 'neutral_prior',
       starter: starterRate >= 0.5,
       starterRate,
       participation, participationSamples: participationRows.length,
       participationEvidence: participationRows.length ? 'boxscore_workload_proxy' : 'unknown',
       impactEvidence: participationRows.length ? 'heuristic_with_workload_proxy' : 'heuristic_with_role_prior',
-      performance,
+      performance, performanceSamples: performanceValues.length,
+      statConflicts: [...new Set(rows.flatMap(row => row.statConflicts || []))].sort(),
       sampleSize: rows.length,
       lastSeen: latest.dateKey,
       autoGenerated: true,
@@ -667,8 +694,10 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       if (!learned) continue;
       player.impact = learned.impact;
       player.form = learned.form;
-      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null };
+      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null, historicalPerformanceSamples: learned.performanceSamples ?? null };
       player.valueSource = learned.source;
+      player.historicalStatConflicts = learned.statConflicts || [];
+      player.historicalFormEvidence = learned.formEvidence || 'unknown';
       learnedInjuries += player.availability < 100 ? 1 : 0;
     }
 

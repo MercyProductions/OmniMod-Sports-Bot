@@ -244,3 +244,57 @@ test('current profile caller freezes workload evidence and sample counts in per-
  assert.equal(player.historicalParticipationSamples,0);
  assert.equal(player.historicalParticipationEvidence,'role_prior');
 });
+
+
+test('incomplete player performance is unknown rather than zero or a negative baseline',async()=>{
+ for(const sport of ['Basketball','Baseball','Football','Hockey','Soccer','Tennis','Combat']){
+  const sample=await historicalPlayer(sport,['MIN'],['1']);
+  assert.equal(sample.players[0].performance,null);
+ }
+});
+
+test('plus-minus and goalie save percentage remain distinct measured statistics',async()=>{
+ const basketball=await historicalPlayer('Basketball',['PTS','REB','AST','STL','BLK','TO','+/-'],['0','0','0','0','0','0','2']);
+ assert.equal(basketball.players[0].stats.plusminus,2);assert.equal(basketball.players[0].performance,.05);
+ const {parseHistoricalEventSummary}=await import('../src/advancedMetrics.js');
+ const sample=parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:[{name:'goalies',labels:['SV','SV%'],athletes:[{
+  starter:true,athlete:{id:'p',displayName:'Goalie'},stats:['30','90%']
+ }]}]}]}},{id:'goalie',sportGroup:'Hockey',leagueKey:'nhl'});
+ assert.equal(sample.players[0].stats.sv,30);assert.equal(sample.players[0].stats.svpct,.9);assert.equal(sample.players[0].performance,.75);
+});
+
+test('malformed numeric stats and invalid clocks cannot become performance or workload evidence',async()=>{
+ const sample=await historicalPlayer('Basketball',['MIN','PTS','AST'],['1:99','12 injured','0-0']);
+ assert.equal(sample.players[0].participation,null);assert.equal(sample.players[0].stats.pts,undefined);
+ assert.equal(sample.players[0].stats.ast,null);
+});
+
+test('unknown historical performance stays unknown through profile aggregation',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const sample=await historicalPlayer('Soccer',['MIN'],['45']);
+ const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+ assert.equal(profile.performance,null);assert.equal(profile.performanceSamples,0);assert.equal(profile.formEvidence,'neutral_prior');
+});
+
+
+test('conflicting player stat groups preserve provenance and cannot overwrite each other by order',async()=>{
+ const {parseHistoricalEventSummary}=await import('../src/advancedMetrics.js');
+ const group=(name,yards)=>({name,labels:['YDS'],athletes:[{starter:true,athlete:{id:'p',displayName:'Player'},stats:[yards]}]});
+ for(const groups of [[group('passing','100'),group('rushing','20')],[group('rushing','20'),group('passing','100')],[group('passing','100'),group('rushing','100')]]){
+  const sample=parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:groups}]}},{id:'g',sportGroup:'Football',leagueKey:'nfl'});
+  assert.equal(sample.players[0].stats.yds,null);assert.deepEqual(sample.players[0].statConflicts,['yds']);
+  assert.equal(sample.players[0].statGroups.length,2);assert.equal(sample.players[0].performance,null);
+ }
+});
+
+
+test('incomplete performances do not dilute complete zero or nonzero performance observations',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const good=await historicalPlayer('Basketball',['PTS','REB','AST','STL','BLK','TO','+/-'],['0','0','0','0','0','0','2']);
+ const missing=await historicalPlayer('Basketball',['MIN'],['1']);
+ const profile=Object.values(buildAutomaticPlayerProfiles([good,missing]))[0];
+ assert.equal(profile.performance,.05);assert.equal(profile.performanceSamples,1);
+ good.players[0].stats.plusminus=0;
+ const zero=Object.values(buildAutomaticPlayerProfiles([good,missing]))[0];
+ assert.equal(zero.performance,0);assert.equal(zero.performanceSamples,1);
+});

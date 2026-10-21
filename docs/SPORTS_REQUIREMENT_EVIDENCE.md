@@ -100,3 +100,7 @@ Development v6.0.15 excludes invalid score observations, separates neutral/unkno
 ## Historical player-workload continuation
 
 Development v6.0.16 separates observed workload proxies from role priors and unverifiable legacy estimates, repairs zero preservation and measures participation reliability with its own sample count. [Reproductions, end-to-end controls and limits](SPORTS_PLAYER_WORKLOAD_EVIDENCE.md); complete suite 304 passing. These remain heuristic inputs requiring forward validation; no deployment or demonstrated predictive improvement.
+
+## Player performance and group integrity continuation
+
+Development v6.0.17 repairs statistic-key loss/collisions, malformed numeric input, missing-as-zero performance and order-dependent group overwrites. [Reproductions, source references, tests and limits](SPORTS_PLAYER_PERFORMANCE_INTEGRITY.md); complete suite 310 passing. Complete-performance counts and fallback evidence are frozen per game; original historical source loss and valid forward predictive improvement remain unresolved.
