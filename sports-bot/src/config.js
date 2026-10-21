@@ -51,6 +51,8 @@ export const config = {
   dailyPostMinute: intEnv('DAILY_POST_MINUTE', 0, 0, 59),
   finalCheckMinutes: intEnv('FINAL_CHECK_MINUTES', 10, 2, 180),
   finalLookbackDays: intEnv('FINAL_LOOKBACK_DAYS', 7, 1, 30),
+  finalCorrectionHours: intEnv('FINAL_CORRECTION_CHECK_HOURS',24,0,168),
+  finalCorrectionMinutes: intEnv('FINAL_CORRECTION_CHECK_MINUTES',60,10,1440),
   postOnStart: boolEnv('POST_ON_START', true),
   registerCommands: boolEnv('REGISTER_COMMANDS', true),
   maxGamesPerPost: intEnv('MAX_GAMES_PER_POST', 75, 1, 200),

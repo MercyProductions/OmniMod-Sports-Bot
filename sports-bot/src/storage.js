@@ -1,4 +1,4 @@
-import {acquireFinalClaim,completeFinalClaim,abandonFinalClaim,verifyFinalClaim,preserveFinalClaimMigration} from './finalClaimStore.js';
+import {acquireFinalClaim,completeFinalClaim,abandonFinalClaim,verifyFinalClaim,preserveFinalClaimMigration,inspectFinalClaim} from './finalClaimStore.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
@@ -128,9 +128,12 @@ export async function finishDailyProviderUsage(dateKey, guildId = '', provider =
 
 // options.staleMs is retained for compatibility; time does not authorize ownership transfer.
 export async function claimFinalResult(dateKey,guildId,gameId,details={},options={}){
-  const frozenDetails=structuredClone(details);
+  const frozenDetails=structuredClone(details),frozenOptions=structuredClone(options);
   await ensureDataDir();
-  return acquireFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},frozenDetails);
+  return acquireFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},frozenDetails,frozenOptions);
+}
+export async function readFinalResultClaim(dateKey,guildId,gameId){
+  return inspectFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')});
 }
 export async function verifyFinalResultClaim(dateKey,guildId,gameId,lease){
   return verifyFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},lease);

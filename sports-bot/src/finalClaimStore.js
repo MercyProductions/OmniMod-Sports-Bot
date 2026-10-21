@@ -38,26 +38,32 @@ function ownerDead(node){
  try{process.kill(node.owner.pid,0);return false;}catch(error){return error.code==='ESRCH';}
 }
 
-export async function acquireFinalClaim(file,identity,details={}){
- details=structuredClone(details);
+export async function acquireFinalClaim(file,identity,details={},options={}){
+ details=structuredClone(details);options=structuredClone(options);
+ let latestPosted=null;
  const legacy=await guard(file,identity);
  if(legacy)return {claimed:false,claim:legacy,reason:legacy.state==='posted'?'legacy_posted':'legacy_owner_unverified'};
  for(let generation=0;generation<4096;generation++){
   let node=await read(nodeFile(file,generation));
   if(!node){
-   const candidate={...details,...identity,schemaVersion:2,generation,claimId:randomUUID(),state:'claimed',claimedAt:new Date().toISOString(),owner:{host,pid:process.pid,sessionId}};
+   if(latestPosted){
+    if(!options.allowRevision||latestPosted.resultDigest===details.resultDigest)return {claimed:false,claim:latestPosted,reason:'posted'};
+    const before=Date.parse(latestPosted.resultObservedAt||''),after=Date.parse(details.resultObservedAt||'');
+    if(!latestPosted.resultDigest||!Number.isFinite(before)||!Number.isFinite(after)||after<=before||after>Date.now()||!/^[a-f0-9]{64}$/.test(details.resultDigest||''))return {claimed:false,claim:latestPosted,reason:'revision_order_unverified'};
+   }
+   const candidate={...details,...(latestPosted?{previousClaimId:latestPosted.claimId,frozenForecast:latestPosted.frozenForecast}:{}),...identity,schemaVersion:2,generation,claimId:randomUUID(),state:'claimed',claimedAt:new Date().toISOString(),owner:{host,pid:process.pid,sessionId}};
    if(await publish(nodeFile(file,generation),candidate))return {claimed:true,claim:candidate,lease:{claimId:candidate.claimId,generation,sessionId}};
    node=await read(nodeFile(file,generation));
   }
   validateNode(node,identity,generation);
   let decision=await read(decisionFile(file,generation));validateDecision(decision,node);
-  if(decision?.state==='posted')return {claimed:false,claim:{...node,...decision},reason:'posted'};
+  if(decision?.state==='posted'){latestPosted={...node,...decision};continue;}
   if(decision)continue;
   if(!ownerDead(node))return {claimed:false,claim:node,reason:'owner_live_or_unverified'};
   // One immutable terminal decision fences the former generation. Contenders cannot rename a successor's claim.
   await publish(decisionFile(file,generation),{schemaVersion:2,state:'recovered',generation,claimId:node.claimId,observedAt:new Date().toISOString(),recovery:'same_host_owner_pid_absent'});
   decision=await read(decisionFile(file,generation));validateDecision(decision,node);
-  if(decision?.state==='posted')return {claimed:false,claim:{...node,...decision},reason:'posted'};
+  if(decision?.state==='posted'){latestPosted={...node,...decision};continue;}
  }
  throw new Error('Final-result claim history exceeds its bound; preserve it for review');
 }
@@ -75,7 +81,8 @@ export async function verifyFinalClaim(file,identity,lease){const {decision}=awa
 export async function completeFinalClaim(file,identity,patch,lease){
  patch=structuredClone(patch);
  const {node,decision}=await owned(file,identity,lease);
- const content={...patch,...identity,schemaVersion:2,state:'posted',generation:node.generation,claimId:node.claimId,owner:node.owner,claimedAt:node.claimedAt,postedAt:patch.postedAt||new Date().toISOString()};
+ if(node.resultDigest&&(patch.resultDigest!==node.resultDigest||Date.parse(patch.resultObservedAt||'')!==Date.parse(node.resultObservedAt||'')))throw new Error('Final result does not match its claimed revision');
+ const content={...patch,...(node.frozenForecast?{frozenForecast:node.frozenForecast}:{}),...identity,schemaVersion:2,state:'posted',generation:node.generation,claimId:node.claimId,owner:node.owner,claimedAt:node.claimedAt,postedAt:patch.postedAt||new Date().toISOString()};
  if(decision){
   if(decision.state==='posted'&&decision.messageId===patch.messageId&&decision.channelId===patch.channelId)return {...node,...decision};
   throw new Error('Final-result claim already has a different terminal decision');
@@ -95,4 +102,18 @@ export async function preserveFinalClaimMigration(source,destination){
  if(record?.schemaVersion!==2||record.state!=='protocol_v2')return false;
  await publish(destination,{...record,migrationRequired:true,sourceDirectory:path.dirname(source)});
  return true;
+}
+
+export async function inspectFinalClaim(file,identity){
+ const record=await read(file);if(!record)return null;
+ if(!matchesIdentity(record,identity))throw new Error('Final-result store belongs to another identity');
+ if(record.schemaVersion!==2||record.state!=='protocol_v2'||record.migrationRequired)return record;
+ let latest=null;
+ for(let generation=0;generation<4096;generation++){
+  const node=await read(nodeFile(file,generation));if(!node)return latest;validateNode(node,identity,generation);
+  const decision=await read(decisionFile(file,generation));validateDecision(decision,node);
+  if(decision?.state==='posted')latest={...node,...decision};
+  else if(!decision)return {...node,previousPosted:latest};
+ }
+ throw new Error('Final-result claim history exceeds its bound');
 }

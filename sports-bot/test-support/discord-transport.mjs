@@ -15,7 +15,7 @@ export async function fakeDiscord(directory,options={}) {
   return channel.send({...payload,reference:{messageId:row.id}});
  },edit:async payload=>{
   counters.edits++;if(options.editFails)throw Object.assign(new Error('Synthetic edit denied'),{code:50013});
-  Object.assign(row,payloadData(payload));await persist();return wrap(row);
+  Object.assign(row,payloadData(payload));await persist();if(options.crashAfterEdit)process.exit(76);if(options.ambiguousEdit)throw new Error('Synthetic timeout after edit acceptance');return wrap(row);
  }});
  const channel={id:'channel',guildId:'transport',type:ChannelType.GuildText,name:'omnimod-sports',isTextBased:()=>true,
   messages:{fetch:async request=>{

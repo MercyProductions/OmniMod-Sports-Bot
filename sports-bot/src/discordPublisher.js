@@ -1,4 +1,5 @@
-import {finalResultFooter,finalResultKey,legacyFinalMessageMatches} from './finalResultIdentity.js';
+import {prepareFinalRevision} from './finalResultRevision.js';
+import {finalResultFooter,finalResultKey,legacyFinalMessageMatches,matchesFinalResultFooter} from './finalResultIdentity.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame} from './slateEventIdentity.js';
 import { recordPredictionJournal } from './predictionJournal.js';
@@ -419,7 +420,6 @@ export async function findFinalResultMessage(client, slate, prediction, existing
     if(channel?.isTextBased?.()&&(!channel.guildId||channel.guildId===slate.guildId))channels.push(channel);else uncertain=true;
   }
   if(!channels.length)throw new Error('Final-result history has no readable channel; a new send is blocked');
-  const footer=finalResultFooter(slate,prediction);
   for (const channel of channels) {
     try {
       let before;
@@ -428,7 +428,7 @@ export async function findFinalResultMessage(client, slate, prediction, existing
         const found = messages.find((message) => {
           if (message.author?.id !== client.user?.id) return false;
           return message.embeds.some((embed) => {
-            if (embed.footer?.text === footer) return true;
+            if (matchesFinalResultFooter(embed.footer?.text,slate,prediction)) return true;
             if(legacyFinalMessageMatches(message,embed,slate,prediction))return true;
             if(embed.footer?.text===`OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`){
               const fields=embed.fields||[],league=fields.find(row=>row.name==='League')?.value,started=fields.find(row=>row.name==='Started')?.value;
@@ -459,8 +459,18 @@ export async function postFinalResult(client, slate, final) {
   const correct = prediction.predictionCorrect === true;
   const graded = typeof prediction.predictionCorrect === 'boolean';
   const highUncertainty = prediction.recommendationStatus === 'withheld';
-  const duplicate = await findFinalResultMessage(client, slate, prediction, resources);
-  if (duplicate) return duplicate;
+  const revision=prepareFinalRevision(slate,final),context=final.deliveryRevision||{};
+  if(context.digest&&context.digest!==revision.digest)throw new Error('Final revision digest does not match the frozen result');
+  const revisionFooter=finalResultFooter(slate,prediction)+' | result: '+revision.digest;
+  let duplicate;
+  if(context.previousMessageId&&context.previousChannelId){
+    const channel=await client.channels.fetch(context.previousChannelId);
+    if(channel.guildId&&channel.guildId!==slate.guildId)throw new Error('Correction target guild mismatch');
+    duplicate=await channel.messages.fetch(context.previousMessageId);
+    if(duplicate.author?.id!==client.user?.id||!duplicate.embeds.some(embed=>matchesFinalResultFooter(embed.footer?.text,slate,prediction)))throw new Error('Correction target does not match this event');
+  }else duplicate=await findFinalResultMessage(client,slate,prediction,resources);
+  if(duplicate?.embeds.some(embed=>embed.footer?.text===revisionFooter))return duplicate;
+  if(context.editOnly&&!duplicate)throw new Error('Original final message is unavailable; a correction cannot create a replacement');
   const uncertaintyWhy = [prediction.abstentionReason, ...(prediction.uncertaintyReasons || []).slice(0, 3)]
     .filter(Boolean).join(' ').slice(0, 1024) || 'The leading outcome did not clear the uncertainty and evidence gates.';
   const embed = new EmbedBuilder()
@@ -471,7 +481,8 @@ export async function postFinalResult(client, slate, final) {
       `Pregame model pick: **${prediction.predictedWinner}** (${prediction.predictionConfidence || prediction.confidence}; ${prediction.predictionUncertainty || 'uncertainty not measured'})\n` +
       `API data quality at prediction time: **${prediction.apiConfidence || 'not measured'}**\n` +
       `Actual winner: **${prediction.actualWinner}**\n` +
-      `Result: **${!graded ? 'Not gradeable' : correct ? 'Pregame forecast matched' : 'Pregame forecast missed'}**${highUncertainty ? ' (high uncertainty at prediction time)' : ''}`
+      `Result: **${!graded ? 'Not gradeable' : correct ? 'Pregame forecast matched' : 'Pregame forecast missed'}**${highUncertainty ? ' (high uncertainty at prediction time)' : ''}` +
+      (context.editOnly?'\nUpdated after a later final-score observation.':'')
     )
     .addFields(
       { name: 'League', value: game.league, inline: true },
@@ -481,9 +492,10 @@ export async function postFinalResult(client, slate, final) {
       { name: 'Risk', value: prediction.riskTier ?? 'Unknown', inline: true },
       ...(highUncertainty ? [{ name: 'Pregame uncertainty', value: uncertaintyWhy, inline: false }] : [])
     )
-    .setFooter({ text: finalResultFooter(slate,prediction) })
+    .setFooter({ text: revisionFooter })
     .setTimestamp(new Date());
 
+  if(duplicate)return duplicate.edit({embeds:[embed],allowedMentions:{parse:[]}});
   let replyMessage = null;
   if (slate.messageId && slate.channelId) {
     let dailyMessage;

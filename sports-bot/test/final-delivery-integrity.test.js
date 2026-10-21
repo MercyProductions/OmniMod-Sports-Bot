@@ -36,7 +36,7 @@ test('final reply acknowledgement and reconciliation cannot borrow the other lea
  value.finalReplies[nba]={eventKey:nba,messageId:'nba',channelId:'channel'};assert.equal(finalReplyFor(value,value.predictions[1]),null);
  assert.deepEqual(pendingFinalDateKeys([{dateKey:value.dateKey,slate:value}],{today:'2026-10-21',now:Date.parse('2026-10-21T06:00:00Z')}),['2026-10-20']);
  const nhl=finalResultKey(value,value.predictions[1]);value.finalReplies[nhl]={eventKey:nhl,messageId:'nhl',channelId:'channel'};
- assert.deepEqual(pendingFinalDateKeys([{dateKey:value.dateKey,slate:value}],{today:'2026-10-21',now:Date.parse('2026-10-21T06:00:00Z')}),[]);
+ assert.deepEqual(pendingFinalDateKeys([{dateKey:value.dateKey,slate:value}],{today:'2026-10-21',now:Date.parse('2026-10-21T06:00:00Z'),correctionHours:0}),[]);
 });
 
 test('persistent final claims and acknowledgements remain independent for scoped events',async()=>{

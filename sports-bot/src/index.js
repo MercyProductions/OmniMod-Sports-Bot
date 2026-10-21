@@ -1,4 +1,4 @@
-import {finalReplyFor} from './finalResultIdentity.js';
+import {mergeFinalReplies} from './finalResultRevision.js';
 import {deliverFinalBatch} from './finalDelivery.js';
 import {scopedEventKey} from './slateEventIdentity.js';
 import {recordPredictionJournal} from './predictionJournal.js';
@@ -320,7 +320,7 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
     const now = Date.now();
     const gamesThatCouldHaveFinished = (cached.games ?? []).filter((game) => {
       if (game.statusKey === 'alert') return false;
-      if (game.statusKey === 'final') return (cached.predictions||[]).some(row=>String(row.gameId)===String(game.id)&&(!row.leagueKey||row.leagueKey===game.leagueKey)&&row.predictionMode==='pregame'&&!finalReplyFor(cached,row));
+      if (game.statusKey === 'final') return (cached.predictions||[]).some(row=>String(row.gameId)===String(game.id)&&(!row.leagueKey||row.leagueKey===game.leagueKey)&&row.predictionMode==='pregame');
       const start = new Date(game.startTime).getTime();
       return Number.isFinite(start) && start <= now;
     });
@@ -339,8 +339,10 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
       refreshedAt: refreshed.refreshedAt,
       finalDeliveryFailures:delivery.failures,
       recoveredFinalAcknowledgements:delivery.recoveredCount,
+      acknowledgedFinalCorrections:delivery.correctedCount,
+      lastFinalCorrectionCheckAt:refreshed.refreshedAt,
       guildId,
-      finalReplies: { ...(latest.finalReplies ?? {}), ...finalReplies },
+      finalReplies: mergeFinalReplies(latest.finalReplies,finalReplies),
       newFinals: []
     };
     await writeDailyCache(dateKey, durableFinals, guildId);
@@ -465,7 +467,7 @@ function startSchedulers() {
         if (Date.now() - last < intervalMs) continue;
         lastFinalCheckAt.set(guildId, Date.now());
         const caches = await listDailyCaches(config.finalLookbackDays + 1, guildId);
-        const dates = pendingFinalDateKeys(caches, { today: localDateKey(), now: Date.now(), lookbackDays: config.finalLookbackDays });
+        const dates = pendingFinalDateKeys(caches, { today: localDateKey(), now: Date.now(), lookbackDays: config.finalLookbackDays,correctionHours:config.finalCorrectionHours,correctionMinutes:config.finalCorrectionMinutes });
         for (const dateKey of dates) await checkFinalScores('interval', guildId, dateKey);
       }
     });

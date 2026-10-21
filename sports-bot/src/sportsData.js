@@ -1,4 +1,4 @@
-import {finalReplyFor} from './finalResultIdentity.js';
+import {finalReplyMatches} from './finalResultRevision.js';
 import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
@@ -713,6 +713,7 @@ function applyManualResults(games, intelligence, dateKey) {
     target.statusKey = 'final';
     target.statusLabel = 'Final';
     target.detail = 'Final (local result)';
+    target.manualResultEvidence={kind:'manual_result',updatedAt:result.updatedAt||null,source:result.source||'manual result',eventIdentityVerified:false};
     target.source = `${target.source} + local result`;
   }
   return games;
@@ -951,7 +952,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     alerts: odds.alerts ?? [],
     messageId: options.cachedSlate?.messageId || '',
     channelId: options.cachedSlate?.channelId || '',
-    finalReplies
+    finalReplies,
+    lastFinalCorrectionCheckAt:options.cachedSlate?.lastFinalCorrectionCheckAt||''
   };
   await recordPredictionJournal(slate, { lifecycle: options.targetedPregame ? 'provisional' : 'issued' });
   // Targeted refreshes are not learner evidence until the caller validates completion.
@@ -981,7 +983,7 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
     const freshGame=match.game||(cachedGame.statusKey==='final'?cachedGame:null);
     if(!freshGame||freshGame.statusKey!=='final'||oldPrediction.legacyFrozenIdentityUnverified)return oldPrediction;
     const graded=attachFinalGrade(freshGame,oldPrediction);
-    const alreadyReplied=Boolean(finalReplyFor(cachedSlate,oldPrediction));
+    const alreadyReplied=finalReplyMatches({...cachedSlate,games:[{...freshGame,id:oldPrediction.gameId}]},graded);
     if(!alreadyReplied&&typeof graded.predictionCorrect==='boolean')finals.push({game:freshGame,prediction:graded});
     return graded;
   });

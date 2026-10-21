@@ -17,6 +17,11 @@ export function finalReplyFor(slate,prediction){
  try{const key=finalResultKey(slate,prediction),reply=slate.finalReplies?.[key];return reply?.eventKey===key&&reply.messageId&&reply.channelId?reply:null;}catch{return null;}
 }
 export const finalResultFooter=(slate,prediction)=>`OmniMod Sports result | ${slate.dateKey} | ${finalResultKey(slate,prediction)}`;
+export function matchesFinalResultFooter(text,slate,prediction){
+ const base=finalResultFooter(slate,prediction),prefix=base+' | result: ';
+ return text===base||(typeof text==='string'&&text.startsWith(prefix)&&/^[a-f0-9]{64}$/.test(text.slice(prefix.length)));
+}
+
 
 /** Legacy footer recovery requires scoped presentation evidence and a unique native-ID/league/displayed-start cohort in this slate. */
 export function legacyFinalMessageMatches(message,embed,slate,prediction){
