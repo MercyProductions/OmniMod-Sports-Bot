@@ -1,5 +1,5 @@
 import {mergeValueQuoteRefresh,refreshScopedPredictionValues} from './quoteRefreshIdentity.js';
-import {mergeFinalReplies} from './finalResultRevision.js';
+import {persistFinalRefresh} from './finalCacheMerge.js';
 import {deliverFinalBatch} from './finalDelivery.js';
 import {scopedEventKey} from './slateEventIdentity.js';
 import {recordPredictionJournal} from './predictionJournal.js';
@@ -329,24 +329,9 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
 
     const refreshed = await refreshFinalGrades(cached, { guildId });
     const delivery=await deliverFinalBatch(client,refreshed,{reason});
-    const {finalReplies,postedCount}=delivery;
+    const {postedCount}=delivery;
 
-    const latest = await readDailyCache(dateKey, guildId) || cached;
-    let durableFinals = {
-      ...latest,
-      games: refreshed.games,
-      predictions: refreshed.predictions,
-      diagnostics: refreshed.diagnostics,
-      refreshedAt: refreshed.refreshedAt,
-      finalDeliveryFailures:delivery.failures,
-      recoveredFinalAcknowledgements:delivery.recoveredCount,
-      acknowledgedFinalCorrections:delivery.correctedCount,
-      lastFinalCorrectionCheckAt:refreshed.refreshedAt,
-      guildId,
-      finalReplies: mergeFinalReplies(latest.finalReplies,finalReplies),
-      newFinals: []
-    };
-    durableFinals = await writeDailyCache(dateKey, durableFinals, guildId, { expectedRevision: cached.cacheRevision ?? 0 });
+    const durableFinals = await persistFinalRefresh(cached, refreshed, delivery);
     if (config.featureWarehouseEnabled) await recordSlateSnapshot(durableFinals);
 
     if (postedCount > 0) {
