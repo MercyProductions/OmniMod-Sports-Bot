@@ -637,7 +637,7 @@ function derivedAdvancedDataset(game, awayProfile, homeProfile) {
   return null;
 }
 
-export function attachFinalGrade(game, prediction) {
+export function attachFinalGrade(game, prediction, now = Date.now()) {
   if (game.statusKey !== 'final' || prediction.predictionMode === 'retrospective_ungraded') return prediction;
   const actualSide = finalOutcomeSide(game);
   if (!actualSide) return { ...prediction, actualSide: '', actualWinner: '', predictionCorrect: null };
@@ -646,6 +646,8 @@ export function attachFinalGrade(game, prediction) {
     ...prediction,
     actualSide,
     actualWinner,
+    resultObservedAt: prediction.resultObservedAt && prediction.actualSide === actualSide && prediction.finalScore === `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
+      ? prediction.resultObservedAt : new Date(now).toISOString(),
     predictionCorrect: actualSide === prediction.predictedSide,
     finalScore: `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
   };

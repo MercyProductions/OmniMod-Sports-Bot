@@ -289,13 +289,18 @@ test('sport-specific feature learning is accepted only after walk-forward improv
     const outcome = index % 2;
     return {
       dateKey: `2099-${String(Math.floor(index / 28) + 1).padStart(2, '0')}-${String(index % 28 + 1).padStart(2, '0')}`,
+      gameId: `feature-${index}`,league:'nba',
+      predictionGeneratedAt:new Date(Date.UTC(2099,0,1+index,8)).toISOString(),
+      startTime:new Date(Date.UTC(2099,0,1+index,12)).toISOString(),
+      resolvedAt:new Date(Date.UTC(2099,0,1+index,16)).toISOString(),
       sport: 'basketball', outcome,
       factors: { 'Useful signal': outcome ? 0.35 : -0.35, 'Misleading signal': outcome ? -0.75 : 0.75 }
     };
   });
-  const model = buildWalkForwardFeatureModels(rows, { minSamples: 20 }).basketball;
+  const model = buildWalkForwardFeatureModels(rows, { minSamples: 20,asOf:Date.parse("2100-01-01T00:00:00Z") }).basketball;
   assert.equal(model.trained, true);
-  assert.equal(model.accepted, true);
+  assert.equal(model.accepted, false);
+  assert.equal(model.researchAccepted, true);
   assert.ok(model.learnedBrier < model.baselineBrier);
   assert.ok(model.weights['Misleading signal'] < 1);
 });
@@ -332,7 +337,8 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
   const context = await loadModelContext('', 365, { asOfDateKey: '2099-03-02', intelligence: { teams: {}, players: {}, results: {} } });
   assert.equal(context.cacheCount, 1);
   assert.equal(context.history.rows, 1);
-  assert.equal(context.featureLearning.basketball.sampleSize, 1);
+  assert.equal(context.featureLearning.basketball.sampleSize, 0);
+  assert.equal(context.featureLearning.basketball.excluded.outcome_chronology_unverified, 1);
 });
 
 test('Elo ratings regress toward neutral when a new season begins', () => {

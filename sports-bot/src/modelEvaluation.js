@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import { listDailyCaches } from './storage.js';
 import { config } from './config.js';
 import { normalizeEntityName, readIntelligenceStore } from './intelligenceStore.js';
@@ -135,6 +136,10 @@ export function collectFeatureRows(caches = [], options = {}) {
     .filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && Array.isArray(row.prediction?.factors) && row.prediction.factors.length)
     .map((row) => ({
       dateKey: row.dateKey,
+      gameId: String(row.prediction.gameId || ''), league: row.prediction.leagueKey || row.game?.leagueKey || '',
+      modelVersion: row.modelVersion, horizon: row.horizon,
+      predictionGeneratedAt: row.prediction.predictionGeneratedAt, startTime: row.prediction.startTime || row.game?.startTime,
+      resolvedAt: row.prediction.resultObservedAt || null,
       sport: profileKey(row.prediction),
       // The learned feature layer models the home-vs-away logit before the
       // sport-specific draw allocation. A draw is neutral evidence here,
@@ -164,54 +169,63 @@ function scoringSummary(rows) {
 
 export function buildWalkForwardFeatureModels(featureRows = [], options = {}) {
   const minSamples = Math.max(20, Number(options.minSamples ?? config.autoLearningMinSamples) || 30);
+  const asOf = options.asOf === undefined ? Date.now() : Number(options.asOf);
+  if (!Number.isFinite(asOf)) throw new Error('Feature learning requires a valid information cutoff');
   const groups = new Map();
   for (const row of featureRows) {
     if (!groups.has(row.sport)) groups.set(row.sport, []);
     groups.get(row.sport).push(row);
   }
   const output = {};
-  for (const [sport, rows] of groups) {
-    rows.sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)));
-    const weights = {};
-    const baselineScores = [];
-    const learnedScores = [];
-    let seen = 0;
-    for (const row of rows) {
-      for (const label of Object.keys(row.factors)) weights[label] ??= 1;
-      const baselineLogit = Object.values(row.factors).reduce((total, value) => total + clamp(value, -3, 3), 0);
-      const learnedLogit = Object.entries(row.factors).reduce((total, [label, value]) => total + clamp(value, -3, 3) * weights[label], 0);
-      if (seen >= minSamples) {
-        baselineScores.push({ probability: logistic(baselineLogit), outcome: row.outcome });
-        learnedScores.push({ probability: logistic(learnedLogit), outcome: row.outcome });
-      }
-      const error = logistic(learnedLogit) - row.outcome;
-      const learningRate = 0.055 / Math.sqrt(1 + seen / 80);
-      for (const [label, rawValue] of Object.entries(row.factors)) {
-        const value = clamp(rawValue, -3, 3);
-        const regularization = 0.018 * (weights[label] - 1);
-        weights[label] = clamp(weights[label] - learningRate * (error * value + regularization), 0.35, 1.65);
-      }
-      seen += 1;
+  for (const [sport, input] of groups) {
+    const excluded = {}, unique = new Map();
+    const reject = reason => { excluded[reason] = (excluded[reason] || 0) + 1; };
+    for (const row of input) {
+      const generated = Date.parse(row.predictionGeneratedAt || ''), start = Date.parse(row.startTime || ''), resolved = Date.parse(row.resolvedAt || '');
+      if (![generated,start,resolved].every(Number.isFinite) || generated >= start || resolved < start || resolved > asOf) { reject('outcome_chronology_unverified'); continue; }
+      if (!row.gameId || ![0,0.5,1].includes(row.outcome) || !row.factors || !Object.keys(row.factors).length
+        || Object.values(row.factors).some(value => typeof value !== 'number' || !Number.isFinite(value))) { reject('invalid_training_input'); continue; }
+      // Different guilds/horizons of one game are not independent training examples.
+      const key = JSON.stringify([row.league || '',row.gameId,row.startTime]);
+      const previous = unique.get(key);
+      if (previous && previous.outcome !== row.outcome) { unique.set(key,{...previous,conflicting:true}); continue; }
+      if (!previous || generated < Date.parse(previous.predictionGeneratedAt)) unique.set(key,{...row,conflicting:previous?.conflicting || false});
     }
-    const baseline = scoringSummary(baselineScores);
-    const learned = scoringSummary(learnedScores);
-    const brierImprovement = baseline.brierScore === null || learned.brierScore === null ? null : baseline.brierScore - learned.brierScore;
-    const accepted = seen >= minSamples && learned.sampleSize >= 20 && brierImprovement > 0.001;
-    const reliability = accepted ? clamp((seen - minSamples + 1) / 220, 0, 0.78) : 0;
-    const shrunkWeights = Object.fromEntries(Object.entries(weights).map(([label, value]) => [label, 1 + (value - 1) * reliability]));
-    output[sport] = {
-      trained: seen >= minSamples,
-      accepted,
-      sampleSize: seen,
-      evaluationSampleSize: learned.sampleSize,
-      weights: shrunkWeights,
-      baselineBrier: baseline.brierScore,
-      learnedBrier: learned.brierScore,
-      baselineLogLoss: baseline.logLoss,
-      learnedLogLoss: learned.logLoss,
-      brierImprovement,
-      walkForward: true
-    };
+    const rows = [...unique.values()].filter(row => { if(row.conflicting){reject('conflicting_game_outcome');return false;} return true; })
+      .sort((a,b) => Date.parse(a.predictionGeneratedAt)-Date.parse(b.predictionGeneratedAt) || String(a.gameId).localeCompare(String(b.gameId)));
+    const split = Math.max(minSamples,Math.floor(rows.length*0.7)), validation = rows.slice(split);
+    const validationStart = validation.length ? Date.parse(validation[0].predictionGeneratedAt) : null;
+    const training = rows.slice(0,split).filter(row => {
+      if (validationStart !== null && Date.parse(row.resolvedAt) >= validationStart) { reject('training_label_overlaps_validation'); return false; }
+      return true;
+    });
+    // Fit in outcome-availability order, with no validation labels or factors entering the fitted artifact.
+    training.sort((a,b) => Date.parse(a.resolvedAt)-Date.parse(b.resolvedAt) || String(a.gameId).localeCompare(String(b.gameId)));
+    const weights = {}; let seen = 0;
+    for (const row of training) {
+      for (const label of Object.keys(row.factors).sort()) weights[label] ??= 1;
+      const logit = Object.entries(row.factors).reduce((sum,[label,value]) => sum+clamp(value,-3,3)*weights[label],0);
+      const error = logistic(logit)-row.outcome, rate = 0.055/Math.sqrt(1+seen/80);
+      for (const [label,raw] of Object.entries(row.factors)) weights[label] = clamp(weights[label]-rate*(error*clamp(raw,-3,3)+0.018*(weights[label]-1)),0.35,1.65);
+      seen++;
+    }
+    const reliability = clamp((training.length-minSamples+1)/220,0,0.78);
+    const fitted = Object.fromEntries(Object.entries(weights).sort(([a],[b])=>a.localeCompare(b)).map(([label,value])=>[label,clamp(1+(value-1)*reliability,0.6,1.4)]));
+    const scores = (learned) => validation.map(row => ({outcome:row.outcome,probability:logistic(Object.entries(row.factors)
+      .reduce((sum,[label,value])=>sum+clamp(value,-3,3)*(learned ? fitted[label] ?? 1 : 1),0))}));
+    const baseline = scoringSummary(scores(false)), challenger = scoringSummary(scores(true));
+    const improvement = baseline.brierScore === null ? null : baseline.brierScore-challenger.brierScore;
+    const artifact = {schema:'sports-feature-fit-v2',sport,weights:fitted,
+      trainingHash:createHash('sha256').update(JSON.stringify(training)).digest('hex'),
+      trainingSamples:training.length,lastTrainingOutcomeAt:training.at(-1)?.resolvedAt || null};
+    const artifactId = createHash('sha256').update(JSON.stringify(artifact)).digest('hex');
+    output[sport] = {...artifact,artifactId,trained:training.length>=minSamples,accepted:false,productionEligible:false,
+      researchAccepted:training.length>=minSamples && validation.length>=20 && improvement>0.001,
+      activationReason:'Frozen feature candidate requires independent prospective artifact review; automatic activation disabled.',
+      sampleSize:rows.length,trainingSampleSize:training.length,evaluationSampleSize:validation.length,excluded,
+      baselineBrier:baseline.brierScore,learnedBrier:challenger.brierScore,baselineLogLoss:baseline.logLoss,
+      learnedLogLoss:challenger.logLoss,brierImprovement:improvement,walkForward:true,
+      validationProtocol:'Single terminal chronological split; training labels purged at first validation issuance; exact shrunk fit scored without validation updates.'};
   }
   return output;
 }
@@ -446,7 +460,7 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
     history: { overall, bySport, rows: rows.length, cohort, evaluationVersion: EVALUATION_VERSION },
     calibration: buildCalibrationModel(rows),
     outcomeValidation: buildOutcomeValidation(rows),
-    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows) : {},
+    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows, { asOf: options.asOfDateKey ? Date.parse(`${options.asOfDateKey}T00:00:00Z`) : Date.now() }) : {},
     drift: buildDriftReport(rows),
     eloRatings: buildEloRatings(historicalIntelligence, caches, externalResults),
     externalResults,
