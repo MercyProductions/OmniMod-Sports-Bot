@@ -20,9 +20,9 @@ export function summarizePredictionJournal(records = []) {
     const versionRows = forecasts.filter(row => row.modelVersion === version);
     const resolved = versionRows.filter(row => results.has(row.forecastId));
     const graded = resolved.filter(row => journalOutcomeVector(row));
-    const convert = (row, probabilities = row.outcomePercentages, side = row.selectedSide) => ({
+    const convert = (row, probabilities = row.outcomePercentages, side = row.selectedSide, modeledOutcomes = row.modeledOutcomes) => ({
       ...row, actualSide: results.get(row.forecastId).actualSide, predictedSide: side,
-      predictionMode: 'pregame', outcomeProbabilities: probabilities
+      predictionMode: 'pregame', outcomeProbabilities: probabilities, modeledOutcomes
     });
     const modelRows = graded.map(row => convert(row));
     const firstPerGame = new Map();
@@ -35,7 +35,7 @@ export function summarizePredictionJournal(records = []) {
       const matched = graded.filter(row => validCandidateVector(row.referenceBaselines?.[baseline]?.probabilities));
       const referenceRows = matched.map(row => {
         const vector = row.referenceBaselines[baseline].probabilities;
-        return convert(row, Object.fromEntries(Object.entries(vector).map(([side, p]) => [side, p * 100])), selectedSide(vector));
+        return convert(row, Object.fromEntries(Object.entries(vector).map(([side, p]) => [side, p * 100])), selectedSide(vector), Object.keys(vector).sort());
       });
       baselineComparisons[baseline] = {
         primaryOnMatchedGames: evaluatePredictionHorizons(matched.map(row => convert(row)), [], { modelVersion: version }),

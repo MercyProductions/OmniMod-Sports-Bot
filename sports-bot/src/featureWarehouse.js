@@ -194,6 +194,9 @@ function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = D
     predictionMode: prediction.predictionMode,
     predictedSide: prediction.predictedSide,
     outcomeProbabilities: prediction.outcomeProbabilities,
+    modeledOutcomes: Object.keys(prediction.outcomeProbabilities || {}).sort(),
+    candidateModeledOutcomes: Object.fromEntries(Object.entries(prediction.candidateProbabilities || {}).map(([name,vector]) =>
+      [name, Object.keys(vector || {}).sort()])),
     valueAnalysis: prediction.valueAnalysis || null,
     marketTimestampEvidence:structuredClone(prediction.marketTimestampEvidence||null),
     lineMarkets:{spread:structuredClone(game.odds?.spread||null),total:structuredClone(game.odds?.total||null)},

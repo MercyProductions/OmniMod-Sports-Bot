@@ -107,6 +107,7 @@ test('horizon evaluation grades T-90, T-30, T-10 independently with closing-line
       predictionGeneratedAt: new Date(Date.UTC(2099, 0, 1, index)).toISOString(),
       startTime: new Date(Date.UTC(2099, 0, 3, index)).toISOString(), predictionMode: 'pregame',
       predictedSide: actualSide, actualSide,
+      modeledOutcomes: ['away','home'],
       outcomeProbabilities: actualSide === 'home' ? { away: 35, home: 65 } : { away: 65, home: 35 },
       inputSnapshot: { seasonType: index % 10 === 0 ? 3 : 2 }
     });

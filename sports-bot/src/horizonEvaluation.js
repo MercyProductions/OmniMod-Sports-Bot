@@ -1,18 +1,21 @@
+import { journalOutcomeVector } from './journalOutcomeSpace.js';
 import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import { finiteNumber } from './dataValidation.js';
 
 function normalizedPrediction(row = {}) {
-  const source = row.outcomeProbabilities || row.candidateProbabilities?.[row.championModel] || row.candidateProbabilities?.evidence || {};
-  // Public outcomes are percentages; candidate model vectors are fractions.
-  // Scaling each coordinate independently misreads outcomes below 1%.
-  const scale = row.outcomeProbabilities ? 100 : 1;
-  const probability = (side) => finiteNumber(source[side], side === 'draw' ? 0 : NaN) / scale;
-  const draw = probability('draw');
-  const sides = draw > 0 || row.actualSide === 'draw' ? ['away', 'home', 'draw'] : ['away', 'home'];
-  if (sides.some((side) => !Number.isFinite(probability(side)) || probability(side) < 0 || probability(side) > 1)) return null;
-  const total = sides.reduce((sum, side) => sum + probability(side), 0);
-  if (total <= 0) return null;
-  return { sides, vector: Object.fromEntries(sides.map((side) => [side, probability(side) / total])) };
+  const model = row.candidateProbabilities?.[row.championModel] ? row.championModel : 'evidence';
+  const primary = row.outcomeProbabilities;
+  const source = primary || row.candidateProbabilities?.[model];
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  // Preserve scale per vector, including sub-1% values; never coerce numeric strings.
+  const percentages = primary || Object.fromEntries(Object.entries(source).map(([side,p]) =>
+    [side, typeof p === 'number' ? p * 100 : p]));
+  const declared = primary ? row.modeledOutcomes : row.candidateModeledOutcomes?.[model];
+  const full = journalOutcomeVector({outcomePercentages:percentages,modeledOutcomes:declared});
+  if (!full) return null;
+  const sides = full.draw > 0 || row.actualSide === 'draw' ? ['away','home','draw'] : ['away','home'];
+  const total = sides.reduce((sum,side) => sum + full[side],0);
+  return {sides,vector:Object.fromEntries(sides.map(side => [side,full[side]/total]))};
 }
 
 export function predictionHorizon(row = {}) {
@@ -130,12 +133,16 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     const prior = deduped.get(key);
     if (!prior || String(row.predictionGeneratedAt || '') > String(prior.predictionGeneratedAt || '')) deduped.set(key, row);
   }
-  const scored = [];
+  const scored = [], scoringExclusions = {};
+  const exclude = reason => { scoringExclusions[reason] = (scoringExclusions[reason] || 0) + 1; };
   for (const row of deduped.values()) {
     const prediction = normalizedPrediction(row);
-    if (!prediction) continue;
+    if (!prediction) { exclude('invalid_or_unverified_outcome_vector'); continue; }
     const selectedSide = row.predictedSide || [...prediction.sides].sort((a, b) => prediction.vector[b] - prediction.vector[a])[0];
-    const selectedProbability = prediction.vector[selectedSide] || 0;
+    if (!prediction.sides.includes(selectedSide) || prediction.vector[selectedSide] !== Math.max(...Object.values(prediction.vector))) {
+      exclude('invalid_frozen_selection'); continue;
+    }
+    const selectedProbability = prediction.vector[selectedSide];
     const brier = prediction.sides.reduce((sum, side) => sum + (prediction.vector[side] - Number(side === row.actualSide)) ** 2, 0) / prediction.sides.length;
     const closing = closingMarket(markets, row);
     const closingProbability = closing ? finiteNumber(closing[selectedSide]) : null;
@@ -171,6 +178,7 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     modelVersion: selectedVersion,
     versionsAvailable: versions,
     logLossProtocol: LOG_LOSS_PROTOCOL,
+    scoringCandidates: deduped.size, scoringExclusions,
     scoreDefinition: 'Full-outcome Brier (mean over outcome coordinates) and multinomial log loss; distinct from selected-outcome binary scores.',
     overall: summarize([...latestByGame.values()]),
     byHorizon: group('horizon'),

@@ -142,3 +142,21 @@ test('an unscoped forecast cannot adopt arbitrary inputs from a shared native ID
 test('an unscoped legacy caller can use one uniquely identified game without guessing among leagues',async()=>{
  const s=fixture();delete s.predictions[0].leagueKey;const row=first(await recordSlateSnapshot(s));assert.equal(row.leagueKey,'nba');assert.equal(row.inputSnapshot.teams.away.name,'nba Away');
 });
+
+
+test('new warehouse snapshots freeze actual emitted primary and candidate outcome keys',async()=>{
+ const s=fixture();delete s.predictions[0].outcomeProbabilities.draw;delete s.predictions[0].candidateProbabilities.evidence.draw;
+ const row=first(await recordSlateSnapshot(s));
+ assert.deepEqual(row.modeledOutcomes,['away','home']);assert.deepEqual(row.candidateModeledOutcomes.evidence,['away','home']);
+ s.predictions[0].outcomeProbabilities={away:20,home:60,draw:20};
+ s.predictions[0].candidateProbabilities.evidence={away:.2,home:.6,draw:.2};
+ const retained=first(await recordSlateSnapshot(s));
+ assert.deepEqual(retained.modeledOutcomes,['away','home']);assert.deepEqual(retained.outcomeProbabilities,{away:40,home:60});
+});
+test('a later snapshot cannot retroactively declare missing legacy warehouse outcome classes',async()=>{
+ const s=fixture(),warehouse=await recordSlateSnapshot(s);
+ delete warehouse.predictions[0].modeledOutcomes;delete warehouse.predictions[0].candidateModeledOutcomes;
+ await writeJson(warehouseFile,warehouse);
+ const retained=first(await recordSlateSnapshot(s));
+ assert.equal(Object.hasOwn(retained,'modeledOutcomes'),false);assert.equal(Object.hasOwn(retained,'candidateModeledOutcomes'),false);
+});
