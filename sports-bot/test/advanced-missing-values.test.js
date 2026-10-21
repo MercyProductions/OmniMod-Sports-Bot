@@ -423,3 +423,80 @@ test('NBA zero minutes remain zero and overtime stays an explicit regulation-sca
   assert.equal(projection.workloadBasis.includesOvertime,false);assert.equal(projection.expectedWorkload,minutes===0?0:48);
  }
 });
+
+
+const teamSample=(sportGroup,stats={},id='sample')=>({id,gameId:id,leagueKey:'test',sportGroup,awayTeam:'Away',homeTeam:'Home',awayScore:1,homeScore:2,
+ teams:{away:{stats:{...stats}},home:{stats:{...stats}}}});
+async function enhancedTeams(samples){
+ const {enhanceTeamProfiles}=await import('../src/advancedMetrics.js');
+ return enhanceTeamProfiles({away:{name:'Away',leagueKey:'test',powerRating:50,offense:50,defense:50},home:{name:'Home',leagueKey:'test',powerRating:50,offense:50,defense:50}},[],samples);
+}
+
+test('incomplete basketball possession inputs cannot manufacture advanced efficiency',async()=>{
+ const profiles=await enhancedTeams([teamSample('Basketball',{fieldgoalsattempted:80,offensiverebounds:10,turnovers:12})]);
+ assert.equal(profiles.home.advancedMetrics.possessions,null);assert.equal(profiles.home.advancedRating,null);
+ assert.equal(profiles.home.offense,50);assert.equal(profiles.home.stats.advancedOffenseSamples,0);
+});
+
+test('football rate proxies need observed components and a positive observed drive count',async()=>{
+ const missing=await enhancedTeams([teamSample('Football',{yardsperplay:5,thirddownpct:40})]);
+ assert.equal(missing.home.advancedMetrics.epaProxy,null);assert.equal(missing.home.advancedMetrics.driveEfficiency,null);
+ const zero=await enhancedTeams([teamSample('Football',{yardsperplay:0,thirddownpct:0,turnovers:0,totaldrives:1})]);
+ assert.equal(zero.home.advancedMetrics.yardsPerPlay,0);assert.equal(zero.home.advancedMetrics.epaProxy,0);assert.equal(zero.home.advancedMetrics.driveEfficiency,2);
+ const negative=await enhancedTeams([teamSample('Football',{yardsperplay:-1,thirddownpct:0,turnovers:0,totaldrives:1})]);
+ assert.equal(negative.home.advancedMetrics.yardsPerPlay,-1);assert.equal(negative.home.advancedMetrics.epaProxy,-.075);
+});
+
+test('historical hockey expected-goal proxies cannot substitute actual goals for absent shot data',async()=>{
+ const missing=await enhancedTeams([teamSample('Hockey')]);assert.equal(missing.home.advancedMetrics.expectedGoalsProxy,null);
+ const zero=await enhancedTeams([teamSample('Hockey',{shotstotal:0,powerplaypct:0})]);assert.equal(zero.home.advancedMetrics.shotVolume,0);assert.equal(zero.home.advancedMetrics.expectedGoalsProxy,0);
+ assert.equal(zero.home.advancedMetrics.goalPreventionProxy,null);
+});
+
+test('soccer shot proxies require both counts but reported zero xG stays valid',async()=>{
+ const missing=await enhancedTeams([teamSample('Soccer',{shotsontarget:4})]);assert.equal(missing.home.advancedMetrics.expectedGoals,null);
+ const zero=await enhancedTeams([teamSample('Soccer',{expectedgoals:0})]);assert.equal(zero.home.advancedMetrics.expectedGoals,0);
+});
+
+test('baseball missing or zero opportunities cannot become expected runs or bullpen runs',async()=>{
+ for(const stats of [{},{plateappearances:0,totalbases:0,walks:0}]){
+  const profiles=await enhancedTeams([teamSample('Baseball',stats)]);
+  assert.equal(profiles.home.advancedMetrics.expectedRunsProxy,null);assert.equal(profiles.home.advancedMetrics.bullpenRunsAllowedProxy,null);
+ }
+});
+
+test('missing team observations do not dilute measured proxy averages or inflate their reliability counts',async()=>{
+ const good=teamSample('Football',{yardsperplay:4,thirddownpct:20,turnovers:0,totaldrives:10},'good');
+ const bad=teamSample('Football',{},'bad');
+ const profiles=await enhancedTeams([good,bad]);
+ assert.equal(profiles.home.stats.advancedOffenseSamples,1);assert.equal(profiles.home.stats.advancedMetricSamples.epaProxy,1);
+ assert.ok(Math.abs(profiles.home.advancedMetrics.epaProxy-.36)<1e-9);
+});
+
+
+test('teams with no advanced measurements do not change the cohort normalization of measured teams',async()=>{
+ const good=teamSample('Football',{yardsperplay:4,thirddownpct:20,turnovers:0,totaldrives:10},'good');
+ const bad={...teamSample('Football',{},'other'),awayTeam:'Other Away',homeTeam:'Other Home'};
+ assert.deepEqual(await enhancedTeams([good,bad]),await enhancedTeams([good]));
+});
+
+test('team feature counts freeze with current input evidence and one-sided data cannot form a combined rating',async()=>{
+ const sample=teamSample('Basketball',{fieldgoalsattempted:80,freethrowsattempted:20,offensiverebounds:10,turnovers:12});
+ sample.teams.home.stats={};const profiles=await enhancedTeams([sample]);
+ assert.equal(profiles.away.advancedDefense,null);assert.equal(profiles.home.advancedOffense,null);
+ assert.equal(profiles.away.advancedRating,null);assert.equal(profiles.home.advancedRating,null);
+ assert.ok(Math.abs(profiles.away.advancedMetrics.possessions-90.8)<1e-9);
+ const frozen=buildEvidenceCoverage({sportGroup:'Basketball',away:{name:'Away'},home:{name:'Home'}},{teams:profiles});
+ assert.equal(frozen.sides.away.modelInputs.advancedTeamFeatureEvidence.offenseSamples,1);
+ assert.equal(frozen.sides.home.modelInputs.advancedTeamFeatureEvidence.metricSamples.possessions,0);
+});
+
+
+test('play-by-play event metadata distinguishes unknown counts from measured zero',async()=>{
+ for(const events of [undefined,0]){
+  const sample=teamSample('Football');sample.playByPlay={away:{playValuePerEvent:.1,events}};
+  const profiles=await enhancedTeams([sample]);
+  assert.equal(profiles.away.advancedMetrics.playByPlay.events,events===undefined?null:0);
+  assert.equal(profiles.away.advancedMetrics.playByPlay.eventSamples,events===undefined?0:1);
+ }
+});

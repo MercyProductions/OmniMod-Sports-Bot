@@ -4,7 +4,7 @@ import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior, basketballWorkloadBasis } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
-import { finiteNumber, validScore } from './dataValidation.js';
+import { finiteNumber, validScore, measuredCalculation } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
 
 function clamp(value, min, max) {
@@ -84,10 +84,6 @@ function athleteStatMap(group, athleteRow) {
   const output = {};
   for (let index = 0; index < names.length; index += 1) addStat(output, names[index], athleteRow?.stats?.[index]);
   return output;
-}
-
-function metric(stats, ...names) {
-  return optionalMetric(stats, ...names) ?? 0;
 }
 
 function optionalMetric(stats, ...names) {
@@ -491,21 +487,33 @@ export function opponentAdjustedRatings(results) {
   return output;
 }
 
+const observedCount = (stats, ...names) => {
+  const value = optionalMetric(stats, ...names);
+  return value !== null && value >= 0 ? value : null;
+};
+function teamPossessions(stats) {
+  const result = measuredCalculation([
+    observedCount(stats, 'fieldGoalsAttempted', 'fieldGoalsMadefieldGoalsAttemptedattempted'),
+    observedCount(stats, 'freeThrowsAttempted', 'freeThrowsMadefreeThrowsAttemptedattempted'),
+    observedCount(stats, 'offensiveRebounds'), observedCount(stats, 'turnovers')
+  ], (shots, freeThrows, rebounds, turnovers) => shots + .44 * freeThrows - rebounds + turnovers);
+  return result !== null && result >= 0 ? result : null;
+}
 function advancedOffense(profileKey, stats, score) {
+  const points = validScore(score);
   if (profileKey === 'basketball') {
-    const possessions = metric(stats, 'fieldGoalsAttempted', 'fieldGoalsMadefieldGoalsAttemptedattempted') +
-      0.44 * metric(stats, 'freeThrowsAttempted', 'freeThrowsMadefreeThrowsAttemptedattempted') -
-      metric(stats, 'offensiveRebounds') + metric(stats, 'turnovers');
-    return possessions > 20 ? (score / possessions) * 100 : score;
+    const possessions = teamPossessions(stats);
+    return possessions !== null && possessions > 20 ? measuredCalculation([points, possessions], (p, count) => p / count * 100) : null;
   }
-  if (profileKey === 'football') return metric(stats, 'yardsPerPlay') * 7 + metric(stats, 'thirdDownPct') * 0.12 - metric(stats, 'turnovers') * 4 + score;
-  if (profileKey === 'baseball') {
-    const appearances = metric(stats, 'plateAppearances') || metric(stats, 'atBats') || 1;
-    return score * 2 + (metric(stats, 'totalBases') + metric(stats, 'walks') * 0.7) / appearances * 10;
-  }
-  if (profileKey === 'hockey') return score * 4 + metric(stats, 'shotsTotal') * 0.18 + metric(stats, 'powerPlayPct') * 0.025;
-  if (profileKey === 'soccer') return score * 4 + metric(stats, 'shotsOnTarget') * 0.6 + metric(stats, 'totalShots') * 0.12 + metric(stats, 'expectedGoals', 'xg') * 1.5;
-  return score;
+  if (profileKey === 'football') return measuredCalculation([points, optionalMetric(stats, 'yardsPerPlay'), observedCount(stats, 'thirdDownPct', 'thirdDownEfficiencyPct'), observedCount(stats, 'turnovers')],
+    (p, yards, thirdDown, turnovers) => yards * 7 + thirdDown * .12 - turnovers * 4 + p);
+  if (profileKey === 'baseball') return measuredCalculation([points, observedCount(stats, 'plateAppearances', 'atBats'), observedCount(stats, 'totalBases'), observedCount(stats, 'walks')],
+    (p, count, bases, walks) => count > 0 ? p * 2 + (bases + walks * .7) / count * 10 : null);
+  if (profileKey === 'hockey') return measuredCalculation([points, observedCount(stats, 'shotsTotal', 'shots'), observedCount(stats, 'powerPlayPct')],
+    (p, shots, powerPlay) => p * 4 + shots * .18 + powerPlay * .025);
+  if (profileKey === 'soccer') return measuredCalculation([points, observedCount(stats, 'shotsOnTarget'), observedCount(stats, 'totalShots'), observedCount(stats, 'expectedGoals', 'xg')],
+    (p, onTarget, shots, xg) => p * 4 + onTarget * .6 + shots * .12 + xg * 1.5);
+  return null;
 }
 
 function specializedTeamMetrics(profileKey, stats, score, opponentScore, playByPlay = null) {
@@ -518,7 +526,7 @@ function specializedTeamMetrics(profileKey, stats, score, opponentScore, playByP
     playShotQuality: finite(playByPlay.shotQuality),
     playPossessionShare: finite(playByPlay.possessionShare),
     playByPlay: {
-      events: playByPlay.events || 0,
+      events: finite(playByPlay.events),
       successRate: finite(playByPlay.successRate),
       turnoverRate: finite(playByPlay.turnoverRate),
       explosiveRate: finite(playByPlay.explosiveRate),
@@ -528,58 +536,36 @@ function specializedTeamMetrics(profileKey, stats, score, opponentScore, playByP
     }
   } : {};
   if (profileKey === 'basketball') {
-    const possessions = metric(stats, 'fieldGoalsAttempted') + 0.44 * metric(stats, 'freeThrowsAttempted') - metric(stats, 'offensiveRebounds') + metric(stats, 'turnovers');
-    return {
-      ...playMetrics,
-      possessions: possessions > 20 ? possessions : null,
-      offensiveEfficiency: possessions > 20 ? (score / possessions) * 100 : null,
-      turnoverRate: possessions > 20 ? metric(stats, 'turnovers') / possessions : null
-    };
+    const count = teamPossessions(stats), possessions = count === 0 || count > 20 ? count : null;
+    return { ...playMetrics, possessions,
+      offensiveEfficiency: possessions !== null && possessions > 20 ? measuredCalculation([score, possessions], (p, n) => p / n * 100) : null,
+      turnoverRate: possessions !== null && possessions > 20 ? measuredCalculation([observedCount(stats, 'turnovers'), possessions], (t, n) => t / n) : null };
   }
   if (profileKey === 'football') {
-    const yardsPerPlay = metric(stats, 'yardsPerPlay');
-    const thirdDownPct = metric(stats, 'thirdDownPct', 'thirdDownEfficiencyPct');
-    const turnovers = metric(stats, 'turnovers');
-    return {
-      ...playMetrics,
-      yardsPerPlay: yardsPerPlay || null,
-      epaProxy: yardsPerPlay ? yardsPerPlay * 0.075 + thirdDownPct * 0.003 - turnovers * 0.12 : null,
-      driveEfficiency: score / Math.max(6, metric(stats, 'totalDrives') || 10)
-    };
+    const yardsPerPlay = optionalMetric(stats, 'yardsPerPlay'), thirdDownPct = observedCount(stats, 'thirdDownPct', 'thirdDownEfficiencyPct');
+    return { ...playMetrics, yardsPerPlay,
+      epaProxy: measuredCalculation([yardsPerPlay, thirdDownPct, observedCount(stats, 'turnovers')], (yards, thirdDown, turnovers) => yards * .075 + thirdDown * .003 - turnovers * .12),
+      driveEfficiency: measuredCalculation([score, observedCount(stats, 'totalDrives')], (p, drives) => drives > 0 ? p / drives : null) };
   }
   if (profileKey === 'hockey') {
-    const shots = metric(stats, 'shotsTotal', 'shots');
-    const powerPlayPct = metric(stats, 'powerPlayPct');
-    return {
-      ...playMetrics,
-      shotVolume: shots || null,
-      expectedGoalsProxy: shots ? shots * (0.082 + clamp(powerPlayPct / 100, 0, 0.5) * 0.035) : score,
-      goalPreventionProxy: -opponentScore
-    };
+    const shots = observedCount(stats, 'shotsTotal', 'shots'), powerPlay = observedCount(stats, 'powerPlayPct');
+    return { ...playMetrics, shotVolume: shots,
+      expectedGoalsProxy: measuredCalculation([shots, powerPlay], (n, pct) => n * (.082 + clamp(pct / 100, 0, .5) * .035)),
+      goalPreventionProxy: null, teamGoalsAllowed: validScore(opponentScore) };
   }
   if (profileKey === 'soccer') {
-    const directXg = optionalMetric(stats, 'expectedGoals', 'xg');
-    const shotsOnTarget = optionalMetric(stats, 'shotsOnTarget');
-    const shots = optionalMetric(stats, 'totalShots');
-    const proxy = shotsOnTarget !== null || shots !== null
-      ? (shotsOnTarget || 0) * 0.24 + Math.max(0, (shots || 0) - (shotsOnTarget || 0)) * 0.055 : null;
+    const directXg = observedCount(stats, 'expectedGoals', 'xg'), shotsOnTarget = observedCount(stats, 'shotsOnTarget'), shots = observedCount(stats, 'totalShots');
+    const proxy = measuredCalculation([shotsOnTarget, shots], (onTarget, total) => onTarget <= total ? onTarget * .24 + (total - onTarget) * .055 : null);
     const expectedGoals = directXg ?? proxy;
-    return {
-      ...playMetrics,
-      expectedGoals,
-      reportedXgCoverage: directXg !== null ? 1 : 0,
-      shotProxyCoverage: directXg === null && proxy !== null ? 1 : 0,
-      shotsOnTarget,
-      shotQuality: shots > 0 && expectedGoals !== null ? expectedGoals / shots : null
-    };
+    return { ...playMetrics, expectedGoals, reportedXgCoverage: directXg !== null ? 1 : 0,
+      shotProxyCoverage: directXg === null && proxy !== null ? 1 : 0, shotsOnTarget,
+      shotQuality: shots !== null && shots > 0 ? measuredCalculation([expectedGoals, shots], (xg, n) => xg / n) : null };
   }
   if (profileKey === 'baseball') {
-    const plateAppearances = metric(stats, 'plateAppearances') || metric(stats, 'atBats');
-    return {
-      ...playMetrics,
-      expectedRunsProxy: plateAppearances ? score * 0.55 + ((metric(stats, 'totalBases') + metric(stats, 'walks') * 0.7) / plateAppearances) * 5 : score,
-      bullpenRunsAllowedProxy: opponentScore
-    };
+    return { ...playMetrics,
+      expectedRunsProxy: measuredCalculation([score, observedCount(stats, 'plateAppearances', 'atBats'), observedCount(stats, 'totalBases'), observedCount(stats, 'walks')],
+        (runs, count, bases, walks) => count > 0 ? runs * .55 + (bases + walks * .7) / count * 5 : null),
+      bullpenRunsAllowedProxy: null, teamRunsAllowed: validScore(opponentScore) };
   }
   return playMetrics;
 }
@@ -592,8 +578,8 @@ function advancedTeamRatings(samples) {
     const profile = sportProfile(sample);
     const awayOffense = advancedOffense(profile.key, awayStats, Number(sample.awayScore));
     const homeOffense = advancedOffense(profile.key, homeStats, Number(sample.homeScore));
-    rows.push({ league: sample.leagueKey || sample.league, team: sample.awayTeam, offense: awayOffense, defense: -homeOffense, metrics: specializedTeamMetrics(profile.key, awayStats, Number(sample.awayScore), Number(sample.homeScore), sample.playByPlay?.away) });
-    rows.push({ league: sample.leagueKey || sample.league, team: sample.homeTeam, offense: homeOffense, defense: -awayOffense, metrics: specializedTeamMetrics(profile.key, homeStats, Number(sample.homeScore), Number(sample.awayScore), sample.playByPlay?.home) });
+    rows.push({ league: sample.leagueKey || sample.league, team: sample.awayTeam, offense: awayOffense, defense: homeOffense === null ? null : -homeOffense, metrics: specializedTeamMetrics(profile.key, awayStats, Number(sample.awayScore), Number(sample.homeScore), sample.playByPlay?.away) });
+    rows.push({ league: sample.leagueKey || sample.league, team: sample.homeTeam, offense: homeOffense, defense: awayOffense === null ? null : -awayOffense, metrics: specializedTeamMetrics(profile.key, homeStats, Number(sample.homeScore), Number(sample.awayScore), sample.playByPlay?.home) });
   }
   const groups = new Map();
   for (const row of rows) {
@@ -604,14 +590,17 @@ function advancedTeamRatings(samples) {
   const byLeague = new Map();
   for (const [key, teamRows] of groups) {
     const metricNames = [...new Set(teamRows.flatMap((row) => Object.keys(row.metrics || {})))].filter((name) => name !== 'playByPlay');
+    const metricSamples = {};
     const metrics = Object.fromEntries(metricNames.map((name) => {
       const values = teamRows.map((row) => finite(row.metrics?.[name])).filter((value) => value !== null);
+      metricSamples[name] = values.length;
       return [name, values.length ? mean(values) : null];
     }));
     if (teamRows.some((row) => row.metrics?.playByPlay)) {
+      const eventCounts = teamRows.map(row => finite(row.metrics?.playByPlay?.events)).filter(value => value !== null);
       metrics.playByPlay = {
         sampleSize: teamRows.filter((row) => row.metrics?.playByPlay).length,
-        events: Math.round(mean(teamRows.map((row) => finite(row.metrics?.playByPlay?.events)).filter((value) => value !== null))),
+        events: eventCounts.length ? Math.round(mean(eventCounts)) : null, eventSamples: eventCounts.length,
         successRate: metrics.playSuccessRate,
         turnoverRate: metrics.playTurnoverRate,
         explosiveRate: metrics.playExplosiveRate,
@@ -620,7 +609,9 @@ function advancedTeamRatings(samples) {
         playValuePerEvent: metrics.playValue
       };
     }
-    const summary = { key, league: teamRows[0].league, offense: mean(teamRows.map((row) => row.offense)), defense: mean(teamRows.map((row) => row.defense)), metrics, sampleSize: teamRows.length };
+    const offenses = teamRows.map(row => row.offense).filter(Number.isFinite), defenses = teamRows.map(row => row.defense).filter(Number.isFinite);
+    const summary = { key, league: teamRows[0].league, offense: offenses.length ? mean(offenses) : null, defense: defenses.length ? mean(defenses) : null,
+      offenseSamples: offenses.length, defenseSamples: defenses.length, metrics, metricSamples, sampleSize: teamRows.length };
     if (!byLeague.has(summary.league)) byLeague.set(summary.league, []);
     byLeague.get(summary.league).push(summary);
   }
@@ -631,12 +622,12 @@ function advancedTeamRatings(samples) {
     const offenseSd = standardDeviation(summaries.map((row) => row.offense));
     const defenseSd = standardDeviation(summaries.map((row) => row.defense));
     for (const row of summaries) {
-      const reliability = row.sampleSize / (row.sampleSize + 4);
-      const offense = 50 + ((row.offense - offenseMean) / offenseSd) * 10 * reliability;
-      const defense = 50 + ((row.defense - defenseMean) / defenseSd) * 10 * reliability;
+      const offense = row.offense === null ? null : clamp(50 + ((row.offense - offenseMean) / offenseSd) * 10 * row.offenseSamples / (row.offenseSamples + 4), 25, 75);
+      const defense = row.defense === null ? null : clamp(50 + ((row.defense - defenseMean) / defenseSd) * 10 * row.defenseSamples / (row.defenseSamples + 4), 25, 75);
       output.set(row.key, {
-        offense: clamp(offense, 25, 75), defense: clamp(defense, 25, 75),
-        rating: clamp((offense + defense) / 2, 25, 75), metrics: row.metrics, sampleSize: row.sampleSize
+        offense, defense,
+        rating: measuredCalculation([offense, defense], (o, d) => (o + d) / 2), metrics: row.metrics, metricSamples: row.metricSamples,
+        offenseSamples: row.offenseSamples, defenseSamples: row.defenseSamples, sampleSize: row.sampleSize
       });
     }
   }
@@ -663,9 +654,10 @@ export function enhanceTeamProfiles(teamProfiles = {}, results = [], samples = [
       profile.advancedDefense = advanced.defense;
       profile.advancedRating = advanced.rating;
       profile.advancedMetrics = advanced.metrics;
-      profile.offense = clamp(profile.offense * 0.84 + advanced.offense * 0.16, 20, 80);
-      profile.defense = clamp(profile.defense * 0.84 + advanced.defense * 0.16, 20, 80);
-      profile.stats = { ...profile.stats, advancedBoxscoreSample: advanced.sampleSize };
+      if (advanced.offense !== null) profile.offense = clamp(profile.offense * 0.84 + advanced.offense * 0.16, 20, 80);
+      if (advanced.defense !== null) profile.defense = clamp(profile.defense * 0.84 + advanced.defense * 0.16, 20, 80);
+      profile.stats = { ...profile.stats, advancedBoxscoreSample: advanced.sampleSize, advancedOffenseSamples: advanced.offenseSamples,
+        advancedDefenseSamples: advanced.defenseSamples, advancedMetricSamples: advanced.metricSamples };
     }
   }
   return teamProfiles;

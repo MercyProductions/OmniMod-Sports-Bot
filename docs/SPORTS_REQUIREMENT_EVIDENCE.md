@@ -112,3 +112,7 @@ Development v6.0.18 preserves unknown/conflicting historical starter assertions 
 ## Basketball workload-unit continuation
 
 Development v6.0.19 repairs NBA 40-versus-48-minute normalization and projection with one league-aware definition, unit-contract checks and frozen diagnostics. [Rules, regressions, integration evidence and limits](SPORTS_BASKETBALL_WORKLOAD_UNITS.md); complete suite 322 passing. Overtime/special formats and other role-workload proxies remain limitations. No deployment or improved predictive performance claim.
+
+## Team feature measurement continuation
+
+Development v6.0.20 repairs missing-as-zero team features, fabricated drive/opportunity denominators, actual-score substitutions and unsupported bullpen/GSAx labels. [Mechanisms, valid-zero controls, cohort normalization and frozen counts](SPORTS_TEAM_FEATURE_MEASUREMENTS.md); complete suite 331 passing. Remaining proxies are explicitly heuristic and require forward validation; no deployment or performance-improvement claim.
