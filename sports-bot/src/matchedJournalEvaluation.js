@@ -1,3 +1,4 @@
+import {validCandidateVector} from './candidateCohorts.js';
 import { probabilityLogLoss } from './probabilityLogLoss.js';
 import {journalOutcomeVector} from './journalOutcomeSpace.js';
 import {journalResultState} from './journalResults.js';
@@ -15,17 +16,15 @@ const group=(rows,key)=>{
   return groups;
 };
 
-function vector(raw,scale=1){
-  if(!raw)return null;
-  const result={away:finiteNumber(raw.away),home:finiteNumber(raw.home),draw:raw.draw==null?0:finiteNumber(raw.draw)};
-  if(Object.values(result).some(p=>p===null||p<0||p>scale))return null;
+function vector(raw,declared){
+  if(!validCandidateVector(raw,declared))return null;
+  const result={away:raw.away,home:raw.home,draw:raw.draw??0};
   const total=Object.values(result).reduce((a,b)=>a+b,0);
-  if(Math.abs(total-scale)>(scale===100?0.5:0.0011)||total<=0)return null;
   return Object.fromEntries(Object.entries(result).map(([side,p])=>[side,p/total]));
 }
 
 function marketVerified(row){
-  const market=vector(row.referenceBaselines?.market?.probabilities),generated=time(row.predictionGeneratedAt);
+  const market=vector(row.referenceBaselines?.market?.probabilities,row.referenceModeledOutcomes?.market),generated=time(row.predictionGeneratedAt);
   return market&&SIDES.filter(side=>market[side]>0).every(side=>(row.odds?.outcomes?.[side]?.offeredQuotes||[])
     .some(quote=>quote.bookmaker&&quotePrice(quote)&&quoteTimestampVerified(quote)
       &&Number.isFinite(time(quote.quotedAt))&&time(quote.quotedAt)<=generated&&generated-time(quote.quotedAt)<=30*60000));
@@ -87,7 +86,7 @@ function compare(pairs,repetitions){
 
 function strata(row){
   const coverage=row.evidenceCoverage,context=row.eventContext||{};
-  const market=marketVerified(row)?vector(row.referenceBaselines.market.probabilities):null;
+  const market=marketVerified(row)?vector(row.referenceBaselines.market.probabilities,row.referenceModeledOutcomes?.market):null;
   const max=market?Math.max(...Object.values(market)):null;
   const confidenceLower=Math.min(9,Math.floor(Math.max(...Object.values(vector(journalOutcomeVector(row))))*10))*10;
   const favorite=market?SIDES.filter(side=>market[side]===max):[];
@@ -138,7 +137,8 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
       for(const item of items){
         const {row,result,probabilities,game}=item;
         if(conflicts.has(game)){skip('conflicting_game_results');continue;}
-        const candidate=vector(row.candidateProbabilities?.[name]||row.referenceBaselines?.[name]?.probabilities);
+        const direct=row.candidateProbabilities?.[name];
+        const candidate=vector(direct||row.referenceBaselines?.[name]?.probabilities, direct?row.candidateModeledOutcomes?.[name]:row.referenceModeledOutcomes?.[name]);
         if(!candidate){skip('reference_missing_or_invalid');continue;}
         if(name==='market'&&!marketVerified(row)){skip('offered_price_timestamps_unverified');continue;}
         if((probabilities.draw>0)!==(candidate.draw>0)){skip('outcome_space_mismatch');continue;}

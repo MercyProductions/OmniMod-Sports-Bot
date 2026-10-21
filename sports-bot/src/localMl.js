@@ -186,7 +186,7 @@ export function trainLocalMlModels(rows = [], options = {}) {
   if (!Number.isFinite(asOf)) throw new Error('Training requires a valid information cutoff');
   const selected = selectCandidateCohort(rows);
   const beforeCutoff = selected.rows.filter(row => Number.isFinite(Date.parse(row.resolvedAt || '')) && Date.parse(row.resolvedAt) <= asOf);
-  rows = beforeCutoff.filter(row => validCandidateVector(row.candidateProbabilities?.evidence));
+  rows = beforeCutoff.filter(row => validCandidateVector(row.candidateProbabilities?.evidence, row.candidateModeledOutcomes?.evidence));
   const minimum = Math.max(60, Number(options.minimum ?? config.localMlMinSamples) || 150);
   const groups = new Map();
   for (const row of rows) {
@@ -257,7 +257,7 @@ export function trainLocalMlModels(rows = [], options = {}) {
       }
     }
   }
-  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows, cohort: selected.cohort, temporalRowsExcluded: selected.rows.length - beforeCutoff.length };
+  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows, cohort: selected.cohort, temporalRowsExcluded: selected.rows.length - beforeCutoff.length, invalidEvidenceVectorsExcluded: beforeCutoff.filter(row => !validCandidateVector(row.candidateProbabilities?.evidence, row.candidateModeledOutcomes?.evidence)).length };
 }
 
 export async function trainAndPersistLocalMlModels(rows = [], options = {}) {

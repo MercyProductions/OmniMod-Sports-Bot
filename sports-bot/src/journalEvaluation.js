@@ -32,10 +32,10 @@ export function summarizePredictionJournal(records = []) {
     }
     const baselineComparisons = {};
     for (const baseline of ['elo', 'market']) {
-      const matched = graded.filter(row => validCandidateVector(row.referenceBaselines?.[baseline]?.probabilities));
+      const matched = graded.filter(row => validCandidateVector(row.referenceBaselines?.[baseline]?.probabilities,row.referenceModeledOutcomes?.[baseline]));
       const referenceRows = matched.map(row => {
         const vector = row.referenceBaselines[baseline].probabilities;
-        return convert(row, Object.fromEntries(Object.entries(vector).map(([side, p]) => [side, p * 100])), selectedSide(vector), Object.keys(vector).sort());
+        return convert(row, Object.fromEntries(Object.entries(vector).map(([side, p]) => [side, p * 100])), selectedSide(vector), row.referenceModeledOutcomes?.[baseline]);
       });
       baselineComparisons[baseline] = {
         primaryOnMatchedGames: evaluatePredictionHorizons(matched.map(row => convert(row)), [], { modelVersion: version }),

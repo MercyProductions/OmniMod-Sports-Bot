@@ -29,7 +29,7 @@ function vectorValue(vector, side) {
 }
 
 function scoreModel(rows, model) {
-  const eligible = rows.filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && validCandidateVector(row.candidateProbabilities?.[model]));
+  const eligible = rows.filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && validCandidateVector(row.candidateProbabilities?.[model], row.candidateModeledOutcomes?.[model]));
   if (!eligible.length) return { sampleSize: 0, brierScore: null, logLoss: null };
   let brier = 0;
   let logLoss = 0;
@@ -51,8 +51,8 @@ export function evaluateCandidateModels(rows = []) {
   const hybrid = models.hybrid;
   const comparisons = {};
   for (const candidate of modelNames.filter((name) => name !== 'evidence')) {
-    const matched = rows.filter((row) => validCandidateVector(row.candidateProbabilities?.evidence)
-      && validCandidateVector(row.candidateProbabilities?.[candidate])
+    const matched = rows.filter((row) => validCandidateVector(row.candidateProbabilities?.evidence, row.candidateModeledOutcomes?.evidence)
+      && validCandidateVector(row.candidateProbabilities?.[candidate], row.candidateModeledOutcomes?.[candidate])
       && (Number(row.candidateProbabilities.evidence.draw || 0) > 0) === (Number(row.candidateProbabilities[candidate].draw || 0) > 0));
     const baseline = scoreModel(matched, 'evidence');
     const challenger = scoreModel(matched, candidate);
@@ -71,6 +71,7 @@ export function evaluateCandidateModels(rows = []) {
   return {
     cohort: selected.cohort,
     logLossProtocol: LOG_LOSS_PROTOCOL,
+    invalidVectorsByModel: Object.fromEntries(modelNames.map(name => [name, rows.filter(row => row.candidateProbabilities?.[name] !== undefined && !validCandidateVector(row.candidateProbabilities[name],row.candidateModeledOutcomes?.[name])).length])),
     models,
     evidence,
     hybrid,

@@ -37,7 +37,7 @@ export function selectCandidateCohort(input = []) {
     const first = ordered[0], earliest = ordered.filter(row => observed(row) === observed(first));
     const frozenInputs = row => eventObservationHash({ generatedAt: Number.isFinite(instant(row.predictionGeneratedAt))
       ? new Date(instant(row.predictionGeneratedAt)).toISOString() : row.predictionGeneratedAt,
-      candidateProbabilities: row.candidateProbabilities, candidateArtifactIds: row.candidateArtifactIds,
+      candidateProbabilities: row.candidateProbabilities, candidateModeledOutcomes: row.candidateModeledOutcomes, candidateArtifactIds: row.candidateArtifactIds,
       mlFeatureVector: row.mlFeatureVector, featureVector: row.featureVector,
       outcomeProbabilities: row.outcomeProbabilities, modeledOutcomes: row.modeledOutcomes, predictedSide: row.predictedSide });
     if (new Set(earliest.map(frozenInputs)).size > 1) { ambiguousFirstForecastGamesExcluded++; continue; }
@@ -59,10 +59,14 @@ export function selectCandidateCohort(input = []) {
       scope: 'First recorded forecast per canonical league/event/start within the selected provenance/model/horizon cohort; replay order uses generated time. Conflicting labels, ambiguous earliest inputs and unordered duplicate copies are excluded. Unversioned legacy evidence is explicitly labeled.' } };
 }
 
-export function validCandidateVector(vector) {
-  if (!vector || typeof vector !== 'object') return false;
-  const values = ['away', 'home', 'draw'].map(side => side === 'draw' && vector[side] === undefined ? 0 : vector[side]);
-  if (values.some(value => value === null || typeof value === 'boolean' || String(value).trim() === ''
-    || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 1)) return false;
-  return Math.abs(values.reduce((sum, value) => sum + Number(value), 0) - 1) <= 0.001;
+export function validCandidateVector(vector, declared) {
+  const sides = ['away','home','draw'];
+  if (!vector || typeof vector !== 'object' || Array.isArray(vector) || Object.keys(vector).some(side => !sides.includes(side))) return false;
+  if (declared !== undefined && (!Array.isArray(declared) || declared.length !== new Set(declared).size
+    || !declared.includes('away') || !declared.includes('home') || declared.some(side => !sides.includes(side)))) return false;
+  const binary = Array.isArray(declared) && declared.length === 2;
+  const values = sides.map(side => side === 'draw' && binary && vector.draw == null ? 0 : vector[side]);
+  if (binary && values[2] !== 0) return false;
+  if (values.some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) return false;
+  return Math.abs(values.reduce((sum,value) => sum + value,0) - 1) <= 0.001;
 }

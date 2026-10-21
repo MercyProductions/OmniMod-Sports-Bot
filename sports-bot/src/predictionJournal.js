@@ -102,6 +102,8 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     } : null,
     candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities || null,
+    candidateModeledOutcomes: Object.fromEntries(Object.entries(prediction.candidateProbabilities || {}).map(([name,vector]) => [name,Object.keys(vector || {}).sort()])),
+    referenceModeledOutcomes: Object.fromEntries(Object.entries(prediction.referenceBaselines || {}).map(([name,reference]) => [name,Object.keys(reference?.probabilities || {}).sort()])),
     referenceBaselines: prediction.referenceBaselines || null,
     issuanceScope: 'Computed pregame slate; Discord delivery is not attested by this journal.',
     dataTimestamps: Object.fromEntries(Object.entries(dataTimes).map(([source, meta]) => [source, {

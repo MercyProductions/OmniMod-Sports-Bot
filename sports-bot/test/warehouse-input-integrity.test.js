@@ -160,3 +160,13 @@ test('a later snapshot cannot retroactively declare missing legacy warehouse out
  const retained=first(await recordSlateSnapshot(s));
  assert.equal(Object.hasOwn(retained,'modeledOutcomes'),false);assert.equal(Object.hasOwn(retained,'candidateModeledOutcomes'),false);
 });
+
+
+test('warehouse training export preserves candidate class metadata without declaring legacy classes',async()=>{
+ const s=fixture();delete s.predictions[0].candidateProbabilities.evidence.draw;
+ const warehouse=await recordSlateSnapshot(s);warehouse.predictions[0].actualSide='home';warehouse.predictions[0].resolvedAt='2099-01-01T22:00:00Z';
+ await writeJson(warehouseFile,warehouse);
+ assert.deepEqual((await warehouseCandidateRowsBefore())[0].candidateModeledOutcomes.evidence,['away','home']);
+ delete warehouse.predictions[0].candidateModeledOutcomes;await writeJson(warehouseFile,warehouse);
+ assert.equal((await warehouseCandidateRowsBefore())[0].candidateModeledOutcomes,undefined);
+});

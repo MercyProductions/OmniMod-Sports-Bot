@@ -301,3 +301,16 @@ test('provisional probability mutation requires a new forecast identity and lega
   const legacy=summarizePredictionJournal([{type:'forecast',payload:{forecastId:'legacy'}}]);
   assert.equal(legacy.legacyUnverifiedForecasts,1);assert.equal(legacy.forecasts,0);
 });
+
+
+test('journal freezes candidate and reference emitted classes without changing old issues',async t=>{
+ const file=await fixture(t),value=slate();
+ value.predictions[0].candidateProbabilities={evidence:{away:.35,home:.65}};
+ value.predictions[0].referenceBaselines={elo:{probabilities:{away:.5,home:.5}}};
+ await recordPredictionJournal(value,{file,now});
+ let row=(await readFullPredictionJournal(file)).find(event=>event.type==='forecast').payload;
+ assert.deepEqual(row.candidateModeledOutcomes.evidence,['away','home']);assert.deepEqual(row.referenceModeledOutcomes.elo,['away','home']);
+ const before=await readFile(file,'utf8');value.predictions[0].candidateProbabilities.evidence.draw=0;
+ await recordPredictionJournal(value,{file,now:now+1000});
+ assert.equal(await readFile(file,'utf8'),before);
+});

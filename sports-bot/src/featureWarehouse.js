@@ -491,6 +491,7 @@ export async function warehouseCandidateRowsBefore(dateKey = '') {
       actualSide: row.actualSide,
       candidateArtifactIds: row.candidateArtifactIds || null,
       candidateProbabilities: row.candidateProbabilities,
+      candidateModeledOutcomes: row.candidateModeledOutcomes,
       mlFeatureVector: row.mlFeatureVector,
       resultEvidenceStatus:row.resultEvidenceStatus||'unreviewed_observation',resultReviewProposalId:row.resultReviewProposalId||null,
       outcomeSourceIndependentlyVerified:false,
