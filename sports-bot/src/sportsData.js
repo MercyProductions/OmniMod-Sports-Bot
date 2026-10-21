@@ -15,7 +15,7 @@ import { MODEL_VERSION, predictGame } from './predictionEngine.js';
 import { cachedFetchJson } from './providerCache.js';
 import { recordPredictionJournal } from './predictionJournal.js';
 import { sportProfile } from './sportProfiles.js';
-import { americanToProbability, finiteNumber, finalOutcomeSide, validScore } from './dataValidation.js';
+import { americanToProbability, finiteNumber, finalOutcomeSide, measuredCalculation, validScore } from './dataValidation.js';
 
 const ESPN_LEAGUES = [
   { key: 'mlb', sport: 'baseball', league: 'mlb', label: 'MLB', group: 'Baseball', priority: 100 },
@@ -623,19 +623,19 @@ function mergeTargetedGames(freshGames, cachedSlate) {
   return merged;
 }
 
-function derivedAdvancedDataset(game, awayProfile, homeProfile) {
+export function derivedAdvancedDataset(game, awayProfile, homeProfile) {
   const away = awayProfile?.advancedMetrics || {};
   const home = homeProfile?.advancedMetrics || {};
   const profile = sportProfile(game).key;
   const withProvenance = values => ({ ...values, sourceReceiptTimes: [awayProfile?.sourceFetchedAt || null, homeProfile?.sourceFetchedAt || null],
     publicationTimeVerified: false, provenancePolicy: 'derived-history-receipts-v1' });
-  const difference = (name) => Number(home[name] || 0) - Number(away[name] || 0);
+  const difference = (name, sign = 1) => measuredCalculation([home[name], away[name]], (h, a) => (h - a) * sign);
   const play = { playValueDifference: difference('playValue'), playSuccessDifference: difference('playSuccessRate'), playTurnoverDifference: difference('playTurnoverRate'), playShotQualityDifference: difference('playShotQuality') };
-  if (profile === 'baseball') return withProvenance({ awayExpectedRuns: away.expectedRunsProxy, homeExpectedRuns: home.expectedRunsProxy, bullpenDifference: -difference('bullpenRunsAllowedProxy'), ...play, provider: 'cached historical box-score/play model' });
-  if (profile === 'basketball') return withProvenance({ pace: [away.possessions, home.possessions].filter(Number.isFinite).reduce((sum, value, _, rows) => sum + value / rows.length, 0) || null, efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'baseball') return withProvenance({ awayExpectedRuns: finiteNumber(away.expectedRunsProxy), homeExpectedRuns: finiteNumber(home.expectedRunsProxy), bullpenDifference: difference('bullpenRunsAllowedProxy', -1), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'basketball') return withProvenance({ pace: measuredCalculation([away.possessions, home.possessions], (a, h) => (a + h) / 2), efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' });
   if (profile === 'football') return withProvenance({ epaDifference: difference('epaProxy'), driveEfficiencyDifference: difference('driveEfficiency'), yardsPerPlayDifference: difference('yardsPerPlay'), ...play, provider: 'cached historical box-score/play model' });
   if (profile === 'hockey') return withProvenance({ xgDifference: difference('expectedGoalsProxy'), gsaxDifference: difference('goalPreventionProxy'), shotVolumeDifference: difference('shotVolume'), ...play, provider: 'cached historical box-score/play model' });
-  if (profile === 'soccer') return withProvenance({ awayXg: away.expectedGoals, homeXg: home.expectedGoals, shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'soccer') return withProvenance({ awayXg: finiteNumber(away.expectedGoals), homeXg: finiteNumber(home.expectedGoals), shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' });
   return null;
 }
 

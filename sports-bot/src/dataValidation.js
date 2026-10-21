@@ -11,6 +11,13 @@ export function finiteNumber(value, fallback = null) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+/** A derived measurement exists only when every required input and the result are finite. */
+export function measuredCalculation(values, calculate) {
+  const observed = values.map(value => finiteNumber(value));
+  const result = observed.some(value => value === null) ? null : finiteNumber(calculate(...observed));
+  return result === 0 ? 0 : result;
+}
+
 export function validScore(value) {
   const score = finiteNumber(value);
   return score !== null && score >= 0 ? score : null;

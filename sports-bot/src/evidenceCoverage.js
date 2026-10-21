@@ -46,6 +46,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       retryAfter: available ? timestamp(row.retryAfter) : null, providerRetryAfter: available ? timestamp(row.providerRetryAfter) : null };
   });
   if (advancedRefreshes.some(row => row.state === 'failed')) missing.push('advanced_dataset:refresh_failed');
+  const measurementMetadata = new Set(['provider','provenancePolicy','sourceReceiptTimes','sourceRefreshStatuses','publicationTimeVerified',
+    'updatedAt','fetchedAt','sourceFetchedAt','observedAt','sourceObservationAt']);
+  const missingMeasurements = Object.entries(game.advancedDataset || {}).filter(([key, value]) => !measurementMetadata.has(key)
+    && (value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value)))).map(([key]) => key);
+  if (missingMeasurements.length) missing.push('advanced_dataset:measurements_incomplete');
   const sides = {};
   for (const side of ['away', 'home']) {
     const players = selectedPlayers?.[side] || (game.autoPlayers || []).filter(row => matches(game[side], row.team));
@@ -91,6 +96,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     advancedDatasetProvenance: { provider: game.advancedDataset?.provider || null,
       receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
       sourceRefreshStatuses: advancedRefreshes,
+      missingMeasurements, measurementCoverageScope: 'Enumerated missing fields only; not a league completeness attestation.',
       missingOrInvalidReceipts: advancedReceipts.filter(value => value === null).length,
       nativePublicationVerified: false },
     advancedStatsAvailability: 'enumerated_player_stats_only_not_a_league_completeness_attestation',

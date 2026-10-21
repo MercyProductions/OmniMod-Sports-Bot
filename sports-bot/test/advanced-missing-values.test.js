@@ -1,0 +1,95 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const directory=await mkdtemp(join(tmpdir(),'sports-measured-features-'));
+process.env.OMNIMOD_SPORTS_DATA_DIR=directory;process.env.ADVANCED_DATASETS_ENABLED='true';process.env.LOCAL_ONLY='false';
+const {derivedAdvancedDataset}=await import('../src/sportsData.js');
+const {attachAdvancedDatasetContext,syncAdvancedDatasets,advancedDatasetSnapshotFile}=await import('../src/advancedDatasets.js');
+const {writeJson}=await import('../src/storage.js');
+const {buildEvidenceCoverage}=await import('../src/evidenceCoverage.js');
+test.after(()=>rm(directory,{recursive:true,force:true}));
+const profile=advancedMetrics=>({advancedMetrics});
+
+test('historical differences need two measured sides while real zeros remain zero',()=>{
+ for(const [sport,field,output] of [['Baseball','bullpenRunsAllowedProxy','bullpenDifference'],
+  ['Basketball','offensiveEfficiency','efficiencyDifference'],['Football','epaProxy','epaDifference'],
+  ['Hockey','expectedGoalsProxy','xgDifference'],['Soccer','shotQuality','shotQualityDifference']]){
+  for(const missing of [undefined,null,'',false,NaN]){
+   const result=derivedAdvancedDataset({sportGroup:sport},profile({[field]:2}),profile({[field]:missing}));
+   assert.equal(result[output],null,`${sport}: missing home metric`);
+  }
+  assert.equal(derivedAdvancedDataset({sportGroup:sport},profile({[field]:0}),profile({[field]:0}))[output],0);
+  assert.equal(derivedAdvancedDataset({sportGroup:sport},profile({}),profile({})).playValueDifference,null);
+  assert.equal(derivedAdvancedDataset({sportGroup:sport},profile({playValue:2}),profile({playValue:5})).playValueDifference,3);
+ }
+});
+
+test('derived pace neither averages one side alone nor discards measured zero',()=>{
+ const game={sportGroup:'Basketball'};
+ assert.equal(derivedAdvancedDataset(game,profile({possessions:100}),profile({})).pace,null);
+ assert.equal(derivedAdvancedDataset(game,profile({possessions:0}),profile({possessions:0})).pace,0);
+ assert.equal(derivedAdvancedDataset(game,profile({possessions:100}),profile({possessions:110})).pace,105);
+});
+
+test('external NFL NBA and NHL features cannot compare a known metric with missing-as-zero',async()=>{
+ await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[],
+  footballTeams:{A:{epaPerGame:null,passingEpaPerGame:null,rushingEpaPerGame:null,cpoe:null},H:{epaPerGame:2,passingEpaPerGame:2,rushingEpaPerGame:1,cpoe:1}},
+  basketballTeams:{away:{pace:null,netRating:null},home:{pace:100,netRating:10}},
+  hockeyTeams:{A:{games:null,xGoalsFor:null,xGoalsAgainst:null,goalsAgainst:null},H:{games:2,xGoalsFor:6,xGoalsAgainst:5,goalsAgainst:4}}});
+ const games=['nfl','nba','nhl'].map(leagueKey=>({id:leagueKey,leagueKey,away:{name:'Away',abbr:'A'},home:{name:'Home',abbr:'H'}}));
+ await attachAdvancedDatasetContext(games,{localOnly:true});
+ assert.equal(games[0].advancedDataset.epaDifference,null);assert.equal(games[0].advancedDataset.cpoeDifference,null);
+ assert.equal(games[1].advancedDataset.pace,null);assert.equal(games[1].advancedDataset.efficiencyDifference,null);
+ assert.equal(games[2].advancedDataset.awayXg,null);assert.equal(games[2].advancedDataset.xgDifference,null);assert.equal(games[2].advancedDataset.gsaxDifference,null);
+ const coverage=buildEvidenceCoverage(games[0]);
+ assert.ok(coverage.advancedDatasetProvenance.missingMeasurements.includes('epaDifference'));
+ assert.ok(coverage.missing.includes('advanced_dataset:measurements_incomplete'));
+});
+
+test('tennis observed zero serve rates remain data and absent rates do not become synthetic priors',async()=>{
+ for(const serveWon of [0,null]){
+  await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[],tennis:{atp:{
+   away:{elo:1500,serveWon,returnWon:0},home:{elo:1500,serveWon:.6,returnWon:.4}}}});
+  const game={id:'tennis',leagueKey:'atp',away:{name:'Away'},home:{name:'Home'}};
+  await attachAdvancedDatasetContext([game],{localOnly:true});
+  assert.equal(game.advancedDataset.serveReturnDifference,serveWon===null?null:1);
+ }
+});
+
+test('provider imports preserve unknown sample sizes and require positive games for rates',async()=>{
+ await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[]});
+ const fetchImpl=async url=>{
+  if(url.includes('/stats_team/'))return {ok:true,text:async()=> 'team,games,passing_epa,rushing_epa,passing_cpoe\nA,0,4,,\nH,2,0,0,0\n'};
+  if(url.includes('moneypuck'))return {ok:true,text:async()=> 'team,situation,games_played,xGoalsFor\nA,all,,4\n'};
+  if(url.includes('type=batter'))return {ok:true,text:async()=> 'player_name,est_woba\nHitter,0\n'};
+  throw new Error('Synthetic unavailable');
+ };
+ const result=await syncAdvancedDatasets({force:true,fetchImpl});
+ assert.equal(result.snapshot.footballTeams.A.epaPerGame,null);
+ assert.equal(result.snapshot.footballTeams.A.passingEpaPerGame,null);
+ assert.equal(result.snapshot.footballTeams.A.cpoe,null);
+ assert.equal(result.snapshot.footballTeams.H.epaPerGame,0);
+ assert.equal(result.snapshot.footballTeams.A.games,0);
+ assert.equal(result.snapshot.hockeyTeams.A.games,null);
+ assert.equal(result.snapshot.baseballPlayers.hitter.sampleSize,null);
+ assert.equal(result.snapshot.baseballPlayers.hitter.expectedWoba,0);
+});
+
+test('known external values preserve the existing units, difference signs and true-zero rates',async()=>{
+ await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[],
+  footballTeams:{A:{epaPerGame:1,passingEpaPerGame:1,rushingEpaPerGame:1,cpoe:0},H:{epaPerGame:2,passingEpaPerGame:2,rushingEpaPerGame:2,cpoe:0}},
+  basketballTeams:{away:{pace:100,netRating:-2},home:{pace:110,netRating:10}},
+  hockeyTeams:{A:{games:2,xGoalsFor:4,xGoalsAgainst:5,goalsAgainst:6},H:{games:2,xGoalsFor:6,xGoalsAgainst:5,goalsAgainst:4}}});
+ const games=['nfl','nba','nhl'].map(leagueKey=>({id:leagueKey,leagueKey,away:{name:'Away',abbr:'A'},home:{name:'Home',abbr:'H'}}));
+ await attachAdvancedDatasetContext(games,{localOnly:true});
+ assert.equal(games[0].advancedDataset.epaDifference,1/60);
+ assert.equal(games[0].advancedDataset.passingEpaDifference,1/38);
+ assert.equal(games[0].advancedDataset.rushingEpaDifference,1/24);
+ assert.equal(games[0].advancedDataset.cpoeDifference,0);
+ assert.equal(games[1].advancedDataset.pace,105);assert.equal(games[1].advancedDataset.efficiencyDifference,12);
+ assert.equal(games[2].advancedDataset.awayXg,2);assert.equal(games[2].advancedDataset.homeXg,3);
+ assert.equal(games[2].advancedDataset.xgDifference,1);assert.equal(games[2].advancedDataset.gsaxDifference,1);
+ assert.equal(buildEvidenceCoverage(games[0]).advancedDatasetProvenance.missingMeasurements.includes('cpoeDifference'),false);
+});

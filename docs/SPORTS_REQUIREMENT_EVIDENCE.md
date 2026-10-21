@@ -76,3 +76,7 @@ Development v6.0.10 closes reproduced parent/derived participation, roster, adva
 ## Advanced source freshness continuation
 
 Development v6.0.11 replaces whole-container freshness with independent source success/retry state, preserves contributing row receipts through model attachment and freezes per-game source diagnostics. [Reproduced defects, synthetic request measurements and remaining limits](SPORTS_ADVANCED_SOURCE_FRESHNESS.md); latest suite 272 passing, syntax checks pass. No live source access, native publication verification or improved prediction performance is claimed.
+
+## Measured feature continuation
+
+Development v6.0.12 repairs reproduced missing-as-zero comparisons, incomplete per-game denominators and discarded genuine-zero serve rates. [Mathematical controls, source references and explicit limits](SPORTS_MEASURED_FEATURES.md); latest suite 278 passing, syntax checks pass. This strengthens missing-value integrity without proving better predictive performance or full provider schema correctness.

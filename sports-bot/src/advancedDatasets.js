@@ -3,6 +3,7 @@ import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
+import { finiteNumber, measuredCalculation } from './dataValidation.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
 const DAY_MS = 86_400_000;
@@ -13,10 +14,11 @@ function clamp(value, min, max) {
 }
 
 function finite(value, fallback = null) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  return finiteNumber(value, fallback);
 }
+
+const perGame = (total, games) => measuredCalculation([total, games], (value, count) => count > 0 ? value / count : null);
+const difference = (home, away, scale = 1) => measuredCalculation([home, away], (h, a) => (h - a) / scale);
 
 export function parseCsv(text = '') {
   const rows = [];
@@ -204,7 +206,7 @@ export async function syncAdvancedDatasets(options = {}) {
           snapshot.baseballPlayers[normalizeEntityName(displayName)] = stamp({
             name: displayName, role, playerId: row.player_id,
             expectedAverage: finite(row.est_ba), expectedSlugging: finite(row.est_slg), expectedWoba: finite(row.est_woba),
-            sampleSize: finite(row.pa ?? row.bip, 0)
+            sampleSize: finite(row.pa ?? row.bip)
           }, `baseball-savant-${role}`);
         }
         recordStatus(`baseball-savant-${role}`, url, true, { rows: rows.length, license: 'MLB Baseball Savant public CSV' });
@@ -221,11 +223,11 @@ export async function syncAdvancedDatasets(options = {}) {
       try {
         const rows = parseCsv(await sourceText(nflUrl));
         snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').toUpperCase(), stamp({
-          team: String(row.team || '').toUpperCase(), games: finite(row.games, 0),
-          epaPerGame: (finite(row.passing_epa, 0) + finite(row.rushing_epa, 0)) / Math.max(1, finite(row.games, 1)),
-          passingEpaPerGame: finite(row.passing_epa, 0) / Math.max(1, finite(row.games, 1)),
-          rushingEpaPerGame: finite(row.rushing_epa, 0) / Math.max(1, finite(row.games, 1)),
-          cpoe: finite(row.passing_cpoe, 0)
+          team: String(row.team || '').toUpperCase(), games: finite(row.games),
+          epaPerGame: perGame(measuredCalculation([row.passing_epa, row.rushing_epa], (passing, rushing) => passing + rushing), row.games),
+          passingEpaPerGame: perGame(row.passing_epa, row.games),
+          rushingEpaPerGame: perGame(row.rushing_epa, row.games),
+          cpoe: finite(row.passing_cpoe)
         }, 'nflverse-team-stats')]));
         recordStatus('nflverse-team-stats', nflUrl, true, { rows: rows.length, license: 'CC BY 4.0' });
         diagnostics.push(`nflverse team stats: ${rows.length} team row(s) for ${footballSeason}.`);
@@ -272,7 +274,7 @@ export async function syncAdvancedDatasets(options = {}) {
         const rows = parseCsv(await sourceText(moneyPuckUrl));
         const allSituations = rows.filter((row) => String(row.situation).toLowerCase() === 'all');
         snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').toUpperCase(), stamp({
-          team: String(row.team || '').toUpperCase(), games: finite(row.games_played, 0),
+          team: String(row.team || '').toUpperCase(), games: finite(row.games_played),
           xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
           flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
           goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)
@@ -384,7 +386,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const away = sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()];
       const home = sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()];
       if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'), provider: 'nflverse team stats', epaDifference: (home.epaPerGame - away.epaPerGame) / 60, passingEpaDifference: (home.passingEpaPerGame - away.passingEpaPerGame) / 38, rushingEpaDifference: (home.rushingEpaPerGame - away.rushingEpaPerGame) / 24, cpoeDifference: home.cpoe - away.cpoe };
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'), provider: 'nflverse team stats', epaDifference: difference(home.epaPerGame, away.epaPerGame, 60), passingEpaDifference: difference(home.passingEpaPerGame, away.passingEpaPerGame, 38), rushingEpaDifference: difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24), cpoeDifference: difference(home.cpoe, away.cpoe) };
         matched += 1;
       }
       continue;
@@ -393,9 +395,11 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const away = sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()];
       const home = sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()];
       if (away && home) {
-        const awayGames = Math.max(1, away.games || 1);
-        const homeGames = Math.max(1, home.games || 1);
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com', awayXg: away.xGoalsFor / awayGames, homeXg: home.xGoalsFor / homeGames, xgDifference: (home.xGoalsFor / homeGames - home.xGoalsAgainst / homeGames) - (away.xGoalsFor / awayGames - away.xGoalsAgainst / awayGames), gsaxDifference: ((home.xGoalsAgainst - home.goalsAgainst) / homeGames) - ((away.xGoalsAgainst - away.goalsAgainst) / awayGames) };
+        const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com',
+          awayXg: perGame(away.xGoalsFor, away.games), homeXg: perGame(home.xGoalsFor, home.games),
+          xgDifference: difference(netRate(home, 'xGoalsFor', 'xGoalsAgainst'), netRate(away, 'xGoalsFor', 'xGoalsAgainst')),
+          gsaxDifference: difference(netRate(home, 'xGoalsAgainst', 'goalsAgainst'), netRate(away, 'xGoalsAgainst', 'goalsAgainst')) };
         matched += 1;
       }
       continue;
@@ -404,7 +408,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const away = sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)];
       const home = sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)];
       if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: (Number(away.pace) + Number(home.pace)) / 2, efficiencyDifference: Number(home.netRating) - Number(away.netRating) };
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: measuredCalculation([away.pace, home.pace], (a, h) => (a + h) / 2), efficiencyDifference: difference(home.netRating, away.netRating) };
         matched += 1;
       }
       continue;
@@ -415,14 +419,14 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     const home = playerRecord(sync.snapshot, tour, game.home?.name);
     if (!away || !home) continue;
     const surface = String(game.autoContext?.surface || game.autoContext?.factors?.surface || '').toLowerCase();
-    const awaySurface = finite(away.surfaces?.[surface], away.elo);
-    const homeSurface = finite(home.surfaces?.[surface], home.elo);
+    const awaySurface = finite(away.surfaces?.[surface], finite(away.elo));
+    const homeSurface = finite(home.surfaces?.[surface], finite(home.elo));
     game.advancedDataset = {
       provider: 'Jeff Sackmann tennis datasets',
       ...provenance(null, [away, home], `tennis-${tour}`),
       surface,
-      surfaceEloDifference: homeSurface - awaySurface,
-      serveReturnDifference: ((home.serveWon || 0.6) + (home.returnWon || 0.4)) - ((away.serveWon || 0.6) + (away.returnWon || 0.4)),
+      surfaceEloDifference: difference(homeSurface, awaySurface),
+      serveReturnDifference: measuredCalculation([home.serveWon, home.returnWon, away.serveWon, away.returnWon], (homeServe, homeReturn, awayServe, awayReturn) => homeServe + homeReturn - awayServe - awayReturn),
       awayMatches: away.matches,
       homeMatches: home.matches
     };
