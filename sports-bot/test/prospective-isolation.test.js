@@ -1,3 +1,4 @@
+import {loadProspectiveCaptures,evaluateProspectiveCaptures} from '../src/prospectivePairs.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,readFile,appendFile} from 'node:fs/promises';
@@ -27,6 +28,10 @@ test('archived baseline and challenger run independently without inherited crede
   assert.equal(bytes.includes('SENSITIVE_ISOLATION_TEST_VALUE'),false);
   const capture=JSON.parse(bytes);assert.equal(capture.discordDelivered,false);assert.equal(capture.mode,'offline');
  }
+ const loaded=await loadProspectiveCaptures(directory);assert.equal(loaded.captures.length,2);
+ assert.equal(evaluateProspectiveCaptures(loaded.captures).pairedForecasts,0);
+ await appendFile(join(directory,'captures',result.captures[0].filename),' ');
+ await assert.rejects(loadProspectiveCaptures(directory),/Frozen capture changed/);
  await assert.rejects(prepareProspectiveIsolation({directory,repository,baselineRef}));
  await writeFile(join(directory,'run.lock'),'existing-owner');
  await assert.rejects(runProspectiveIsolation(directory));

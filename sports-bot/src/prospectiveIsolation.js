@@ -1,3 +1,4 @@
+import {recordCaptureReceipt} from './prospectivePairs.js';
 import {createHash} from 'node:crypto';
 import {execFileSync,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -79,7 +80,8 @@ export async function runProspectiveIsolation(directory,{live=false,timeout=1200
     AUTO_OFFICIAL_SOURCES:'false',AUTO_SUMMARY_MAX_GAMES:'6',AUTO_HISTORY_MAX_LEAGUES:'4',AUTO_HISTORY_MAX_DAYS:'90',AUTO_BOXSCORE_MAX_EVENTS:'0',LOCAL_ONLY:live?'false':'true'});
    const response=await run(process.execPath,[join(root,'worker.mjs'),root,name,live?'live':'offline'],{cwd:root,env,timeout,maxBuffer:2000000,windowsHide:true});
    const summary=JSON.parse(response.stdout.trim().split('\n').at(-1));
-   captures.push({...summary,sourceCommit:manifest.sources[name].commit});
+   const receipt=await recordCaptureReceipt(root,{...summary,sourceCommit:manifest.sources[name].commit});
+   captures.push({...summary,sourceCommit:manifest.sources[name].commit,receiptHash:receipt.eventHash});
   }
   return {status:'isolated_captures_completed',liveDataRequested:live,captures,productionChanged:false,performanceEstablished:false};
  }finally{await owner.close();await unlink(join(root,'run.lock'));}
