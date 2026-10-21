@@ -156,3 +156,7 @@ Development v6.0.29 rejects invalid NFL/NHL game denominators, validates consume
 ## Warehouse integrity continuation
 
 Development v6.0.30 preserves missing inputs, separates forecast identities and quarantines disputed finals. [Tests, NFL unit audit and limits](SPORTS_WAREHOUSE_INPUT_INTEGRITY.md); 425 tests passing. Scoring weights unchanged; controlled adjudication and predictive improvement remain unverified.
+
+## Reviewed result recovery continuation
+
+Development v6.0.31 adds explicit journal-bound warehouse adjudication, shared writer locks and current-proof checks. [Workflow, 22 integration cases and trust limits](SPORTS_WAREHOUSE_RESULT_REVIEW.md); 447 tests passing. Labels become available at application time; original forecasts remain immutable. Source truth/reviewer identity, live operation and predictive improvement remain unverified.

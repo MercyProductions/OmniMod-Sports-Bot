@@ -1,4 +1,7 @@
 import path from 'node:path';
+import { withAuditFileLock } from './auditFileLock.js';
+import { readPredictionJournal, predictionJournalFile } from './predictionJournal.js';
+import { makeWarehouseResultProposal, reviewedWarehouseResult, currentReviewedWarehouseResult } from './warehouseResultReview.js';
 import { dataDir } from './config.js';
 import { warehousePlayRows } from './playByPlay.js';
 import { readJson, writeJson } from './storage.js';
@@ -91,7 +94,7 @@ function mergeRows(existing, incoming, keyFn, limit, sortField = 'dateKey') {
     .slice(-limit);
 }
 
-function compactInputSnapshot(game = {}) {
+function compactInputSnapshot(game = {}, capturedAt = Date.now()) {
   const compactSide = (row = {}) => ({
     confirmed: observedBoolean(row.confirmed),
     starterCount: observedCount(row.starterCount),
@@ -133,7 +136,7 @@ function compactInputSnapshot(game = {}) {
   return {
     schema: 'sports-compact-inputs-v2',
     scope: 'bounded_compact_inputs_not_complete_source_payload',
-    capturedAt: new Date().toISOString(),
+    capturedAt: new Date(capturedAt).toISOString(),
     statusKey: game.statusKey || '',
     seasonYear: game.seasonYear || null,
     seasonType: game.seasonType || null,
@@ -164,7 +167,7 @@ function compactInputSnapshot(game = {}) {
   };
 }
 
-function publicPrediction(prediction = {}, slate = {}, game = {}) {
+function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = Date.now()) {
   const start = new Date(prediction.startTime || game.startTime || '').getTime();
   const generated = new Date(prediction.predictionGeneratedAt || slate.generatedAt || '').getTime();
   const minutesToStart = Number.isFinite(start) && Number.isFinite(generated) ? (start - generated) / 60_000 : null;
@@ -181,7 +184,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}) {
     snapshotPolicy: 'first_issue_immutable_v1',
     identityPolicy: 'league_start_model_horizon_issue_v2',
     horizon: predictionHorizon({...prediction,minutesToStart}),
-    recordedAt: new Date().toISOString(),
+    recordedAt: new Date(capturedAt).toISOString(),
     modelAsOf: prediction.modelAsOf || prediction.predictionGeneratedAt || slate.generatedAt || '',
     quoteRefreshOnly: prediction.quoteRefreshOnly === true,
     snapshotStage: prediction.snapshotStage || 'daily',
@@ -213,7 +216,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}) {
       driftPenalty: finiteNumber(prediction.driftPenalty),
       seasonTransitionRisk: finiteNumber(prediction.seasonTransitionRisk)
     },
-    inputSnapshot: compactInputSnapshot(game),
+    inputSnapshot: compactInputSnapshot(game,capturedAt),
     predictionUncertaintyPoints: finiteNumber(prediction.predictionUncertaintyPoints),
     recommendationStatus: prediction.recommendationStatus,
     actualWinner: prediction.actualWinner || '',
@@ -279,8 +282,8 @@ export function calculateMarketMovement(rows = []) {
   };
 }
 
-export async function readFeatureWarehouse() {
-  const stored = await readJson(warehouseFile, null, { throwOnError: true });
+export async function readFeatureWarehouse({readOnly=false} = {}) {
+  const stored = await readJson(warehouseFile, null, { throwOnError: true,readOnly,redactErrors:readOnly });
   if (!stored) return emptyWarehouse();
   if (![1, WAREHOUSE_VERSION].includes(Number(stored.version)) || Object.keys(LIMITS).some((key) => stored[key] !== undefined && !Array.isArray(stored[key]))) {
     throw new Error('Invalid sports feature warehouse schema; existing history was preserved.');
@@ -288,15 +291,16 @@ export async function readFeatureWarehouse() {
   return { ...emptyWarehouse(), ...stored, version: WAREHOUSE_VERSION };
 }
 
-async function queuedUpdate(updater) {
-  const operation = writeChain.then(async () => {
-    const current = await readFeatureWarehouse();
+async function queuedUpdate(updater,{skipDataMigration=false}={}) {
+  const operation = writeChain.then(() => withAuditFileLock(warehouseFile,async () => {
+    const current = await readFeatureWarehouse({readOnly:skipDataMigration});
     const next = await updater(current);
+    if(next===current)return current;
     next.version = WAREHOUSE_VERSION;
     next.updatedAt = new Date().toISOString();
-    await writeJson(warehouseFile, next, { compact: true, backup: true, mode: 0o600 });
+    await writeJson(warehouseFile, next, { compact: true, backup: true, mode: 0o600,skipDataMigration });
     return next;
-  });
+  }));
   writeChain = operation.catch(() => {});
   return operation;
 }
@@ -327,7 +331,8 @@ export async function ingestFeatureEvidence(evidence = {}) {
   }));
 }
 
-export async function recordSlateSnapshot(slate = {}) {
+export async function recordSlateSnapshot(slate = {}, {now=Date.now()} = {}) {
+  if(!Number.isFinite(now))throw new Error('Valid warehouse observation time required');
   const games=slate.games||[],gamesById=new Map();
   for(const game of games){const id=String(game.id);if(!gamesById.has(id))gamesById.set(id,[]);gamesById.get(id).push(game);}
   const rows = (slate.predictions || []).map(prediction=>{
@@ -339,12 +344,12 @@ export async function recordSlateSnapshot(slate = {}) {
         &&(!Number.isFinite(issuedStart)||!Number.isFinite(gameStart)||issuedStart===gameStart);
     });
     // Clone before the queued write yields: callers may refresh their mutable slate.
-    return structuredClone(publicPrediction(prediction,slate,matches.length===1?matches[0]:{}));
+    return structuredClone(publicPrediction(prediction,slate,matches.length===1?matches[0]:{},now));
   });
   const finals=new Map(),conflicts=new Set(),finalObservations=new Map();
   for(const game of games){
     const actualSide=finalOutcomeSide(game);if(!actualSide)continue;
-    const key=datedEventKey({...game,dateKey:game.dateKey||slate.dateKey}),final={actualSide,actualWinner:actualSide==='draw'?'Draw':game[actualSide]?.name||''};
+    const key=datedEventKey({...game,dateKey:game.dateKey||slate.dateKey}),final={actualSide,actualWinner:actualSide==='draw'?'Draw':game[actualSide]?.name||'',awayScore:finiteNumber(game.away?.score),homeScore:finiteNumber(game.home?.score)};
     const signature=JSON.stringify([actualSide,finiteNumber(game.away?.score),finiteNumber(game.home?.score)]);
     if(!finalObservations.has(key))finalObservations.set(key,[]);
     const observations=finalObservations.get(key);
@@ -368,16 +373,23 @@ export async function recordSlateSnapshot(slate = {}) {
         if((row.guildId || '') !== (slate.guildId || ''))return row;
         const key=datedEventKey(row);
         if(conflicts.has(key))return {...row,actualSide:'',actualWinner:'',predictionCorrect:null,resultEvidenceStatus:'disputed',
-          resultConflictObservedAt:row.resultConflictObservedAt||new Date().toISOString(),
-          lastUndisputedGrade:row.lastUndisputedGrade||(['away','home','draw'].includes(row.actualSide)?{actualSide:row.actualSide,actualWinner:row.actualWinner,predictionCorrect:row.predictionCorrect,resolvedAt:row.resolvedAt||null}:null),
+          resultConflictObservedAt:row.resultConflictObservedAt||new Date(now).toISOString(),
+          lastUndisputedGrade:['away','home','draw'].includes(row.actualSide)?{actualSide:row.actualSide,actualWinner:row.actualWinner,predictionCorrect:row.predictionCorrect,resolvedAt:row.resolvedAt||null,resultReviewProposalId:row.resultReviewProposalId||null}:row.lastUndisputedGrade||null,
           conflictingFinalObservations:finalObservations.get(key).slice(0,8).map(({signature:ignored,...observation})=>observation),
           conflictingFinalObservationsTruncated:finalObservations.get(key).length>8};
         // Re-admission requires explicit adjudication, never an unverified later batch.
         if(row.resultEvidenceStatus==='disputed')return row;
         const final = finals.get(key);
         if (!final) return row;
+        if(row.resultEvidenceStatus==='adjudicated'){
+          const approved=row.adjudicatedResult;
+          if(final.actualSide===approved?.actualSide&&final.awayScore===approved?.awayScore&&final.homeScore===approved?.homeScore)return row;
+          return {...row,actualSide:'',actualWinner:'',predictionCorrect:null,resultEvidenceStatus:'disputed',resultConflictObservedAt:new Date(now).toISOString(),
+            lastUndisputedGrade:{actualSide:row.actualSide,actualWinner:row.actualWinner,predictionCorrect:row.predictionCorrect,resolvedAt:row.resolvedAt},
+            conflictingFinalObservations:[{...approved},{actualSide:final.actualSide,awayScore:final.awayScore,homeScore:final.homeScore}],conflictingFinalObservationsTruncated:false};
+        }
         return { ...row, actualSide:final.actualSide,actualWinner:final.actualWinner, predictionCorrect: row.predictedSide === final.actualSide,
-          resolvedAt: row.resolvedAt || slate.refreshedAt || new Date().toISOString(),
+          resolvedAt: row.resolvedAt || slate.refreshedAt || new Date(now).toISOString(),
           resolvedAtSource: row.resolvedAtSource || 'first_observed_final'
         };
       });
@@ -416,6 +428,7 @@ export async function historicalEvidenceBefore(dateKey) {
 
 export async function warehouseInventory() {
   const warehouse = await readFeatureWarehouse();
+  const proofs=await currentAdjudicationProofs(warehouse.predictions);
   return {
     version: warehouse.version,
     updatedAt: warehouse.updatedAt,
@@ -426,14 +439,18 @@ export async function warehouseInventory() {
     plays: warehouse.plays.length,
     predictions: warehouse.predictions.length,
     disputedPredictionRecords: warehouse.predictions.filter(row=>row.resultEvidenceStatus==='disputed').length,
+    adjudicatedPredictionRecords: warehouse.predictions.filter(row=>row.resultEvidenceStatus==='adjudicated').length,
+    staleAdjudicatedPredictionRecords:warehouse.predictions.filter(row=>row.resultEvidenceStatus==='adjudicated'&&!proofs.get(row)).length,
     markets: warehouse.markets.length
   };
 }
 
 export async function warehouseCandidateRowsBefore(dateKey = '') {
   const warehouse = await readFeatureWarehouse();
+  const proofs=await currentAdjudicationProofs(warehouse.predictions);
   return warehouse.predictions
     .filter((row) => {
+      if (row.resultEvidenceStatus==='adjudicated'&&!proofs.get(row))return false;
       if (row.resultEvidenceStatus==='disputed' || row.quoteRefreshOnly || !['away', 'home', 'draw'].includes(row.actualSide) || !row.candidateProbabilities || row.predictionMode !== 'pregame' || (dateKey && String(row.dateKey) >= String(dateKey))) return false;
       const generatedAt = new Date(row.predictionGeneratedAt || '').getTime();
       const startTime = new Date(row.startTime || '').getTime();
@@ -456,8 +473,58 @@ export async function warehouseCandidateRowsBefore(dateKey = '') {
       candidateArtifactIds: row.candidateArtifactIds || null,
       candidateProbabilities: row.candidateProbabilities,
       mlFeatureVector: row.mlFeatureVector,
+      resultEvidenceStatus:row.resultEvidenceStatus||'unreviewed_observation',resultReviewProposalId:row.resultReviewProposalId||null,
+      outcomeSourceIndependentlyVerified:false,
       source: 'frozen-production'
     }));
 }
 
 export { warehouseFile };
+
+
+/** Read-only preparation; the journal is fully checked by its canonical reader. */
+export async function prepareWarehouseResultReview(forecastId,{journalFile=predictionJournalFile,now=Date.now()}={}) {
+  requireLocalReviewJournal(journalFile);
+  const records=await readPredictionJournal(journalFile),warehouse=await readFeatureWarehouse({readOnly:true});
+  return makeWarehouseResultProposal(records,warehouse.predictions,forecastId,dataDir,now,journalFile);
+}
+
+/** Explicit operator review only; ordinary scanners never invoke this recovery path. */
+export async function applyWarehouseResultReview(proposal,review,{journalFile=predictionJournalFile,expectedDataDirectory,now=Date.now()}={}) {
+  if(!expectedDataDirectory||path.resolve(expectedDataDirectory)!==path.resolve(dataDir))throw new Error('Explicit matching data directory required');
+  requireLocalReviewJournal(journalFile);
+  proposal=structuredClone(proposal);review=structuredClone(review);
+  return withAuditFileLock(journalFile,async()=>{
+    const records=await readPredictionJournal(journalFile);let decision;
+    await queuedUpdate(current=>{
+      decision=reviewedWarehouseResult(records,current.predictions,proposal,review,dataDir,now,journalFile);
+      if(decision.duplicate)return current;
+      const predictions=[...current.predictions];predictions[decision.index]=decision.row;
+      return {...current,predictions};
+    },{skipDataMigration:true});
+    return {status:decision.duplicate?'already_applied':'applied',proposalId:proposal.proposalId,forecastId:proposal.forecastId};
+  });
+}
+
+
+function requireLocalReviewJournal(file){
+  if(typeof file!=='string'||path.dirname(path.resolve(file))!==path.resolve(dataDir)||path.extname(file)!=='.jsonl')throw new Error('Review journal must be a JSONL file in the configured data directory');
+}
+
+async function currentAdjudicationProofs(rows){
+  const cache=new Map(),proofs=new Map();
+  for(const row of rows){
+    if(row.resultEvidenceStatus!=='adjudicated')continue;
+    const receipt=(row.resultAdjudications||[]).find(value=>value.proposalId===row.resultReviewProposalId);
+    if(!receipt?.journalFile||!receipt.forecastId){proofs.set(row,false);continue;}
+    try{requireLocalReviewJournal(receipt.journalFile);}catch{proofs.set(row,false);continue;}
+    if(!cache.has(receipt.journalFile)){
+      const records=await readPredictionJournal(receipt.journalFile),latest=new Map(),forecasts=new Map();
+      for(const record of records){if(record.type==='forecast')forecasts.set(record.eventHash,record);if(record.type==='result')latest.set(record.payload.forecastId,record);}
+      cache.set(receipt.journalFile,{latest,forecasts});
+    }
+    const {latest,forecasts}=cache.get(receipt.journalFile);
+    proofs.set(row,currentReviewedWarehouseResult(row,receipt,forecasts.get(receipt.forecastEventHash),latest.get(receipt.forecastId)));
+  }
+  return proofs;
+}

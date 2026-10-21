@@ -5,9 +5,9 @@ import { dataDir, legacyDataDir } from './config.js';
 
 let migrationChecked = false;
 
-async function ensureDataDir() {
+async function ensureDataDir({skipMigration=false} = {}) {
   await fs.mkdir(dataDir, { recursive: true });
-  if (process.env.NODE_ENV === 'test' || process.env.OMNIMOD_DISABLE_DATA_MIGRATION === 'true'
+  if (skipMigration || process.env.NODE_ENV === 'test' || process.env.OMNIMOD_DISABLE_DATA_MIGRATION === 'true'
     || migrationChecked || path.resolve(dataDir) === path.resolve(legacyDataDir)) return;
   migrationChecked = true;
 
@@ -46,12 +46,13 @@ export function dailyCachePath(dateKey, guildId = '') {
 }
 
 export async function readJson(file, fallback = null, options = {}) {
-  await ensureDataDir();
+  if(!options.readOnly)await ensureDataDir();
   try {
     const raw = await fs.readFile(file, 'utf8');
     return JSON.parse(raw);
   } catch (error) {
     if (options.throwOnError && error?.code !== 'ENOENT') {
+      if(options.redactErrors)throw new Error(`Could not read valid JSON from ${path.basename(file)}`);
       throw new Error(`Could not read valid JSON from ${path.basename(file)}: ${error.message}`, { cause: error });
     }
     return fallback;
@@ -59,7 +60,7 @@ export async function readJson(file, fallback = null, options = {}) {
 }
 
 export async function writeJson(file, value, options = {}) {
-  await ensureDataDir();
+  await ensureDataDir({skipMigration:options.skipDataMigration===true});
   await fs.mkdir(path.dirname(file), { recursive: true });
   if (options.backup) {
     await fs.copyFile(file, `${file}.bak`).catch((error) => {
