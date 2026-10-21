@@ -3,7 +3,7 @@ import {prepareProspectiveIsolation,runProspectiveIsolation,inspectProspectiveIs
 const arg=name=>process.argv.slice(2).find(value=>value.startsWith(`--${name}=`))?.slice(name.length+3);
 try{
  const directory=arg('directory'),action=arg('action');let result;
- if(action==='prepare')result=await prepareProspectiveIsolation({directory,repository:arg('repository'),baselineRef:arg('baseline'),challengerRef:arg('challenger')||'HEAD'});
+ if(action==='prepare')result=await prepareProspectiveIsolation({directory,repository:arg('repository'),baselineRef:arg('baseline'),challengerRef:arg('challenger')||'HEAD',dayOffset:arg('day-offset')===undefined?0:Number(arg('day-offset'))});
  else if(action==='inspect')result=await inspectProspectiveIsolation(directory);
  else if(action==='report'){
   await inspectProspectiveIsolation(directory);

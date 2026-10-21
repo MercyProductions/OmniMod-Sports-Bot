@@ -57,7 +57,7 @@ export async function loadProspectiveCaptures(directory){
   const bytes=await readFile(join(directory,'captures',p.filename));if(hash(bytes)!==p.captureHash)throw new Error('Frozen capture changed');
   const capture=JSON.parse(bytes);
   if(capture.schema!=='sports-isolated-capture-v1'||capture.role!==p.role||!['baseline','challenger'].includes(capture.role)
-   ||p.sourceCommit!==manifest.sources?.[p.role]?.commit||epoch(capture.completedAt)>epoch(receipt.recordedAt))throw new Error('Capture receipt mismatch');
+   ||p.sourceCommit!==manifest.sources?.[p.role]?.commit||(capture.sampling?.dayOffset??0)!==(manifest.profile?.dayOffset??0)||epoch(capture.completedAt)>epoch(receipt.recordedAt))throw new Error('Capture receipt mismatch');
   captures.push({receipt,capture});
  }
  const indexed=new Set(records.map(row=>row.payload.filename));

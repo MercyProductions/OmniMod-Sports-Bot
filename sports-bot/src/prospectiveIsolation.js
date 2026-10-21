@@ -12,7 +12,8 @@ const git=(root,args)=>execFileSync('git',['-C',root,...args],{maxBuffer:2500000
 const workerSource=fileURLToPath(new URL('../scripts/prospective-worker.mjs',import.meta.url));
 
 /** Archive tracked source only; a new explicitly isolated directory is mandatory. */
-export async function prepareProspectiveIsolation({directory,repository,baselineRef,challengerRef='HEAD'}={}){
+export async function prepareProspectiveIsolation({directory,repository,baselineRef,challengerRef='HEAD',dayOffset=0}={}){
+ if(!Number.isInteger(dayOffset)||![0,1].includes(dayOffset))throw new Error('Research sampling day offset must be zero or one');
  if(!directory||!repository||!baselineRef)throw new Error('Explicit research directory, repository and baseline required');
  const root=await realpath(repository),parent=await realpath(dirname(resolve(directory))),target=join(parent,basename(directory));
  if(contains(root,target)||contains(target,root))throw new Error('Research state must be outside the source repository');
@@ -31,7 +32,7 @@ export async function prepareProspectiveIsolation({directory,repository,baseline
  const manifest={schema:'sports-prospective-isolation-v1',createdAt:new Date().toISOString(),dependencyLockHash:hash(lock),
   workerCapabilities:['collect','reconcile'],
   dependencyDirectory:await realpath(join(root,'sports-bot','node_modules')),workerHash:hash(await readFile(workerSource)),emptyEnvHash:hash('# Intentionally empty research environment\n'),sources:{},
-  profile:{leagues:['nba','nhl','nfl','mlb'],summaryMaxGames:6,historyMaxLeagues:4,historyDays:90,
+  profile:{dayOffset,timezone:'America/Chicago',leagues:['nba','nhl','nfl','mlb'],summaryMaxGames:6,historyMaxLeagues:4,historyDays:90,
    boxscoreMaxEvents:0,paidOdds:false,advancedDatasets:false,officialSources:false,
    historicalReplay:false,featureWarehouse:false,localMl:false,discord:false,liveOrders:false},
   limitations:['Controlled cold-start pipeline comparison, not a snapshot of the deployed learner or all market coverage.',

@@ -79,3 +79,26 @@ test('a pinned isolated worker refreshes prior-date finals without changing orig
  const empty=await runProspectiveIsolation(directory,{operation:'reconcile'});
  assert.equal(empty.status,'no_pending_final_queries');assert.equal(empty.captures.length,0);
 });
+
+
+test('tomorrow sampling is pinned at preparation and does not move forecast issuance into the future',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'sports-upcoming-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const directory=join(parent,'study'),manifest=await prepareProspectiveIsolation({directory,repository,baselineRef,dayOffset:1});
+ assert.equal(manifest.profile.dayOffset,1);
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(row=>[row.type,row.value]));
+ const target=new Date(Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day)+1,20));
+ const dateKey=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(target);
+ const game={id:'fixture-tomorrow',dateKey,startTime:target.toISOString(),league:'NBA',leagueKey:'nba',sportGroup:'Basketball',statusKey:'scheduled',awayTeam:'Fixture A',homeTeam:'Fixture H'};
+ for(const name of ['baseline','challenger'])await writeFile(join(directory,'state',name,'intelligence-isolated-prospective.json'),JSON.stringify({version:2,teams:{},players:{},contexts:{},results:{},games:{fixture:game}}));
+ const result=await runProspectiveIsolation(directory);
+ for(const summary of result.captures){
+  assert.equal(summary.games,1);assert.equal(summary.pregameForecasts,1);
+  const capture=JSON.parse(await readFile(join(directory,'captures',summary.filename),'utf8'));
+  assert.equal(capture.sampling.dayOffset,1);assert.equal(capture.sampling.targetDateKey,dateKey);
+  assert.ok(Date.parse(capture.slate.predictions[0].predictionGeneratedAt)<=Date.now());
+  assert.ok(Date.parse(capture.completedAt)<target.getTime());
+  if(capture.role==='challenger')assert.ok(Date.parse(capture.slate.predictions[0].inputChronology.cutoffAt)<=Date.now());
+ }
+ assert.equal((await loadProspectiveCaptures(directory)).captures.length,2);
+ await assert.rejects(prepareProspectiveIsolation({directory:join(parent,'invalid'),repository,baselineRef,dayOffset:2}),/offset/);
+});
