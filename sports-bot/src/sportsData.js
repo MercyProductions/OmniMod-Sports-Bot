@@ -830,8 +830,9 @@ export async function buildDailySlate(date = new Date(), options = {}) {
       }])),
       horizonEvaluation: horizonEvaluation ? {
         sampleSize: horizonEvaluation.overall.sampleSize,
+        forecastCount: horizonEvaluation.overall.forecastCount,
         byHorizon: Object.fromEntries(Object.entries(horizonEvaluation.byHorizon).map(([horizon, row]) => [horizon, {
-          sampleSize: row.sampleSize,
+          sampleSize: row.sampleSize, forecastCount: row.forecastCount,
           accuracy: row.accuracy,
           brierScore: row.brierScore,
           meanModelVsCloseEdge: row.meanModelVsCloseEdge

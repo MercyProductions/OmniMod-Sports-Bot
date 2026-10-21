@@ -1,3 +1,4 @@
+import {summarizeHorizonRows as summarize} from './horizonStatistics.js';
 import { eventObservationHash } from './journalEventMatch.js';
 import { quoteTimeEpoch as instant } from './oddsPricing.js';
 import { validCandidateVector } from './candidateCohorts.js';
@@ -34,74 +35,6 @@ export function predictionHorizon(row = {}) {
     if (minutes <= 120) return 'T-90';
   }
   return 'Daily';
-}
-
-function seededRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0;
-    return state / 4294967296;
-  };
-}
-
-function percentile(values, fraction) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction)))];
-}
-
-function bootstrapIntervals(rows, repetitions = 300) {
-  if (rows.length < 8) return { accuracy: null, brier: null };
-  const random = seededRandom(rows.length * 7919 + 17);
-  const accuracy = [];
-  const brier = [];
-  for (let iteration = 0; iteration < repetitions; iteration += 1) {
-    let correct = 0;
-    let brierTotal = 0;
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[Math.floor(random() * rows.length)];
-      correct += Number(row.correct);
-      brierTotal += row.brier;
-    }
-    accuracy.push(correct / rows.length);
-    brier.push(brierTotal / rows.length);
-  }
-  return {
-    accuracy: [percentile(accuracy, 0.025), percentile(accuracy, 0.975)],
-    brier: [percentile(brier, 0.025), percentile(brier, 0.975)]
-  };
-}
-
-function summarize(rows = []) {
-  if (!rows.length) return { sampleSize: 0, accuracy: null, brierScore: null, logLoss: null, calibrationError: null, meanModelVsCloseEdge: null, bootstrap95: { accuracy: null, brier: null } };
-  const bins = Array.from({ length: 10 }, () => ({ count: 0, probability: 0, correct: 0 }));
-  let accuracy = 0;
-  let brier = 0;
-  let logLoss = 0;
-  let closingEdge = 0;
-  let closingCount = 0;
-  for (const row of rows) {
-    accuracy += Number(row.correct);
-    brier += row.brier;
-    logLoss += row.logLoss;
-    const bin = bins[Math.min(9, Math.floor(row.selectedProbability * 10))];
-    bin.count += 1;
-    bin.probability += row.selectedProbability;
-    bin.correct += Number(row.correct);
-    if (Number.isFinite(row.modelVsCloseEdge)) { closingEdge += row.modelVsCloseEdge; closingCount += 1; }
-  }
-  const calibrationError = bins.filter((bin) => bin.count).reduce((sum, bin) =>
-    sum + (bin.count / rows.length) * Math.abs(bin.correct / bin.count - bin.probability / bin.count), 0);
-  return {
-    sampleSize: rows.length,
-    accuracy: accuracy / rows.length,
-    brierScore: brier / rows.length,
-    logLoss: logLoss / rows.length,
-    calibrationError,
-    meanModelVsCloseEdge: closingCount ? closingEdge / closingCount : null,
-    closingSampleSize: closingCount,
-    bootstrap95: bootstrapIntervals(rows)
-  };
 }
 
 const leagueKey = row => String(row.leagueKey || row.league || '').trim().toLowerCase();
@@ -224,7 +157,7 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
   }
   return {
     generatedAt: new Date().toISOString(),
-    methodology: 'One declared model version; overall uses latest frozen pregame forecast per game. Horizon groups are separate correlated populations. Intervals use game-IID bootstrap, not day/league-cluster validation.',
+    methodology: 'One declared model version; overall retains latest eligible issue per guild/event and weights canonical games equally across those records. Horizon/stratum populations overlap. Intervals resample whole games; day/team/league dependence is not resolved.',
     modelVersion: selectedVersion,
     versionsAvailable: versions,
     logLossProtocol: LOG_LOSS_PROTOCOL,
