@@ -249,7 +249,7 @@ async function buildDailySlateOnce(reason, guildId = '', options = {}) {
         })
       : providerClaim.usage;
 
-    const durableSlate = {
+    let durableSlate = {
       ...slate,
       guildId,
       messageId: cached?.messageId || channelMessage?.id || '',
@@ -263,7 +263,7 @@ async function buildDailySlateOnce(reason, guildId = '', options = {}) {
         reason
       }
     };
-    await writeDailyCache(dateKey, durableSlate, guildId);
+    durableSlate = await writeDailyCache(dateKey, durableSlate, guildId, { expectedRevision: cached?.cacheRevision ?? 0 });
     console.log(
       `[${nowLabel()}] Created durable daily cache for ${dateKey}, guild=${guildId || 'default'}, ` +
       `providerBatch=${providerClaim.claimed ? 'claimed' : 'skipped'}, discordPost=${channelMessage ? 'recovered' : 'none'}, reason=${reason}.`
@@ -332,7 +332,7 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
     const {finalReplies,postedCount}=delivery;
 
     const latest = await readDailyCache(dateKey, guildId) || cached;
-    const durableFinals = {
+    let durableFinals = {
       ...latest,
       games: refreshed.games,
       predictions: refreshed.predictions,
@@ -346,7 +346,7 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
       finalReplies: mergeFinalReplies(latest.finalReplies,finalReplies),
       newFinals: []
     };
-    await writeDailyCache(dateKey, durableFinals, guildId);
+    durableFinals = await writeDailyCache(dateKey, durableFinals, guildId, { expectedRevision: cached.cacheRevision ?? 0 });
     if (config.featureWarehouseEnabled) await recordSlateSnapshot(durableFinals);
 
     if (postedCount > 0) {
@@ -373,8 +373,7 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
     if (!cached) return null;
     if (cached.pregameRefreshDeliveryPending) {
       const delivered = await postDailySlate(client, cached, { forceNew: false, reuseExisting: false, guildId });
-      const acknowledged = { ...delivered, pregameRefreshDeliveryPending: false };
-      await writeDailyCache(dateKey, acknowledged, guildId);
+      const acknowledged = await writeDailyCache(dateKey, { ...delivered, pregameRefreshDeliveryPending: false }, guildId);
       return acknowledged;
     }
     const due = duePregameRefreshes(cached, new Date(), { windows: config.pregameRefreshWindows });
@@ -407,19 +406,19 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
       finalReplies: latest.finalReplies || cached.finalReplies || {},
       providerDailyUsage: cached.providerDailyUsage || null
     }, due, attemptedAt, refreshedAt);
-    const durable = attempt.slate;
+    let durable = attempt.slate;
     if (config.featureWarehouseEnabled && attempt.completed.length) {
       const accepted = new Set(attempt.completed.map(row => String(row.gameId)));
       await recordSlateSnapshot({ ...durable, predictions: durable.predictions.filter(row => accepted.has(String(row.gameId))) });
     }
-    await writeDailyCache(dateKey, durable, guildId);
+    durable = await writeDailyCache(dateKey, durable, guildId, { expectedRevision: cached.cacheRevision ?? 0 });
     if (!attempt.completed.length) {
       runtimeState.nextPregameRefreshAt = nextPregameRefresh(durable, new Date(), { windows: config.pregameRefreshWindows })?.dueAt || '';
       return durable;
     }
-    const posted = await postDailySlate(client, durable, { forceNew: false, reuseExisting: false, guildId });
+    let posted = await postDailySlate(client, durable, { forceNew: false, reuseExisting: false, guildId });
     posted.pregameRefreshDeliveryPending = false;
-    await writeDailyCache(dateKey, posted, guildId);
+    posted = await writeDailyCache(dateKey, posted, guildId);
     runtimeState.lastPregameRefreshAt = refreshedAt;
     const afterNext = nextPregameRefresh(posted, new Date(), { windows: config.pregameRefreshWindows });
     runtimeState.nextPregameRefreshAt = afterNext?.dueAt || '';
@@ -1036,7 +1035,7 @@ async function handleSportsCommand(interaction) {
         await recordSlateSnapshot(refreshed.issuedSlate);
         const latest = await readDailyCache(cached.dateKey, guildId) || cached;
         cached = mergeValueQuoteRefresh(latest,refreshed);
-        await writeDailyCache(cached.dateKey, cached, guildId);
+        cached = await writeDailyCache(cached.dateKey, cached, guildId);
       }
     }
     cached = refreshScopedPredictionValues(cached);

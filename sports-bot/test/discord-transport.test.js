@@ -10,6 +10,9 @@ import {fakeDiscord} from '../test-support/discord-transport.mjs';
 
 const directory=await mkdtemp(join(tmpdir(),'sports-transport-'));
 process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
+const {readDailyCache,writeDailyCache,dailyCachePath}=await import('../src/storage.js');
+const {unlink}=await import('node:fs/promises');
+test.beforeEach(async()=>{await unlink(dailyCachePath('2099-01-01','transport')).catch(error=>{if(error.code!=='ENOENT')throw error;});});
 const {postDailySlate}=await import('../src/discordPublisher.js');
 const {recordPredictionJournal,readPredictionJournal}=await import('../src/predictionJournal.js');
 const {CURRENT_MODEL_VERSION}=await import('../src/modelIdentity.js');
@@ -31,8 +34,8 @@ test('failed send leaves an issued forecast undelivered and successful retry ack
  const before=delivered(await readPredictionJournal()).length;
  await assert.rejects(postDailySlate((await fakeDiscord(path,{sendFails:true})).client,value),/Synthetic send/);
  assert.equal(delivered(await readPredictionJournal()).length,before);
- const remote=await fakeDiscord(path);await postDailySlate(remote.client,value);
- await postDailySlate(remote.client,value);
+ const remote=await fakeDiscord(path);const posted=await postDailySlate(remote.client,value);
+ await postDailySlate(remote.client,posted);
  assert.equal(remote.rows.length,1);assert.equal(remote.counters.sends,1);
  assert.equal(delivered(await readPredictionJournal()).length,before+1);
 });
@@ -62,9 +65,9 @@ test('cached message permission failures do not become missing-message replaceme
 
 test('confirmed missing cached IDs recover through history and edit the existing post',async t=>{
  const path=await remoteDirectory(t),value=slate('missing-message');await recordPredictionJournal(value);
- await postDailySlate((await fakeDiscord(path)).client,value);
+ const posted=await postDailySlate((await fakeDiscord(path)).client,value);
  const remote=await fakeDiscord(path);
- await postDailySlate(remote.client,{...value,messageId:'deleted',channelId:'channel'},{reuseExisting:false});
+ await postDailySlate(remote.client,{...posted,messageId:'deleted',channelId:'channel'},{reuseExisting:false});
  assert.equal(remote.counters.sends,0);assert.equal(remote.counters.edits,1);assert.equal(remote.rows.length,1);
 });
 
@@ -79,7 +82,7 @@ test('finding an older post does not acknowledge new forecast content that was n
  const path=await remoteDirectory(t),old=slate('older-content'),fresh=slate('unwritten-content');
  await recordPredictionJournal(old);await postDailySlate((await fakeDiscord(path)).client,old);
  await recordPredictionJournal(fresh);
- const remote=await fakeDiscord(path);await postDailySlate(remote.client,fresh);
+ const remote=await fakeDiscord(path);await postDailySlate(remote.client,{...fresh,cacheRevision:(await readDailyCache(fresh.dateKey,fresh.guildId)).cacheRevision});
  const rows=await readPredictionJournal(),id=rows.find(row=>row.type==='forecast'&&row.payload.gameId==='unwritten-content').payload.forecastId;
  assert.equal(delivered(rows).filter(row=>row.payload.forecastId===id).length,0);
  assert.equal(remote.counters.edits,0);assert.equal(remote.counters.sends,0);
@@ -154,4 +157,23 @@ test('hidden ambiguous rows never receive a Discord forecast-delivery acknowledg
  assert.equal(acknowledgements.some(row=>row.payload.forecastId===forecasts.find(row=>row.payload.league==='nba').payload.forecastId),false);
  assert.equal(acknowledgements.some(row=>row.payload.forecastId===forecasts.find(row=>row.payload.league==='nhl').payload.forecastId),true);
  assert.match(remote.rows[0].embeds[0].fields[0].value,/could not be matched uniquely/);
+});
+
+
+test('delivery accepted during a concurrent cache update is journaled without replacing newer state', async t => {
+ const path=await remoteDirectory(t),value=slate('cache-conflict-delivery');
+ await recordPredictionJournal(value);
+ const cached=await writeDailyCache(value.dateKey,value,value.guildId);
+ const remote=await fakeDiscord(path),send=remote.channel.send;
+ let newer;
+ remote.channel.send=async payload=>{
+  const message=await send(payload);
+  newer=await writeDailyCache(value.dateKey,{...cached,finalReplies:{other:{claimGeneration:2}}},value.guildId);
+  return message;
+ };
+ await assert.rejects(postDailySlate(remote.client,cached),{code:'DAILY_CACHE_CONFLICT'});
+ assert.deepEqual(await readDailyCache(value.dateKey,value.guildId),newer);
+ const rows=await readPredictionJournal(),forecast=rows.find(row=>row.type==='forecast'&&row.payload.gameId==='cache-conflict-delivery');
+ assert.equal(delivered(rows).filter(row=>row.payload.forecastId===forecast.payload.forecastId).length,1);
+ assert.equal(remote.counters.sends,1);
 });

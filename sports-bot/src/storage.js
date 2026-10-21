@@ -1,5 +1,6 @@
 import {acquireFinalClaim,completeFinalClaim,abandonFinalClaim,verifyFinalClaim,preserveFinalClaimMigration,inspectFinalClaim} from './finalClaimStore.js';
 import fs from 'node:fs/promises';
+import { withAuditFileLock } from './auditFileLock.js';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { dataDir, legacyDataDir } from './config.js';
@@ -151,8 +152,38 @@ export async function readDailyCache(dateKey, guildId = '') {
   return readJson(dailyCachePath(dateKey), null, { throwOnError: true });
 }
 
-export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?? '') {
-  await writeJson(dailyCachePath(dateKey, guildId), slate);
+const dailyCacheWrites = new Map();
+
+function cacheRevision(slate) {
+  const revision = slate?.cacheRevision ?? 0;
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('Invalid daily cache revision.');
+  return revision;
+}
+
+// Serialize local writers; the owner lock excludes other processes. A revision
+// check is still required: locking a stale whole-object write would lose updates.
+export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?? '', options = {}) {
+  const snapshot = structuredClone(slate);
+  const expected = options.expectedRevision ?? cacheRevision(snapshot);
+  if (!Number.isSafeInteger(expected) || expected < 0) throw new Error('Invalid expected daily cache revision.');
+  const file = dailyCachePath(dateKey, guildId);
+  const previous = dailyCacheWrites.get(file) ?? Promise.resolve();
+  const operation = previous.catch(() => {}).then(() => withAuditFileLock(file, async () => {
+    const current = await readJson(file, null, { throwOnError: true, redactErrors: true });
+    const revision = cacheRevision(current);
+    if (expected !== revision) {
+      const error = new Error('Daily cache changed during this operation; reload before retrying.');
+      error.code = 'DAILY_CACHE_CONFLICT';
+      throw error;
+    }
+    if (revision === Number.MAX_SAFE_INTEGER) throw new Error('Daily cache revision exhausted.');
+    const persisted = { ...snapshot, cacheRevision: revision + 1 };
+    await writeJson(file, persisted);
+    return persisted;
+  }));
+  dailyCacheWrites.set(file, operation);
+  try { return await operation; }
+  finally { if (dailyCacheWrites.get(file) === operation) dailyCacheWrites.delete(file); }
 }
 
 export async function listDailyCaches(limit = 30, guildId = '') {

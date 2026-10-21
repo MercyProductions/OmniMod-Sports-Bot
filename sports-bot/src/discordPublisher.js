@@ -392,7 +392,7 @@ export async function postDailySlate(client, slate, options = {}) {
     payloadWritten = true;
   }
 
-  const updated = {
+  let updated = {
     ...slate,
     guildId: resources.guild.id,
     messageId: message.id,
@@ -400,11 +400,12 @@ export async function postDailySlate(client, slate, options = {}) {
     notifyRoleId: resources.notifyRole?.id ?? slate.notifyRoleId ?? '',
     postedAt: new Date().toISOString()
   };
-  await writeDailyCache(updated.dateKey, updated, updated.guildId);
+  // Transport evidence must survive a subsequent cache conflict.
+  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: presentation.displayedPredictions }, { lifecycle: 'delivered' });
+  updated = await writeDailyCache(updated.dateKey, updated, updated.guildId);
   if (created) {
     await logBotEvent(client, `Posted OmniMod Sports slate ${updated.dateKey} with ${updated.predictions.length} prediction(s).`, updated.guildId);
   }
-  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: presentation.displayedPredictions }, { lifecycle: 'delivered' });
   return updated;
 }
 

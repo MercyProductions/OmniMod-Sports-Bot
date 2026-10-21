@@ -45,7 +45,7 @@ test('unattested schedule receipts cannot stand in for final-result availability
 });
 
 test('later updates cannot change an earlier loaded learning context',async()=>{
- const row=cache();await writeDailyCache(row.dateKey,row.slate,'chronology-context');
+ const row=cache();row.slate=await writeDailyCache(row.dateKey,row.slate,'chronology-context');
  const options={asOf:cutoff,asOfDateKey:'2099-01-03',intelligence:{teams:{},results:{}}};
  const before=await loadModelContext('chronology-context',365,options);
  const mutated={...options,intelligence:{teams:{future:{name:'H',league:'nba',elo:2200,updatedAt:'2099-01-04T00:00:00Z'}},results:{future:{...result(),recordedAt:'2099-01-04T00:00:00Z',homeScore:999}}}};

@@ -47,10 +47,11 @@ if(process.argv[1]===fileURLToPath(import.meta.url)){
  if(!directory||!['crash','retry','final-crash','final-retry'].includes(mode))throw new Error('Invalid synthetic transport worker');
  const {postDailySlate,postFinalResult}=await import('../src/discordPublisher.js');
  const {recordPredictionJournal}=await import('../src/predictionJournal.js');
+ const {readDailyCache}=await import('../src/storage.js');
  const slate=JSON.parse(await readFile(join(directory,'slate.json'),'utf8'));
  await recordPredictionJournal(slate);
  const remote=await fakeDiscord(directory,{crashAfterSend:['crash','final-crash'].includes(mode)});
  if(mode.startsWith('final-'))await postFinalResult(remote.client,slate,{game:slate.games[0],prediction:slate.predictions[0]});
- else await postDailySlate(remote.client,slate,{guildId:'transport',reuseExisting:false});
+ else { const cached=await readDailyCache(slate.dateKey,'transport');await postDailySlate(remote.client,{...slate,cacheRevision:cached?.cacheRevision??0},{guildId:'transport',reuseExisting:false}); }
  console.log(JSON.stringify({messages:remote.rows.length,...remote.counters}));
 }
