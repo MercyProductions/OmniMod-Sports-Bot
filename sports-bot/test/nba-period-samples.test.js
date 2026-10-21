@@ -13,7 +13,7 @@ const key=seasonStart=>JSON.stringify({contract:'advanced-source-contract-v1',so
 const game=seasonYear=>({id:'nba',leagueKey:'nba',seasonYear,sourceMeta:{provider:'ESPN CDN'},away:{name:'Away'},home:{name:'Home'}});
 const teams=()=>({away:{team:'Away',teamId:1,games:10,pace:100,netRating:0,sourceRequestKey:key(2026),sourceFetchedAt:old},home:{team:'Home',teamId:2,games:10,pace:110,netRating:10,sourceRequestKey:key(2026),sourceFetchedAt:old}});
 async function seed(basketballTeams){await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[],basketballTeams});}
-async function attach(g){return attachAdvancedDatasetContext([g],{clock:()=>now,localOnly:true});}
+async function attach(g,options={}){return attachAdvancedDatasetContext([g],{clock:()=>now,localOnly:true,...options});}
 test.after(()=>rm(directory,{recursive:true,force:true}));
 
 test('observed ESPN NBA end-year metadata maps 2027 to the requested 2026-27 scope',async()=>{
@@ -25,7 +25,7 @@ test('observed ESPN NBA end-year metadata maps 2027 to the requested 2026-27 sco
 
 test('wrong NBA seasons clear existing numeric factors and produce structured rejections',async()=>{
  await seed(teams());const g=game(2026);g.advancedDataset={provider:'NBA.com advanced team stats',pace:999,efficiencyDifference:99};
- const result=await attach(g);assert.equal(g.advancedDataset.pace,null);assert.equal(g.advancedDataset.efficiencyDifference,null);
+ const result=await attach(g,{seasonStart:2026});assert.equal(g.advancedDataset.pace,null);assert.equal(g.advancedDataset.efficiencyDifference,null);
  assert.equal(g.advancedDataset.sourcePeriodEvidence.state,'season_mismatch');assert.equal(result.periodRejections.length,1);
 });
 

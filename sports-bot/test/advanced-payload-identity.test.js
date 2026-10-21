@@ -155,7 +155,7 @@ const periodGame=seasonYear=>({id:'period',leagueKey:'nfl',seasonYear,away:{abbr
 
 test('a fresh request-matching NFL source cannot attach to a game from a different season',async()=>{
  await currentNflSnapshot();const game=periodGame(2025);
- await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+ await attachAdvancedDatasetContext([game],{clock:()=>now,seasonStart:2026,localOnly:true});
  assert.equal(game.advancedDataset.epaDifference,null);assert.equal(game.advancedDataset.sourcePeriodEvidence.state,'season_mismatch');
 });
 
@@ -193,7 +193,7 @@ test('per-game period rejection is frozen and future source receipts cannot leak
  const {buildEvidenceCoverage}=await import('../src/evidenceCoverage.js');const {predictionInputsAt}=await import('../src/inputChronology.js');
  await currentNflSnapshot();
  for(const seasonYear of [2025,'invalid',20262027]){
-  const game=periodGame(seasonYear),result=await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+  const game=periodGame(seasonYear),result=await attachAdvancedDatasetContext([game],{clock:()=>now,seasonStart:2026,localOnly:true});
   assert.equal(result.periodRejections.length,1);assert.equal(result.matched,0);
   assert.equal(game.advancedDataset.epaDifference,null);
   const frozen=buildEvidenceCoverage(game,{now});assert.equal(frozen.advancedDatasetProvenance.sourcePeriodEvidence.blocked,true);

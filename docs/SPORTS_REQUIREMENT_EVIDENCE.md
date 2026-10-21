@@ -144,3 +144,7 @@ Development v6.0.26 blocks known wrong-season batting factors and requires measu
 ## NBA period and sample continuation
 
 Development v6.0.27 binds NBA source seasons using observed ESPN end-year metadata, excludes unknown/invalid team samples and rejects duplicate team identities. [Synthetic controls, three preserved real metadata checks and limitations](SPORTS_NBA_SEASON_AND_SAMPLES.md); complete suite 387 passing. No new provider calls, forecasts, deployment or demonstrated predictive improvement.
+
+## Source-specific collection-period continuation
+
+Development v6.0.28 selects independent game-driven source periods, preserves explicit research pins and refuses ambiguous same-source seasons. [Reproductions, scope API, cache/retry/concurrency controls and actual historical import evidence](SPORTS_SOURCE_COLLECTION_PERIODS.md); complete suite 397 passing. No new provider access, forecasts, deployment or demonstrated predictive improvement.

@@ -19,12 +19,12 @@ function fixture(year=2026){
  }
  return {game,snapshot:{sources:[],footballSchedules:[],baseballPlayers}};
 }
-async function attach({game,snapshot}){await writeJson(advancedDatasetSnapshotFile,snapshot);const result=await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});return {advanced:game.advancedDataset,result};}
+async function attach({game,snapshot},options={}){await writeJson(advancedDatasetSnapshotFile,snapshot);const result=await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true,...options});return {advanced:game.advancedDataset,result};}
 test.after(()=>rm(directory,{recursive:true,force:true}));
 
 test('a known MLB game season cannot consume another calendar-year cohort and clears an old comparison',async()=>{
  const f=fixture();f.game.seasonYear=2025;f.game.advancedDataset={provider:'MLB Baseball Savant',lineupXwobaDifference:.9};
- const {advanced,result}=await attach(f);assert.equal(advanced.lineupXwobaDifference,null);assert.equal(advanced.awayLineupXwoba,null);
+ const {advanced,result}=await attach(f,{year:2026});assert.equal(advanced.lineupXwobaDifference,null);assert.equal(advanced.awayLineupXwoba,null);
  assert.equal(advanced.sourcePeriodEvidence.state,'season_mismatch');assert.equal(advanced.lineupXwobaCoverage,'blocked_period');assert.equal(result.periodRejections.length,1);
 });
 

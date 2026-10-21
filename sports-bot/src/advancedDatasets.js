@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { planSourceCollectionPeriods } from './sourceCollectionPeriods.js';
 import { checkedNbaTeamRows, nbaGameSeasonEvidence, nbaTeamSampleEvidence } from './nbaDatasetEvidence.js';
 import { replaceBaseballRole, lookupBaseballStat, baseballSampleMeasurement } from './baseballStatIdentity.js';
 import { config, dataDir } from './config.js';
@@ -137,7 +138,7 @@ export async function syncAdvancedDatasets(options = {}) {
   if (!config.advancedDatasetsEnabled || options.localOnly || config.localOnly) {
     return { ...request, snapshot: await readAdvancedDatasetSnapshot(), externalCalls: 0, diagnostics: ['Advanced dataset sync skipped by configuration/local-only mode.'] };
   }
-  const requestKey = JSON.stringify(request.requestIdentities);
+  const requestKey = JSON.stringify({identities:request.requestIdentities,periodConflicts:options.collectionPeriodConflicts||[]});
   if (syncPromise) {
     if (syncRequestKey === requestKey) return syncPromise;
     await syncPromise;
@@ -146,9 +147,10 @@ export async function syncAdvancedDatasets(options = {}) {
   syncRequestKey = requestKey;
   syncPromise = (async () => {
     const current = await readAdvancedDatasetSnapshot();
-    const clock = options.clock || Date.now, { now, year, seasonStart, requestIdentities } = request;
+    const clock = options.clock || Date.now, { now, year, requestIdentities } = request;
     const statuses = new Map((current.sources || []).map(row => [row.id, row]));
     const sourceDue = id => {
+      if(options.collectionPeriodConflicts?.includes(id))return false;
       const row = statuses.get(id), checked = Date.parse(row?.checkedAt || '');
       if (Date.parse(row?.providerRetryAfter || '') > now) return false;
       if (options.force) return true;
@@ -211,11 +213,9 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
 
-    const statcastSources = [
-      ['batter', `https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=batter&year=${year}&position=&team=&min=25&csv=true`],
-      ['pitcher', `https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=pitcher&year=${year}&position=&team=&min=25&csv=true`]
-    ];
-    for (const [role, url] of statcastSources) {
+    for (const role of ['batter','pitcher']) {
+      const year=JSON.parse(requestIdentities[`baseball-savant-${role}`]).year;
+      const url=`https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=${role}&year=${year}&position=&team=&min=25&csv=true`;
       if (!sourceDue(`baseball-savant-${role}`)) continue;
       try {
         const parsed = checkedBaseballSeasonRows(parseCsv(await sourceText(url)), year, role);
@@ -241,7 +241,8 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
 
-    const footballSeason = seasonStart;
+    const footballSeason = JSON.parse(requestIdentities['nflverse-team-stats']).seasonStart;
+    const scheduleMinimumSeason = JSON.parse(requestIdentities['nflverse-schedules']).minimumSeason;
     const nflUrl = `https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_reg_${footballSeason}.csv`;
     if (sourceDue('nflverse-team-stats')) {
       try {
@@ -270,7 +271,7 @@ export async function syncAdvancedDatasets(options = {}) {
           identity: row => finite(row.season) !== null && Boolean(calendarDay(row.gameday)) && nonemptyText(row.away_team) && nonemptyText(row.home_team) });
         const rows = parsed.rows;
         const schedules = rows
-          .filter((row) => finite(row.season, 0) >= footballSeason - 1)
+          .filter((row) => finite(row.season, 0) >= scheduleMinimumSeason)
           .map((row) => stamp({
             game_id: row.game_id,
             season: finite(row.season),
@@ -297,7 +298,7 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
 
-    const hockeySeason = seasonStart;
+    const hockeySeason = JSON.parse(requestIdentities['moneypuck-team-xg']).seasonStart;
     const moneyPuckUrl = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${hockeySeason}/regular/teams.csv`;
     if (sourceDue('moneypuck-team-xg')) {
       try {
@@ -322,14 +323,15 @@ export async function syncAdvancedDatasets(options = {}) {
     }
 
     if (config.advancedNbaStatsEnabled && sourceDue('nba-advanced-teams')) {
-      const seasonLabel = `${seasonStart}-${String(seasonStart + 1).slice(-2)}`;
+      const nbaSeasonStart=JSON.parse(requestIdentities['nba-advanced-teams']).seasonStart;
+      const seasonLabel = `${nbaSeasonStart}-${String(nbaSeasonStart + 1).slice(-2)}`;
       const nbaUrl = `https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&LastNGames=0&LeagueID=00&Location=&MeasureType=Advanced&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlusMinus=N&Rank=N&Season=${seasonLabel}&SeasonType=Regular%20Season&TeamID=0`;
       try {
         const payload = JSON.parse(await sourceText(nbaUrl, 8_000));
         const resultSet = payload.resultSets?.[0] || payload.resultSet || {};
         const headers = resultSet.headers, dataRows = resultSet.rowSet;
         if (!Array.isArray(headers) || !Array.isArray(dataRows) || dataRows.some(row => !Array.isArray(row))) throw new Error('Advanced source nba-advanced-teams: unsupported payload schema');
-        const parsed = checkedNbaTeamRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))), seasonStart);
+        const parsed = checkedNbaTeamRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))), nbaSeasonStart);
         const rows = parsed.rows;
         snapshot.basketballTeams = Object.fromEntries(rows.map((row) => [normalizeEntityName(row.TEAM_NAME), stamp({
           team: row.TEAM_NAME, teamId: row.TEAM_ID, games: finite(row.GP), pace: finite(row.PACE), nativeSeasonLabel: row.SEASON_YEAR || null,
@@ -396,10 +398,12 @@ function ownsSource(previous, sourceId) {
 }
 
 export async function attachAdvancedDatasetContext(games = [], options = {}) {
-  const sync = await syncAdvancedDatasets(options);
+  const collectionPlan=planSourceCollectionPeriods(games,options);
+  const sync = await syncAdvancedDatasets(collectionPlan.options);
   const explicitPeriod = options.year !== undefined || options.seasonStart !== undefined;
-  const eligibleRow = (row, sourceId) => !row ? null : row.sourceRequestKey
-    ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod ? null : row;
+  const eligibleRow = (row, sourceId) => !row||collectionPlan.conflicts.includes(sourceId) ? null : row.sourceRequestKey
+    ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod||Object.hasOwn(options.sourcePeriods||{},sourceId) ? null : row;
+  const hasPeriodRelevantCache=(source,rows)=>Boolean(collectionPlan.selection[source]?.gameSeasons.length&&rows.some(Boolean));
   let matched = 0;
   const periodRejections = [];
   const provenance = (previous, rows, sourceId, dependencyReceiptTimes=[]) => {
@@ -459,7 +463,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nfl') {
       const away = eligibleRow(sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()], 'nflverse-team-stats');
       const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
-      if (away || home || ownsSource(game.advancedDataset, 'nflverse-team-stats')) {
+      if (away || home || hasPeriodRelevantCache('nflverse-team-stats',[sync.snapshot.footballTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.footballTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'nflverse-team-stats')) {
         const sourcePeriodEvidence = nflGameSeasonEvidence(game, [away, home]);
         const usable = away && home && !sourcePeriodEvidence.blocked;
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'),
@@ -476,7 +480,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nhl') {
       const away = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
       const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
-      if (away || home || ownsSource(game.advancedDataset, 'moneypuck-team-xg')) {
+      if (away || home || hasPeriodRelevantCache('moneypuck-team-xg',[sync.snapshot.hockeyTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.hockeyTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'moneypuck-team-xg')) {
         const sourcePeriodEvidence = nhlGameSeasonEvidence(game, [away, home]);
         const usable = away && home && !sourcePeriodEvidence.blocked;
         const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
@@ -492,7 +496,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nba') {
       const away = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)], 'nba-advanced-teams');
       const home = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)], 'nba-advanced-teams');
-      if (away || home || ownsSource(game.advancedDataset, 'nba-advanced-teams')) {
+      if (away || home || hasPeriodRelevantCache('nba-advanced-teams',[sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)],sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)]]) || ownsSource(game.advancedDataset, 'nba-advanced-teams')) {
         const sourcePeriodEvidence=nbaGameSeasonEvidence(game,[away,home]);
         const teamSampleEvidence=nbaTeamSampleEvidence(away,home);
         const usable=away&&home&&!sourcePeriodEvidence.blocked&&teamSampleEvidence.away.positiveSample&&teamSampleEvidence.home.positiveSample&&!teamSampleEvidence.sharedTeamIdentity;
@@ -523,7 +527,11 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     };
     if (away && home) matched += 1;
   }
-  return { ...sync, matched, sourceCorroborations, periodRejections };
+  for(const game of games){
+    const evidence=game.advancedDataset?.sourcePeriodEvidence;
+    if(evidence)evidence.collectionSelection=collectionPlan.selection[evidence.sourceId]||null;
+  }
+  return { ...sync, matched, sourceCorroborations, periodRejections,collectionPeriodPlan:collectionPlan.selection };
 }
 
 export { snapshotFile as advancedDatasetSnapshotFile };

@@ -1,5 +1,10 @@
 import {finiteNumber} from './dataValidation.js';
 
+export const SOURCE_PERIOD_FIELDS=Object.freeze({
+ 'baseball-savant-batter':'year','baseball-savant-pitcher':'year','nflverse-team-stats':'seasonStart',
+ 'nflverse-schedules':'minimumSeason','moneypuck-team-xg':'seasonStart','nba-advanced-teams':'seasonStart'
+});
+
 export function advancedDatasetRequest(options={}){
  const now=(options.clock||Date.now)();
  if(!Number.isFinite(now))throw new Error('Valid advanced dataset observation time required');
@@ -7,6 +12,16 @@ export function advancedDatasetRequest(options={}){
  const seasonStart=options.seasonStart===undefined?(new Date(now).getUTCMonth()<8?year-1:year):Number(options.seasonStart);
  if(!Number.isInteger(year)||year<1000||year>9999)throw new Error('Invalid advanced dataset year');
  if(!Number.isInteger(seasonStart)||seasonStart<1000||seasonStart>9999)throw new Error('Invalid advanced dataset season');
+ const supplied=options.sourcePeriods===undefined?{}:options.sourcePeriods,sourcePeriods={};
+ if(!supplied||typeof supplied!=='object'||Array.isArray(supplied))throw new Error('Invalid source period configuration');
+ for(const [source,scope] of Object.entries(supplied)){
+  if(!Object.hasOwn(SOURCE_PERIOD_FIELDS,source))throw new Error('Unknown source period selector');
+  const field=SOURCE_PERIOD_FIELDS[source];
+  if(!scope||typeof scope!=='object'||Array.isArray(scope)||Object.keys(scope).length!==1||!Object.hasOwn(scope,field))throw new Error('Invalid source period fields');
+  const value=Number(scope[field]),minimum=field==='minimumSeason'?999:1000;
+  if(!Number.isInteger(value)||value<minimum||value>9999)throw new Error('Invalid source period year or season');
+  sourcePeriods[source]={[field]:value};
+ }
  const requestIdentities={};
  for(const source of ['tennis-atp','tennis-wta','baseball-savant-batter','baseball-savant-pitcher','nflverse-team-stats',
   'nflverse-schedules','moneypuck-team-xg','nba-advanced-teams','statsbomb-open-data']){
@@ -15,9 +30,10 @@ export function advancedDatasetRequest(options={}){
   if(source==='nflverse-team-stats')scope.recordContract='regular-season-team-summary-v1';
   if(['nflverse-team-stats','moneypuck-team-xg','nba-advanced-teams'].includes(source))scope.seasonStart=seasonStart;
   if(source==='nflverse-schedules')scope.minimumSeason=seasonStart-1;
+  Object.assign(scope,sourcePeriods[source]||{});
   requestIdentities[source]=JSON.stringify(scope);
  }
- return {now,year,seasonStart,requestIdentities};
+ return {now,year,seasonStart,sourcePeriods,requestIdentities};
 }
 
 export const nonemptyText=value=>typeof value==='string'&&Boolean(value.trim());
