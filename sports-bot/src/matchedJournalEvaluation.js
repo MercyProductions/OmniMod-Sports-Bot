@@ -1,3 +1,4 @@
+import {journalOutcomeVector} from './journalOutcomeSpace.js';
 import {journalResultState} from './journalResults.js';
 import {quotePrice,quoteTimestampVerified} from './oddsPricing.js';
 import {finiteNumber} from './dataValidation.js';
@@ -87,7 +88,7 @@ function strata(row){
   const coverage=row.evidenceCoverage,context=row.eventContext||{};
   const market=marketVerified(row)?vector(row.referenceBaselines.market.probabilities):null;
   const max=market?Math.max(...Object.values(market)):null;
-  const confidenceLower=Math.min(9,Math.floor(Math.max(...Object.values(vector(row.outcomePercentages,100)))*10))*10;
+  const confidenceLower=Math.min(9,Math.floor(Math.max(...Object.values(vector(journalOutcomeVector(row))))*10))*10;
   const favorite=market?SIDES.filter(side=>market[side]===max):[];
   const risk=finiteNumber(coverage?.rosterTransitionRisk);
   return {sport:context.sport||'unknown',league:row.league||'unknown',horizon:row.horizon||'unknown',
@@ -119,9 +120,10 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
   }
   const eligible=[];
   for(const row of first.values()){
-    const result=results.get(row.forecastId),probabilities=vector(row.outcomePercentages,100);
+    const result=results.get(row.forecastId),probabilities=vector(journalOutcomeVector(row));
     if(!result){reject('unresolved');continue;}
     if(!SIDES.includes(result.actualSide)||!Number.isFinite(time(result.observedAt))||time(result.observedAt)<time(row.startTime)||time(result.observedAt)>time(result.resultRecordedAt)||result.scheduleChanged){reject('result_chronology_or_schedule_invalid');continue;}
+    if(!probabilities && row.outcomePercentages?.draw == null && row.modeledOutcomes === undefined){reject('modeled_outcome_space_unverified');continue;}
     if(!probabilities||!SIDES.includes(row.selectedSide)||probabilities[row.selectedSide]!==Math.max(...Object.values(probabilities))){reject('invalid_primary_probabilities_or_pick');continue;}
     const game=JSON.stringify([row.league,row.gameId,new Date(time(row.startTime)).toISOString()]);
     eligible.push({row,result,probabilities,game});

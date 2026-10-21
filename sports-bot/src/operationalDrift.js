@@ -1,22 +1,10 @@
-import { validCandidateVector } from './candidateCohorts.js';
+import { journalOutcomeVector } from './journalOutcomeSpace.js';
 import { eventObservationHash } from './journalEventMatch.js';
 import { quoteTimeEpoch as instant } from './oddsPricing.js';
 
 const sides = ['away', 'home', 'draw'];
 const text = value => typeof value === 'string' && value.trim().length > 0;
 const add = (groups, key, row) => { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(row); };
-function probabilities(row) {
-  const raw = row.outcomePercentages, declared = row.modeledOutcomes;
-  if (!raw || Array.isArray(raw) || Object.keys(raw).some(key => !sides.includes(key))) return null;
-  if (declared !== undefined && (!Array.isArray(declared) || declared.length !== new Set(declared).size
-    || !declared.includes('away') || !declared.includes('home') || declared.some(side => !sides.includes(side)))) return null;
-  const binary = Array.isArray(declared) && declared.length === 2;
-  const vector = Object.fromEntries(sides.map(side => [side, side === 'draw' && binary && raw.draw == null ? 0 : raw[side]]));
-  if (binary && vector.draw !== 0) return null;
-  if (Object.values(vector).some(value => typeof value !== 'number' || !Number.isFinite(value))) return null;
-  for (const side of sides) vector[side] /= 100;
-  return validCandidateVector(vector) ? vector : null;
-}
 
 /** Journal-only descriptive monitoring. No fitting, model selection or automatic action. */
 export function operationalDrift(issued, results, conflicts, { asOf, windowDays, minDriftGames }) {
@@ -61,7 +49,7 @@ export function operationalDrift(issued, results, conflicts, { asOf, windowDays,
     const earliest = rows.filter(other => other.at === item.at);
     if (new Set(earliest.map(other => eventObservationHash({ vector: other.row.outcomePercentages, selectedSide: other.row.selectedSide,
       generatedAt: new Date(other.generated).toISOString() }))).size > 1) { skip('simultaneous_forecast_conflict'); continue; }
-    const vector = probabilities(row);
+    const vector = journalOutcomeVector(row);
     if (!vector) {
       const raw = row.outcomePercentages;
       skip(raw && Number.isFinite(raw.away) && Number.isFinite(raw.home) && raw.draw == null && row.modeledOutcomes === undefined

@@ -115,3 +115,38 @@ test('a durable journal conflict removes paired scores only after its recorded c
  rows.push({type:'result',recordedAt:'2026-10-20T23:30:00Z',payload:{forecastId:'disputed',actualSide:'home',observedAt:'2026-10-20T23:30:00Z',resolvesConflictId:'c'}});
  assert.equal(hybrid(report(rows)).primary.forecasts,1);
 });
+
+
+test('unknown legacy null or absent draw cannot become an inferred binary primary',()=>{
+ for(const probabilities of [{away:30,home:70},{away:30,home:70,draw:null}]){
+  const rows=fixture('legacy',{outcomePercentages:probabilities});
+  assert.equal(report(rows).rejections.modeled_outcome_space_unverified,1);
+  assert.deepEqual(Object.keys(report(rows).byVersion),[]);
+ }
+});
+test('explicit binary classes permit null padding without rewriting original records',()=>{
+ const rows=fixture('binary',{outcomePercentages:{away:30,home:70,draw:null},modeledOutcomes:['away','home']});
+ const before=JSON.stringify(rows);
+ assert.ok(Math.abs(hybrid(report(rows)).primary.brier-.09)<1e-12);
+ assert.equal(JSON.stringify(rows),before);
+});
+test('malformed or contradictory declared outcome classes fail closed',()=>{
+ for(const modeledOutcomes of [['away'],['away','home','home'],['away','home','other'],['away','home','draw']]){
+  const rows=fixture('invalid',{outcomePercentages:{away:30,home:70,draw:null},modeledOutcomes});
+  assert.equal(report(rows).rejections.invalid_primary_probabilities_or_pick,1);
+ }
+ const rows=fixture('contradictory',{outcomePercentages:{away:25,home:70,draw:5},modeledOutcomes:['away','home']});
+ assert.equal(report(rows).rejections.invalid_primary_probabilities_or_pick,1);
+});
+test('primary numeric strings cannot be coerced into frozen evidence',()=>{
+ const rows=fixture('coercion',{outcomePercentages:{away:'30',home:70,draw:0}});
+ assert.equal(report(rows).rejections.invalid_primary_probabilities_or_pick,1);
+});
+test('unexpected actual draw penalizes a zero forecast instead of disappearing',()=>{
+ const rows=fixture('unexpected-draw',{modeledOutcomes:['away','home']});
+ rows[1].payload.actualSide='draw';
+ const matched=hybrid(report(rows));
+ assert.equal(matched.primary.games,1);assert.equal(matched.primary.accuracy,0);
+ assert.ok(Math.abs(matched.primary.logLoss + Math.log(1e-12))<1e-12);
+ assert.ok(Math.abs(matched.primary.brier-(.09+.49+1)/3)<1e-12);
+});

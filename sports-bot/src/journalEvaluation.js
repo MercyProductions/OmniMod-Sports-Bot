@@ -1,3 +1,4 @@
+import {journalOutcomeVector} from './journalOutcomeSpace.js';
 import {journalResultState} from './journalResults.js';
 import {evaluateMatchedJournal} from './matchedJournalEvaluation.js';
 import {validCandidateVector} from './candidateCohorts.js';
@@ -17,7 +18,8 @@ export function summarizePredictionJournal(records = []) {
   const byVersion = {};
   for (const version of versions) {
     const versionRows = forecasts.filter(row => row.modelVersion === version);
-    const graded = versionRows.filter(row => results.has(row.forecastId));
+    const resolved = versionRows.filter(row => results.has(row.forecastId));
+    const graded = resolved.filter(row => journalOutcomeVector(row));
     const convert = (row, probabilities = row.outcomePercentages, side = row.selectedSide) => ({
       ...row, actualSide: results.get(row.forecastId).actualSide, predictedSide: side,
       predictionMode: 'pregame', outcomeProbabilities: probabilities
@@ -43,7 +45,8 @@ export function summarizePredictionJournal(records = []) {
       };
     }
     byVersion[version] = {
-      forecasts: versionRows.length, graded: graded.length, unresolved: versionRows.length - graded.length,
+      forecasts: versionRows.length, graded: resolved.length, unresolved: versionRows.length - resolved.length,
+      scorableForecasts: graded.length, invalidOrUnverifiedOutcomeSpace: resolved.length - graded.length,
       outcomes: evaluatePredictionHorizons(modelRows, [], { modelVersion: version }),
       selectedOutcomeBinary: { ...evaluatePredictionRows([...firstPerGame.values()].map(row => ({
         correct: row.selectedSide === results.get(row.forecastId).actualSide,
