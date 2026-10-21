@@ -5,6 +5,7 @@ import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
 import { finiteNumber } from './dataValidation.js';
+import { reconcilePlayerEvidence } from './playerEvidence.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -659,8 +660,8 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
     const sides = {};
     for (const side of ['away', 'home']) {
       const team = game[side];
-      const lineupRows = (game.autoLineups || []).filter((row) => matchesTeam(team, row.team));
-      const starters = lineupRows.filter((row) => row.starter && row.active !== false);
+      const lineupRows = reconcilePlayerEvidence((game.autoLineups || []).filter((row) => matchesTeam(team, row.team)), game.autoPlayers || []);
+      const starters = lineupRows.filter(isConfirmedStarter);
       const teamProfiles = Object.values(playerProfiles)
         .filter((row) => normalizeEntityName(row.leagueKey || row.league) === normalizeEntityName(game.leagueKey || game.league) && normalizeEntityName(row.team) === normalizeEntityName(team.name))
         .sort((a, b) => b.impact * (0.6 + b.starterRate * 0.4) - a.impact * (0.6 + a.starterRate * 0.4));
@@ -694,7 +695,8 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
         ? clamp(50 + ((currentValue - expectedValue) / expectedValue) * 32, 30, 70)
         : 50;
       const lineupRating = clamp(lineupRatingBase + (interactionRating - 50) * 0.55, 30, 70);
-      const criticalPlayers = (game.autoPlayers || []).filter((row) => matchesTeam(team, row.team) && row.starter && row.availability >= 80);
+      const criticalPlayers = reconcilePlayerEvidence(game.autoPlayers || [], game.autoLineups || [])
+        .filter((row) => matchesTeam(team, row.team) && row.active !== false && row.starter && row.availability >= 80);
       const criticalForm = criticalPlayers.length ? mean(criticalPlayers.map((row) => finite(row.form, 50))) : 50;
       sides[side] = {
         confirmed,

@@ -36,8 +36,11 @@ export async function recordCaptureReceipt(directory,summary){
  const bytes=await readFile(join(directory,'captures',summary.filename));
  if(hash(bytes)!==summary.captureHash)throw new Error('Worker capture hash mismatch');
  const capture=JSON.parse(bytes),now=Date.now();
- if(capture.role!==summary.role||capture.startedAt!==summary.startedAt||capture.completedAt!==summary.completedAt
-  ||!Number.isFinite(epoch(capture.startedAt))||epoch(capture.startedAt)>epoch(capture.completedAt)||epoch(capture.completedAt)>now)throw new Error('Invalid capture chronology');
+ const start=epoch(capture.startedAt),complete=epoch(capture.completedAt);
+ const chronologyFailure=capture.role!==summary.role||capture.startedAt!==summary.startedAt||capture.completedAt!==summary.completedAt?'summary_mismatch'
+  :!Number.isFinite(start)||!Number.isFinite(complete)?'invalid_timestamp'
+  :start>complete?'completion_before_start':complete>now?'completion_after_receipt':null;
+ if(chronologyFailure)throw new Error(`Invalid capture chronology (${chronologyFailure}; startMs=${Number.isFinite(start)?start:null}; completedMs=${Number.isFinite(complete)?complete:null}; receiptMs=${now})`);
  const records=await readCaptureLedger(directory);
  if(records.some(row=>row.payload.filename===summary.filename))throw new Error('Capture already has a receipt');
  const body={schema:'sports-capture-receipt-v1',sequence:records.length+1,previousHash:records.at(-1)?.eventHash||null,
@@ -57,7 +60,9 @@ export async function loadProspectiveCaptures(directory){
   const bytes=await readFile(join(directory,'captures',p.filename));if(hash(bytes)!==p.captureHash)throw new Error('Frozen capture changed');
   const capture=JSON.parse(bytes);
   if(capture.schema!=='sports-isolated-capture-v1'||capture.role!==p.role||!['baseline','challenger'].includes(capture.role)
-   ||p.sourceCommit!==manifest.sources?.[p.role]?.commit||(capture.sampling?.dayOffset??0)!==(manifest.profile?.dayOffset??0)||epoch(capture.completedAt)>epoch(receipt.recordedAt))throw new Error('Capture receipt mismatch');
+   ||p.sourceCommit!==manifest.sources?.[p.role]?.commit||(capture.sampling?.dayOffset??0)!==(manifest.profile?.dayOffset??0)
+   ||![capture.startedAt,capture.completedAt,receipt.recordedAt].every(value=>Number.isFinite(epoch(value)))
+   ||epoch(capture.startedAt)>epoch(capture.completedAt)||epoch(capture.completedAt)>epoch(receipt.recordedAt))throw new Error('Capture receipt mismatch');
   captures.push({receipt,capture});
  }
  const indexed=new Set(records.map(row=>row.payload.filename));

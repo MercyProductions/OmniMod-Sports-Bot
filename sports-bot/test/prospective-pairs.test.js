@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger,pendingProspectiveFinalQueries} from '../src/prospectivePairs.js';
+import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger,pendingProspectiveFinalQueries,loadProspectiveCaptures} from '../src/prospectivePairs.js';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -58,6 +58,37 @@ test('capture receipts verify written bytes, preserve a chain and reject duplica
  await assert.rejects(recordCaptureReceipt(directory,summary),/already has/);
  const ledger=join(directory,'capture-ledger.jsonl');await writeFile(ledger,(await readFile(ledger,'utf8')).replace('baseline-fixture','altered-fixture'));
  await assert.rejects(readCaptureLedger(directory),/integrity/);
+});
+
+test('capture receipt chronology rejects unknown completion and reports bounded timing diagnostics',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'sports-capture-time-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ await mkdir(join(directory,'captures'));
+ const start=new Date(Date.now()-10000).toISOString();
+ for(const [completedAt,reason] of [['not-a-time','invalid_timestamp'],[null,'invalid_timestamp'],
+  [new Date(Date.now()+3600000).toISOString(),'completion_after_receipt'],
+  [new Date(Date.parse(start)-1000).toISOString(),'completion_before_start']]){
+  const capture={role:'baseline',startedAt:start,completedAt},bytes=JSON.stringify(capture)+'\n';
+  const summary={filename:'baseline-timing.json',...capture,captureHash:createHash('sha256').update(bytes).digest('hex')};
+  await writeFile(join(directory,'captures',summary.filename),bytes);
+  await assert.rejects(recordCaptureReceipt(directory,summary),error=>error.message.startsWith('Invalid capture chronology')&&error.message.includes(reason));
+  assert.equal((await readCaptureLedger(directory)).length,0);
+ }
+});
+
+test('valid hashes do not make an older malformed capture timestamp eligible on reload',async t=>{
+ const directory=await mkdtemp(join(tmpdir(),'sports-legacy-capture-time-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ await mkdir(join(directory,'captures'));
+ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+ const manifest={sources:{baseline:{commit:'a'.repeat(40)}},profile:{dayOffset:0}};
+ await writeFile(join(directory,'manifest.json'),JSON.stringify({...manifest,manifestHash:hash(JSON.stringify(manifest))}));
+ const capture={schema:'sports-isolated-capture-v1',role:'baseline',startedAt:new Date(Date.now()-1000).toISOString(),completedAt:'unknown'};
+ const bytes=JSON.stringify(capture)+'\n',filename='baseline-legacy.json';
+ await writeFile(join(directory,'captures',filename),bytes);
+ const receipt={schema:'sports-capture-receipt-v1',sequence:1,previousHash:null,recordedAt:new Date().toISOString(),
+  payload:{filename,captureHash:hash(bytes),role:'baseline',sourceCommit:manifest.sources.baseline.commit}};
+ await writeFile(join(directory,'capture-ledger.jsonl'),JSON.stringify({...receipt,eventHash:hash(JSON.stringify(receipt))})+'\n');
+ assert.equal((await readCaptureLedger(directory)).length,1);
+ await assert.rejects(loadProspectiveCaptures(directory),/Capture receipt mismatch/);
 });
 
 

@@ -133,7 +133,7 @@ test('opponent adjustment distinguishes schedule strength from raw results', () 
   assert.ok(profiles.Strong.stats.opponentAdjustedSample >= 3);
 });
 
-test('current lineups inherit learned player impact and report confirmed coverage', () => {
+test('current lineups inherit learned impact without counting an unavailable starter as confirmed coverage', () => {
   const samples = Array.from({ length: 5 }, (_, index) => parseHistoricalEventSummary(
     basketballSummary(index), basketballResult(`line-${index}`, `2099-01-${String(index + 1).padStart(2, '0')}`)
   ));
@@ -173,14 +173,20 @@ test('current lineups inherit learned player impact and report confirmed coverag
   const outcome = applyPlayerProfilesAndLineups([game], profiles);
   const learnedHomeStar = game.autoPlayers[0];
   assert.equal(outcome.learnedInjuries, 1);
-  assert.equal(outcome.confirmedLineups, 2);
+  assert.equal(outcome.confirmedLineups, 1);
   assert.ok(learnedHomeStar.impact > 4);
-  assert.equal(game.autoLineup.confirmedSides, 2);
+  assert.equal(game.autoLineup.confirmedSides, 1);
   assert.equal(game.autoLineup.away.coverage, 1);
-  assert.ok(game.autoLineup.home.pairCoverage > 0);
-  assert.ok(game.autoLineup.home.interactionRating > 50);
+  assert.equal(game.autoLineup.home.coverage, 0.8);
+  assert.equal(game.autoLineup.home.pairCoverage, 0);
+  assert.equal(game.autoLineup.home.interactionRating, 50);
   assert.ok(game.autoLineup.rosterTransitionRisk > 0);
   assert.ok(Number.isFinite(game.autoLineup.ratingDifference));
+  game.autoPlayers[0].availability=100;
+  applyPlayerProfilesAndLineups([game],profiles);
+  assert.equal(game.autoLineup.confirmedSides,2);
+  assert.ok(game.autoLineup.home.pairCoverage>0);
+  assert.ok(game.autoLineup.home.interactionRating>50);
 });
 
 test('schedule automation derives travel, time zones, altitude, fatigue, and playoff context locally', () => {

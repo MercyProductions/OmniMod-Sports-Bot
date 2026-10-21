@@ -1,17 +1,12 @@
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
-import { explicitlyUnavailable, finiteNumber } from './dataValidation.js';
+import { finiteNumber } from './dataValidation.js';
+import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
+export { isConfirmedStarter } from './playerEvidence.js';
 
 const timestamp = value => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
 const matches = (team, name) => [team?.name, team?.abbr, ...(team?.aliases || [])]
   .filter(Boolean).some(value => normalizeEntityName(value) === normalizeEntityName(name));
-
-/** Starter role alone is not evidence that a projected player has been confirmed. */
-export function isConfirmedStarter(player = {}) {
-  if (typeof player.confirmedStarter === 'boolean') return player.confirmedStarter;
-  if (player.confirmationStatus === 'projected' || /probable|projected/i.test(`${player.source || ''} ${player.status || ''}`)) return false;
-  return player.starter === true;
-}
 
 export function summaryEvidence(game = {}, now = Date.now()) {
   const meta = game.autoEnrichment || {}, fetchedAt = timestamp(meta.fetchedAt);
@@ -44,9 +39,9 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   const sides = {};
   for (const side of ['away', 'home']) {
     const players = selectedPlayers?.[side] || (game.autoPlayers || []).filter(row => matches(game[side], row.team));
-    const lineup = (game.autoLineups || []).filter(row => matches(game[side], row.team));
+    const lineup = reconcilePlayerEvidence((game.autoLineups || []).filter(row => matches(game[side], row.team)), players);
     const injuries = players.filter(row => /injury/i.test(row.source || ''));
-    const critical = criticalRole ? [...players, ...lineup].filter(row => criticalRole.test(row.role || '')) : [];
+    const critical = criticalRole ? reconcilePlayerEvidence([...players, ...lineup]).filter(row => criticalRole.test(row.role || '')) : [];
     const metrics = players.flatMap(row => Object.values(row.stats || {})).map(value => finiteNumber(value));
     const historyGames = finiteNumber(game.autoHistory?.[`${side}Games`]);
     sides[side] = {
@@ -59,11 +54,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },
       injuryCoverage: summary.injuryCoveredSides.includes(side) ? 'team_report_received_not_a_clean_bill_of_health' : 'unknown',
-      confirmedStarters: lineup.filter(row => isConfirmedStarter(row) && row.active !== false && !explicitlyUnavailable(row)
-        && (finiteNumber(row.availability) === null || finiteNumber(row.availability) > 0)).length,
+      confirmedStarters: lineup.filter(isConfirmedStarter).length,
+      lineupEvidenceConflicts: lineup.filter(row => row.availabilityConflict || row.starterEvidenceConflict).length,
       projectedStarters: players.filter(row => row.starter && !isConfirmedStarter(row)).length,
       criticalRole: criticalRole ? criticalRole.source : 'not_a_single_position',
-      criticalStarterStatus: !criticalRole ? 'not_applicable' : critical.some(row => isConfirmedStarter(row) && row.active !== false && !explicitlyUnavailable(row) && (finiteNumber(row.availability) === null || finiteNumber(row.availability) > 0))
+      criticalStarterStatus: !criticalRole ? 'not_applicable' : critical.some(isConfirmedStarter)
         ? 'confirmed_record_present' : critical.length ? 'projected_or_unavailable' : 'missing',
       playerHistorySampleSizes: players.map(row => ({ playerId: String(row.sourceAthleteId || row.id || ''),
         games: finiteNumber(row.stats?.historicalBoxscoreGames) })),
@@ -72,6 +67,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       lateScratchCoverage: 'not_independently_verified', bullpenAvailability: profile === 'baseball' ? 'not_independently_verified' : 'not_applicable'
     };
     if (!summary.injuryCoveredSides.includes(side)) missing.push(`${side}:injury_coverage_unknown`);
+    if (sides[side].lineupEvidenceConflicts) missing.push(`${side}:lineup_evidence_conflict`);
     if (historyGames === null || historyGames < 8) missing.push(`${side}:thin_or_unknown_team_history`);
     if (criticalRole && sides[side].criticalStarterStatus !== 'confirmed_record_present') missing.push(`${side}:critical_starter_unconfirmed`);
   }

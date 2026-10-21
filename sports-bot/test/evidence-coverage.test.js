@@ -6,6 +6,7 @@ import {attachParticipationProjections, projectPlayerParticipation} from '../src
 import {predictGame} from '../src/predictionEngine.js';
 import {modelDecisionForSport} from '../src/modelRegistry.js';
 import {applyPlayerProfilesAndLineups} from '../src/advancedMetrics.js';
+import {reconcilePlayerEvidence} from '../src/playerEvidence.js';
 
 const now=Date.parse('2026-10-20T18:00:00Z');
 const game=()=>({id:'coverage',leagueKey:'mlb',league:'MLB',sportGroup:'Baseball',statusKey:'scheduled',
@@ -159,6 +160,59 @@ test('event roster confirmation cannot transfer between teams through a collidin
     injuries:[{team:{displayName:'Away'},injuries:[{athlete:{id:'shared',displayName:'Away Player'},status:'Questionable'}]}]},value,
     {fetchedAt:new Date(now).toISOString(),cacheState:'network'});
   assert.equal(unknownTeam.players[0].confirmedStarter,false);
+});
+
+test('a separate unavailable player report defeats contradictory roster coverage and lineup bonuses',()=>{
+  const value=game();value.leagueKey='nba';value.sportGroup='Basketball';
+  value.autoLineups=Array.from({length:5},(_,i)=>({athleteId:String(i),name:`Player ${i}`,team:'Away',role:'Guard',starter:true,confirmedStarter:true,active:true}));
+  value.autoPlayers=[{sourceAthleteId:'0',name:'Player 0',team:'Away',role:'Guard',starter:true,status:'Out',availability:0}];
+  const original=structuredClone(value.autoLineups);
+  applyPlayerProfilesAndLineups([value]);
+  assert.equal(value.autoLineup.away.starterCount,4);
+  assert.equal(value.autoLineup.away.confirmed,false);
+  assert.equal(buildEvidenceCoverage(value,{now}).sides.away.confirmedStarters,4);
+  assert.equal(value.autoPlayers[0].participationProjection.startProbability,0);
+  assert.deepEqual(value.autoLineups,original);
+});
+
+test('duplicate or contradictory roster records cannot manufacture a complete starting lineup',()=>{
+  for (const conflicting of [false,true]) {
+    const value=game();value.leagueKey='nba';value.sportGroup='Basketball';
+    const player={athleteId:'one',name:'One Player',team:'Away',starter:true,confirmedStarter:true,active:true};
+    value.autoLineups=Array.from({length:5},()=>({...player}));
+    if(conflicting)value.autoLineups.push({...player,confirmedStarter:false,starter:false});
+    applyPlayerProfilesAndLineups([value]);
+    assert.equal(value.autoLineup.away.starterCount,conflicting?0:1);
+    assert.equal(value.autoLineup.away.confirmed,false);
+    assert.equal(buildEvidenceCoverage(value,{now}).sides.away.confirmedStarters,conflicting?0:1);
+  }
+});
+
+test('same-team injury contradictions cannot leave a critical starter confirmed',()=>{
+  const value=game();
+  value.autoLineups=[{athleteId:'p',name:'Pitcher',team:'Away',role:'Starting Pitcher',starter:true,confirmedStarter:true,active:true}];
+  value.autoPlayers=[{sourceAthleteId:'p',name:'Pitcher',team:'Away',role:'Starting Pitcher',status:'Out'}];
+  assert.equal(buildEvidenceCoverage(value,{now}).sides.away.criticalStarterStatus,'projected_or_unavailable');
+  assert.ok(buildEvidenceCoverage(value,{now}).missing.includes('away:lineup_evidence_conflict'));
+});
+
+test('availability conflict handling is order independent and cannot cross teams or conflicting known IDs',()=>{
+  const player={athleteId:'p',name:'Shared Name',team:'Away',role:'Starting Pitcher',starter:true,confirmedStarter:true,active:true};
+  const out={...player,status:'Out',availability:0};
+  for(const rows of [[player,out],[out,player]]) {
+    const result=reconcilePlayerEvidence(rows);
+    assert.equal(result.length,1);assert.equal(result[0].active,false);
+    assert.equal(result[0].confirmedStarter,false);assert.equal(result[0].availabilityConflict,true);
+  }
+  for(const other of [{...out,team:'Home'},{...out,athleteId:'different'}]) {
+    assert.equal(reconcilePlayerEvidence([player],[other])[0].confirmedStarter,true);
+  }
+  const distinct=reconcilePlayerEvidence([player,{...player,athleteId:'different'},
+    {name:'Shared Name',team:'Away',starter:true,confirmedStarter:true}]);
+  assert.equal(distinct.length,2);
+  const unidentifiedOut={name:'Shared Name',team:'Away',status:'Out'};
+  assert.equal(reconcilePlayerEvidence([player,unidentifiedOut])[0].active,false);
+  assert.equal(reconcilePlayerEvidence([{team:'Away',starter:true,confirmedStarter:true}]).length,0);
 });
 
 test('a champion supported only by v6.0.1 evidence stays inactive after evidence-semantic repairs',()=>{

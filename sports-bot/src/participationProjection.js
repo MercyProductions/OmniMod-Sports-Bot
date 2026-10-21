@@ -1,4 +1,5 @@
-import { isConfirmedStarter } from './evidenceCoverage.js';
+import { isConfirmedStarter, reconcilePlayerEvidence, samePlayerIdentity } from './playerEvidence.js';
+export { samePlayerIdentity } from './playerEvidence.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { explicitlyUnavailable } from './dataValidation.js';
@@ -83,20 +84,12 @@ function playerIdentity(row = {}) {
   return String(row.athleteId || row.sourceAthleteId || normalizeEntityName(row.name));
 }
 
-export function samePlayerIdentity(left = {}, right = {}) {
-  const leftId = String(left.athleteId || left.sourceAthleteId || '');
-  const rightId = String(right.athleteId || right.sourceAthleteId || '');
-  if (leftId && rightId) return leftId === rightId;
-  const name = normalizeEntityName(left.name);
-  return Boolean(name) && name === normalizeEntityName(right.name);
-}
-
 const teamPlayerKey = row => `${normalizeEntityName(row.team)}::${playerIdentity(row)}`;
 
 export function attachParticipationProjections(game, playerProfiles = {}, findLearned = null) {
-  const lineupByPlayer = new Map((game.autoLineups || []).map((row) => [teamPlayerKey(row), row]));
+  const lineupByPlayer = new Map(reconcilePlayerEvidence(game.autoLineups || [], game.autoPlayers || []).map(row => [teamPlayerKey(row), row]));
   const rows = new Map();
-  for (const row of [...(game.autoLineups || []), ...(game.autoPlayers || [])]) {
+  for (const row of reconcilePlayerEvidence([...(game.autoLineups || []), ...(game.autoPlayers || [])])) {
     const key = teamPlayerKey(row);
     rows.set(key, { ...(rows.get(key) || {}), ...row });
   }

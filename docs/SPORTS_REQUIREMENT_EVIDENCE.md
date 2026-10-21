@@ -56,3 +56,7 @@ Sports is unfinished. Crypto and Stocks remain queued in that order after Sports
 ## Player identity continuation
 
 Development v6.0.8 repairs team-scoped lineup joins and conflicting-ID historical matches; see [defects, fixtures and remaining limits](SPORTS_PLAYER_IDENTITY.md). The latest full suite passes 237 tests, zero failures/skips; syntax checks pass. The initial verification encountered intermittent capture chronology failures, documented in that report; chronology gates were preserved. Archived v6.0.7 pregame evidence is unchanged.
+
+## Lineup conflict continuation
+
+Development v6.0.9 introduces distinct-player reconciliation shared by advanced lineup features, participation and frozen coverage. Separate unavailable reports defeat contradictory roster confirmation; duplicate rows cannot manufacture a complete lineup. Capture write/reload also rejects malformed completion timestamps. See [verified mechanisms and unresolved reliability limits](SPORTS_LINEUP_CONFLICTS.md). Latest suite: 243 passing; syntax checks pass. Prospective accuracy, actual transport/process recovery and provider coverage remain unfinished.
