@@ -101,3 +101,13 @@ test('final-query date limits defer excess dates explicitly and merge repeated h
  assert.equal(plan.tasks.length,2);assert.equal(plan.deferred.length,2);
  assert.equal(plan.tasks.every(row=>row.games.length===1),true);
 });
+
+
+test('conflicting per-role finals remain queryable and result-only captures cannot issue new forecasts',()=>{
+ const rows=[entry('baseline'),entry('challenger',1000),entry('baseline',0,{final:true}),entry('challenger',0,{final:true,side:'away'})];
+ const pending=pendingProspectiveFinalQueries(rows,{asOf:base+5*3600000});
+ assert.equal(pending.conflictingFinalEvents,1);assert.equal(pending.tasks.length,2);
+ const disguised=entry('baseline');disguised.capture.purpose='final_reconciliation';
+ const result=evaluateProspectiveCaptures([disguised,entry('challenger',1000)],options);
+ assert.equal(result.pairedForecasts,0);assert.equal(result.rejections.missing_counterpart,1);
+});

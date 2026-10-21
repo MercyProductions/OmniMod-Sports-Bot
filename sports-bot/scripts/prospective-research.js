@@ -12,7 +12,8 @@ try{
   result={...evaluateProspectiveCaptures(loaded.captures),unindexedLegacyCapturesExcluded:loaded.unindexed,
    finalQueryPlan:{...pending,tasks:pending.tasks.map(row=>({role:row.role,dateKey:row.dateKey,games:row.games.length}))}};
  }
+ else if(action==='reconcile')result=await runProspectiveIsolation(directory,{live:arg('data')==='live',operation:'reconcile'});
  else if(action==='collect')result=await runProspectiveIsolation(directory,{live:arg('data')==='live'});
- else throw new Error('Explicit prepare, inspect, collect or report required');
+ else throw new Error('Explicit prepare, inspect, collect, reconcile or report required');
  console.log(JSON.stringify(result,null,2));
 }catch{console.error('Isolated research operation failed. Preserve private source, manifest and worker evidence for inspection.');process.exitCode=1;}

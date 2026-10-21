@@ -1,5 +1,5 @@
-import {recordCaptureReceipt} from './prospectivePairs.js';
-import {createHash} from 'node:crypto';
+import {recordCaptureReceipt,loadProspectiveCaptures,pendingProspectiveFinalQueries} from './prospectivePairs.js';
+import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {readFile,writeFile,mkdir,realpath,symlink} from 'node:fs/promises';
@@ -29,6 +29,7 @@ export async function prepareProspectiveIsolation({directory,repository,baseline
  }
  await mkdir(target,{mode:0o700}); // Never reuse an existing directory, production or research.
  const manifest={schema:'sports-prospective-isolation-v1',createdAt:new Date().toISOString(),dependencyLockHash:hash(lock),
+  workerCapabilities:['collect','reconcile'],
   dependencyDirectory:await realpath(join(root,'sports-bot','node_modules')),workerHash:hash(await readFile(workerSource)),emptyEnvHash:hash('# Intentionally empty research environment\n'),sources:{},
   profile:{leagues:['nba','nhl','nfl','mlb'],summaryMaxGames:6,historyMaxLeagues:4,historyDays:90,
    boxscoreMaxEvents:0,paidOdds:false,advancedDatasets:false,officialSources:false,
@@ -64,25 +65,41 @@ export async function inspectProspectiveIsolation(directory){
  return manifest;
 }
 
-export async function runProspectiveIsolation(directory,{live=false,timeout=120000}={}){
+export async function runProspectiveIsolation(directory,{live=false,timeout=120000,operation='collect'}={}){
  const root=await realpath(directory),manifest=await inspectProspectiveIsolation(root);
+ if(!['collect','reconcile'].includes(operation))throw new Error('Invalid research worker operation');
  if(!Number.isInteger(timeout)||timeout<1000||timeout>300000)throw new Error('Bounded worker timeout required');
  // Exclusive owner lock prevents two collectors from writing the same learner at once.
  const {open,unlink}=await import('node:fs/promises');const owner=await open(join(root,'run.lock'),'wx',0o600);
  try{
   const captures=[];
-  for(const name of ['baseline','challenger']){
+  let jobs=['baseline','challenger'].map(role=>({role})),finalPlan=null;
+  if(operation==='reconcile'){
+   const loaded=await loadProspectiveCaptures(root);finalPlan=pendingProspectiveFinalQueries(loaded.captures);jobs=finalPlan.tasks;
+   if(jobs.length&&!manifest.workerCapabilities?.includes('reconcile'))throw new Error('Pinned worker does not support reconciliation; preserve study and prepare a new compatible worker study');
+  }
+  for(const job of jobs){
+   const name=job.role;
    await inspectProspectiveIsolation(root);
    const env={};for(const key of ['PATH','Path','SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key];
    Object.assign(env,{NODE_ENV:'research',OMNIMOD_DISABLE_DATA_MIGRATION:'true',OMNIMOD_SPORTS_DATA_DIR:join(root,'state',name),
     DOTENV_CONFIG_PATH:join(root,'empty.env'),DOTENV_CONFIG_QUIET:'true',POST_ON_START:'false',REGISTER_COMMANDS:'false',
     FEATURE_WAREHOUSE_ENABLED:'false',HISTORICAL_REPLAY_ENABLED:'false',LOCAL_ML_ENABLED:'false',ADVANCED_DATASETS_ENABLED:'false',
     AUTO_OFFICIAL_SOURCES:'false',AUTO_SUMMARY_MAX_GAMES:'6',AUTO_HISTORY_MAX_LEAGUES:'4',AUTO_HISTORY_MAX_DAYS:'90',AUTO_BOXSCORE_MAX_EVENTS:'0',LOCAL_ONLY:live?'false':'true'});
-   const response=await run(process.execPath,[join(root,'worker.mjs'),root,name,live?'live':'offline'],{cwd:root,env,timeout,maxBuffer:2000000,windowsHide:true});
+   const args=[join(root,'worker.mjs'),root,name,live?'live':'offline',operation];
+   if(operation==='reconcile'){
+    await mkdir(join(root,'jobs'),{recursive:true});
+    const filename='reconcile-'+randomUUID()+'.json',bytes=JSON.stringify({schema:'sports-final-query-job-v1',role:name,
+     sourceCommit:manifest.sources[name].commit,createdAt:new Date().toISOString(),slate:job.slate})+'\n';
+    await writeFile(join(root,'jobs',filename),bytes,{flag:'wx',mode:0o600});args.push(filename,hash(bytes));
+   }
+   const response=await run(process.execPath,args,{cwd:root,env,timeout,maxBuffer:2000000,windowsHide:true});
    const summary=JSON.parse(response.stdout.trim().split('\n').at(-1));
    const receipt=await recordCaptureReceipt(root,{...summary,sourceCommit:manifest.sources[name].commit});
    captures.push({...summary,sourceCommit:manifest.sources[name].commit,receiptHash:receipt.eventHash});
   }
-  return {status:'isolated_captures_completed',liveDataRequested:live,captures,productionChanged:false,performanceEstablished:false};
+  return {status:operation==='collect'?'isolated_captures_completed':jobs.length?'isolated_final_queries_completed':'no_pending_final_queries',
+   operation,liveDataRequested:live,captures,finalQueryPlan:finalPlan?{dates:jobs.length,deferred:finalPlan.deferred,excluded:finalPlan.excluded}:null,
+   productionChanged:false,performanceEstablished:false};
  }finally{await owner.close();await unlink(join(root,'run.lock'));}
 }

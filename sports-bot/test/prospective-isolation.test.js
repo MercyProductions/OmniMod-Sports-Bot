@@ -1,3 +1,7 @@
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {mkdir} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {loadProspectiveCaptures,evaluateProspectiveCaptures} from '../src/prospectivePairs.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,4 +47,35 @@ test('archived baseline and challenger run independently without inherited crede
 
 test('research preparation refuses repository-local paths',async()=>{
  await assert.rejects(prepareProspectiveIsolation({directory:join(resolve(repository),'unsafe-research'),repository,baselineRef}),/outside/);
+});
+
+
+test('a pinned isolated worker refreshes prior-date finals without changing original probability or issuance',async t=>{
+ const parent=await mkdtemp(join(tmpdir(),'sports-final-worker-'));t.after(()=>rm(parent,{recursive:true,force:true}));
+ const directory=join(parent,'study'),manifest=await prepareProspectiveIsolation({directory,repository,baselineRef});
+ const date=new Date(Date.now()-26*3600000),parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).map(row=>[row.type,row.value]));
+ const dateKey=`${parts.year}-${parts.month}-${parts.day}`,startTime=date.toISOString();
+ const game={id:'fixture-final',dateKey,startTime,league:'NBA',leagueKey:'nba',sportGroup:'Basketball',statusKey:'scheduled',away:{name:'Fixture A',abbr:'A'},home:{name:'Fixture H',abbr:'H'}};
+ const prediction={gameId:game.id,predictionMode:'pregame',predictedSide:'home',predictionGeneratedAt:new Date(date.getTime()-3600000).toISOString(),startTime,outcomeProbabilities:{away:40,home:60,draw:0}};
+ await mkdir(join(directory,'jobs'));
+ for(const role of ['baseline','challenger']){
+  const native={...game,awayTeam:game.away.name,homeTeam:game.home.name};
+  const store={version:2,teams:{},players:{},contexts:{},games:{fixture:native},results:{fixture:{dateKey,league:'NBA',leagueKey:'nba',awayTeam:'Fixture A',homeTeam:'Fixture H',awayScore:90,homeScore:100,recordedAt:new Date(Date.now()-1000).toISOString()}}};
+  await writeFile(join(directory,'state',role,'intelligence-isolated-prospective.json'),JSON.stringify(store));
+  const filename='reconcile-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.json',bytes=JSON.stringify({schema:'sports-final-query-job-v1',role,sourceCommit:manifest.sources[role].commit,
+   createdAt:new Date().toISOString(),slate:{dateKey,guildId:'isolated-prospective',games:[game],predictions:[prediction],finalReplies:{}}});
+  await writeFile(join(directory,'jobs',filename),bytes);
+  const env={};for(const key of ['PATH','Path','SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key];
+  Object.assign(env,{NODE_ENV:'research',OMNIMOD_DISABLE_DATA_MIGRATION:'true',OMNIMOD_SPORTS_DATA_DIR:join(directory,'state',role),DOTENV_CONFIG_PATH:join(directory,'empty.env'),
+   FEATURE_WAREHOUSE_ENABLED:'false',HISTORICAL_REPLAY_ENABLED:'false',LOCAL_ML_ENABLED:'false',LOCAL_ONLY:'true'});
+  const response=await promisify(execFile)(process.execPath,[join(directory,'worker.mjs'),directory,role,'offline','reconcile',filename,createHash('sha256').update(bytes).digest('hex')],{cwd:directory,env,timeout:20000,windowsHide:true});
+  const summary=JSON.parse(response.stdout.trim().split('\n').at(-1)),capture=JSON.parse(await readFile(join(directory,'captures',summary.filename),'utf8'));
+  assert.equal(summary.pregameForecasts,0);assert.equal(capture.purpose,'final_reconciliation');
+  assert.equal(capture.slate.games[0].statusKey,'final');assert.equal(capture.slate.predictions[0].predictionCorrect,true);
+  assert.deepEqual(capture.slate.predictions[0].outcomeProbabilities,prediction.outcomeProbabilities);
+  assert.equal(capture.slate.predictions[0].predictionGeneratedAt,prediction.predictionGeneratedAt);
+  await assert.rejects(promisify(execFile)(process.execPath,[join(directory,'worker.mjs'),directory,role,'offline','reconcile',filename,'0'.repeat(64)],{cwd:directory,env,timeout:20000,windowsHide:true}));
+ }
+ const empty=await runProspectiveIsolation(directory,{operation:'reconcile'});
+ assert.equal(empty.status,'no_pending_final_queries');assert.equal(empty.captures.length,0);
 });

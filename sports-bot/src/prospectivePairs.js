@@ -83,6 +83,7 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
     versions[capture.role]={actualSide,awayScore:game.away?.score,homeScore:game.home?.score,observedAt:receipt.recordedAt};finals.set(key,versions);
    }
   }
+  if(capture.purpose==='final_reconciliation')continue;
   for(const prediction of capture.slate?.predictions||[]){
    const game=games.get(String(prediction.gameId)),generated=epoch(prediction.predictionGeneratedAt),start=epoch(game?.startTime);
    if(!game||prediction.predictionMode!=='pregame'||game.statusKey!=='scheduled'){reject('not_observed_pregame');continue;}
@@ -134,14 +135,18 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
   const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms)).map(row=>[row.type,row.value]));
   return `${parts.year}-${parts.month}-${parts.day}`;
  };
- const today=dateKey(asOf),day=Date.parse(today+'T00:00:00Z'),pending=new Map(),resolved=new Set(),excluded={};
+ const today=dateKey(asOf),day=Date.parse(today+'T00:00:00Z'),pending=new Map(),resolved=new Map(),excluded={};
  const reject=reason=>{excluded[reason]=(excluded[reason]||0)+1;};
  for(const {receipt,capture} of entries){
   const issued=epoch(receipt.recordedAt),began=epoch(capture.startedAt),completed=epoch(capture.completedAt);
   if(capture.mode!=='live'||!['baseline','challenger'].includes(capture.role)||![issued,began,completed].every(Number.isFinite)
    ||issued>asOf||began>completed||completed>issued)continue;
   const games=new Map((capture.slate?.games||[]).map(row=>[String(row.id),row]));
-  for(const game of games.values())if(finalOutcomeSide(game)&&Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime))resolved.add(capture.role+':'+identity(game));
+  for(const game of games.values())if(finalOutcomeSide(game)&&Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime)){
+   const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);
+   if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,signature:JSON.stringify([finalOutcomeSide(game),game.away?.score,game.home?.score])});
+  }
+  if(capture.purpose==='final_reconciliation')continue;
   for(const prediction of capture.slate?.predictions||[]){
    const game=games.get(String(prediction.gameId)),start=epoch(game?.startTime),generated=epoch(prediction.predictionGeneratedAt);
    if(!game||game.statusKey!=='scheduled'||prediction.predictionMode!=='pregame'||!probabilityVector(prediction)
@@ -153,9 +158,12 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
    if(!previous||issued<previous.issued)pending.set(key,{role:capture.role,dateKey:date,issued,game,prediction});
   }
  }
+ const signatures=new Map();
+ for(const row of resolved.values()){const values=signatures.get(row.eventKey)||new Set();values.add(row.signature);signatures.set(row.eventKey,values);}
+ const conflicts=new Set([...signatures].filter(([,values])=>values.size>1).map(([key])=>key));
  const grouped=new Map();
  for(const [key,row] of pending){
-  if(resolved.has(key))continue;
+  if(resolved.has(key)&&!conflicts.has(identity(row.game)))continue;
   const groupKey=row.role+':'+row.dateKey;
   if(!grouped.has(groupKey))grouped.set(groupKey,{role:row.role,dateKey:row.dateKey,games:[],predictions:[]});
   grouped.get(groupKey).games.push(row.game);grouped.get(groupKey).predictions.push(row.prediction);
@@ -167,5 +175,5 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
   tasks.push({...task,slate:{guildId:'isolated-prospective',dateKey:task.dateKey,games:task.games,predictions:task.predictions,finalReplies:{}}});
  }
  return {asOf:new Date(asOf).toISOString(),today,lookbackDays,maximumDatesPerRole,tasks,deferred,excluded,
-  requestsPerformed:0,productionChanged:false};
+  conflictingFinalEvents:conflicts.size,requestsPerformed:0,productionChanged:false};
 }
