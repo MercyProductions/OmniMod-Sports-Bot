@@ -141,6 +141,8 @@ Fork, create a development branch and use your own local credentials. Add regres
 
 ## Source map
 
+Sports research updates add immutable forecast lifecycle records, per-game evidence coverage, matched game-weighted evaluation and [preregistered ML holdout review](docs/SPORTS_SELECTION_PROTOCOL.md). Runtime registry refreshes do not automatically promote challengers. Development validation and synthetic tests do not establish accuracy improvement or profitable wagering; production changes require separate review.
+
 - [Prediction engine](sports-bot/src/predictionEngine.js)
 - [Data lifecycle](sports-bot/src/sportsData.js)
 - [Outcome warehouse](sports-bot/src/featureWarehouse.js)

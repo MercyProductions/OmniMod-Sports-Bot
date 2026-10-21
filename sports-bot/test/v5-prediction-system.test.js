@@ -1,3 +1,4 @@
+import {CURRENT_MODEL_VERSION} from '../src/modelIdentity.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -144,7 +145,8 @@ test('champion registry promotes only proven improvement and rolls back recent d
     brierImprovement: 0.01,
     logLossImprovement: 0.01
   };
-  const promoted = applyCandidateDecision({}, 'basketball', good, good, { minimum: 75, now: '2099-01-01T00:00:00Z' });
+  const promoted = applyCandidateDecision({}, 'basketball', good, good, { minimum: 75, now: '2099-01-01T00:00:00Z', allowPromotion: true,
+    selectionReview: {status: 'review_ready', candidate: 'hybrid', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: 'a'.repeat(64)} });
   assert.equal(promoted.entry.champion, 'hybrid');
   assert.equal(promoted.action, 'promoted_hybrid');
   const badRecent = {

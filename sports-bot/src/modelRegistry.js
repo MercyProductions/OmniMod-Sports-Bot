@@ -81,6 +81,14 @@ export function evaluateCandidateModels(rows = []) {
   };
 }
 
+function approvedReview(row = {}, sport = row.sport) {
+  const review = row.selectionReview;
+  return review?.status === 'review_ready' && review.modelVersion === CURRENT_MODEL_VERSION
+    && review.candidate === row.champion && review.sport === sport
+    && /^[a-f0-9]{64}$/.test(review.reportHash || '') && /^[a-f0-9]{64}$/.test(review.artifactId || '')
+    && row.approvedArtifactId === review.artifactId;
+}
+
 function defaultSportEntry(sport) {
   return {
     sport,
@@ -118,13 +126,18 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
     brierImprovement: recentEvaluation.brierImprovement
   } : null);
   const provenanceEligible = !options.requireProspectiveRecords || evaluation.cohort?.prospectiveRecordsVerified === true;
-  const promotable = provenanceEligible && Number(fullComparison.sampleSize || 0) >= minimum &&
+  const review = options.selectionReview;
+  const reviewEligible = options.allowPromotion === true && review?.status === 'review_ready'
+    && review.candidate === proposed && review.sport === sport
+    && review.modelVersion === CURRENT_MODEL_VERSION && /^[a-f0-9]{64}$/.test(review.reportHash || '')
+    && /^[a-f0-9]{64}$/.test(review.artifactId || '');
+  const promotable = reviewEligible && provenanceEligible && Number(fullComparison.sampleSize || 0) >= minimum &&
     Number(fullComparison.brierImprovement) > 0.0025 &&
     Number(fullComparison.logLossImprovement) >= -0.003 &&
     Number(recentComparison.brierImprovement ?? -1) > -0.004;
   const rollback = existing.champion !== 'evidence' && Number(championRecentComparison?.sampleSize || 0) >= 30 &&
     Number(championRecentComparison?.brierImprovement) < -0.009;
-  if (!provenanceEligible && existing.champion !== 'evidence') {
+  if ((!provenanceEligible || !approvedReview(existing, sport)) && existing.champion !== 'evidence') {
     existing.champion = 'evidence';
     existing.championModelId = MODELS.evidence;
     existing.status = 'provenance_revalidation_required';
@@ -136,6 +149,8 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
     existing.challenger = 'evidence';
     existing.challengerModelId = MODELS.evidence;
     existing.promotedAt = now;
+    existing.selectionReview = review;
+    existing.approvedArtifactId = review.artifactId;
     existing.status = 'promoted';
     action = `promoted_${proposed}`;
   } else if (rollback) {
@@ -152,6 +167,7 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
     existing.challenger = proposed;
     existing.challengerModelId = MODELS[proposed] || proposed;
     existing.status = !provenanceEligible ? 'research_only_provenance_unverified'
+      : !reviewEligible && Number(fullComparison.sampleSize || 0) >= minimum ? 'awaiting_preregistered_review'
       : Number(fullComparison.sampleSize || 0) >= minimum ? 'challenger_not_better' : 'collecting';
   }
   existing.evaluation = evaluation;
@@ -170,7 +186,7 @@ export async function readModelRegistry() {
 
 export function modelDecisionForSport(registry = {}, sport = 'default') {
   let row = registry.sports?.[sport] || defaultSportEntry(sport);
-  if (row.champion !== 'evidence' && (!row.evaluation?.cohort?.prospectiveRecordsVerified
+  if (row.champion !== 'evidence' && (!approvedReview(row, sport) || !row.evaluation?.cohort?.prospectiveRecordsVerified
     || !String(row.evaluation.cohort.key || '').includes(`|${CURRENT_MODEL_VERSION}|`)))
     row = { ...defaultSportEntry(sport), status: 'provenance_revalidation_required' };
   return {
@@ -180,6 +196,7 @@ export function modelDecisionForSport(registry = {}, sport = 'default') {
     challengerModelId: row.challengerModelId || MODELS.hybrid,
     specialistWeight: clamp(Number(row.specialistWeight) || 0.38, 0.15, 0.55),
     status: row.status || 'collecting',
+    approvedArtifactId: row.approvedArtifactId || null,
     sampleSize: row.evaluation?.models?.[row.champion]?.sampleSize || row.evaluation?.evidence?.sampleSize || 0
   };
 }
@@ -204,7 +221,7 @@ export async function refreshModelRegistry(rows = [], options = {}) {
       const evaluation = evaluateCandidateModels(sorted);
       const recentEvaluation = evaluateCandidateModels(sorted.slice(-Math.min(75, Math.max(30, Math.floor(sorted.length / 3)))));
       const { entry: existing, action } = applyCandidateDecision(registry.sports[sport], sport, evaluation, recentEvaluation,
-        { minimum, requireProspectiveRecords: true });
+        { minimum, requireProspectiveRecords: true, allowPromotion: false });
       registry.sports[sport] = existing;
       if (action) registry.audit.push({ at: existing.evaluatedAt, sport, action, evaluation, recentEvaluation });
     }

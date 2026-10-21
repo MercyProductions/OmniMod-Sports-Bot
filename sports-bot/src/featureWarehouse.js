@@ -173,6 +173,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}) {
     predictedSide: prediction.predictedSide,
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
+    candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities,
     referenceBaselines: prediction.referenceBaselines || null,
     championModel: prediction.championModel,
@@ -406,6 +407,7 @@ export async function warehouseCandidateRowsBefore(dateKey = '') {
       resolvedAt: row.resolvedAt || '',
       snapshotPolicy: row.snapshotPolicy || '',
       actualSide: row.actualSide,
+      candidateArtifactIds: row.candidateArtifactIds || null,
       candidateProbabilities: row.candidateProbabilities,
       mlFeatureVector: row.mlFeatureVector,
       source: 'frozen-production'

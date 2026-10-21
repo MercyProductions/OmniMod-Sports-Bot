@@ -70,6 +70,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     evidenceCoverage: prediction.evidenceCoverage || null,
     eventContext: { sport: prediction.sportProfile || game.sportGroup || null,
       season: game.seasonYear ?? game.season?.year ?? null, seasonType: game.seasonType ?? game.season?.type ?? null },
+    candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities || null,
     referenceBaselines: prediction.referenceBaselines || null,
     issuanceScope: 'Computed pregame slate; Discord delivery is not attested by this journal.',

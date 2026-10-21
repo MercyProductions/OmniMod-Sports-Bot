@@ -2,7 +2,7 @@ import { CURRENT_MODEL_VERSION } from '../src/modelIdentity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluatePredictionHorizons, predictionHorizon } from '../src/horizonEvaluation.js';
-import { normalizeMlFeatureVector, predictLocalMlCandidate, trainLocalMlModels } from '../src/localMl.js';
+import { FEATURE_NAMES, localMlArtifactId, normalizeMlFeatureVector, predictLocalMlCandidate, trainLocalMlModels } from '../src/localMl.js';
 import { applyCandidateDecision, evaluateCandidateModels } from '../src/modelRegistry.js';
 import { projectPlayerParticipation, summarizeTeamParticipation } from '../src/participationProjection.js';
 import { buildPlayByPlayEvidence, compactEspnPlays } from '../src/playByPlay.js';
@@ -64,24 +64,24 @@ function mlRows(count = 320) {
 }
 
 test('local gradient-boosted challenger is trained and accepted only on chronological holdout improvement', () => {
-  const trained = trainLocalMlModels(mlRows(), { minimum: 100 });
+  const trained = trainLocalMlModels(mlRows(), { minimum: 100, now: Date.parse('2100-01-01T00:00:00Z') });
   const model = trained.sports.basketball;
   assert.equal(model.accepted, true);
   assert.equal(model.trainingSampleSize, 224);
   assert.equal(model.validationSampleSize, 96);
   assert.ok(model.evaluation.brierImprovement > 0.1);
   assert.equal(trained.evaluationRows.length, 96);
-  const candidate = predictLocalMlCandidate(model, { playByPlay: 1, participation: 0.7, elo: 0.1 }, { away: 0.48, home: 0.52, draw: 0 }, { twoWay: true, leagueKey: 'nba' });
+  const candidate = predictLocalMlCandidate(model, { playByPlay: 1, participation: 0.7, elo: 0.1 }, { away: 0.48, home: 0.52, draw: 0 }, { twoWay: true, leagueKey: 'nba', now: Date.parse('2100-01-01T00:00:00Z') });
   assert.equal(candidate.available, true);
   assert.ok(candidate.probabilities.home > 0.52);
   assert.ok(Math.abs(candidate.probabilities.away + candidate.probabilities.home - 1) < 1e-10);
 
-  const underMinimum = trainLocalMlModels(mlRows(90), { minimum: 150 });
+  const underMinimum = trainLocalMlModels(mlRows(90), { minimum: 150, now: Date.parse('2100-01-01T00:00:00Z') });
   assert.equal(underMinimum.sports.basketball.accepted, false);
   assert.equal(underMinimum.evaluationRows.length, 0);
 });
 
-test('registry can promote a validated ML candidate without changing legacy hybrid behavior', () => {
+test('registry keeps strong ML results as research without a preregistered approved review', () => {
   const rows = Array.from({ length: 100 }, (_, index) => {
     const actualSide = index % 2 ? 'home' : 'away';
     const vector = (probability) => actualSide === 'home' ? { away: 1 - probability, home: probability, draw: 0 } : { away: probability, home: 1 - probability, draw: 0 };
@@ -90,8 +90,9 @@ test('registry can promote a validated ML candidate without changing legacy hybr
   const evaluation = evaluateCandidateModels(rows);
   assert.equal(evaluation.bestChallenger, 'ml');
   const decision = applyCandidateDecision({}, 'basketball', evaluation, evaluation, { minimum: 75, now: '2099-01-01T00:00:00Z' });
-  assert.equal(decision.entry.champion, 'ml');
-  assert.equal(decision.action, 'promoted_ml');
+  assert.equal(decision.entry.champion, 'evidence');
+  assert.equal(decision.entry.status, 'awaiting_preregistered_review');
+  assert.equal(decision.action, '');
 });
 
 test('horizon evaluation grades T-90, T-30, T-10 independently with closing-line context', () => {
@@ -176,12 +177,15 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
       home: { sampleSize: 20, powerRating: 55, offense: 55, defense: 55, form: 55, opponentAdjustedRating: 55, advancedRating: 55, advancedMetrics: { playValue: 0.2, playSuccessRate: 0.54, playTurnoverRate: 0.09 } }
     }
   };
-  const model = { modelId: 'local-gbdt-hierarchical-basketball-v1', accepted: true, sampleSize: 200, stumps: [{ feature: 'playByPlay', threshold: 0, left: -0.1, right: 0.1 }], leagueAdjustments: {} };
+  const model = { artifactFormat: 'sports-local-ml-artifact-v2', sport: 'basketball', trainingHash: 'x', trainingCohort: 'fixture', featureNames: FEATURE_NAMES, fitRounds: 22, lastTrainingOutcomeAt: '2097-12-31T00:00:00Z', trainedAt: '2098-01-01T00:00:00Z', artifactId: 'a'.repeat(64), modelId: 'local-gbdt-hierarchical-basketball-v1', accepted: true, sampleSize: 200, stumps: [{ feature: 'playByPlay', threshold: 0, left: -0.1, right: 0.1 }], leagueAdjustments: {} };
+  model.artifactId = localMlArtifactId(model);
   const prediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+    modelRegistry: { sports: { basketball: { champion: 'ml', approvedArtifactId: model.artifactId,
+      selectionReview: {status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
       evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
+    now: Date.parse('2100-01-01T00:00:00Z'),
     localMlModels: { sports: { basketball: model } }
   });
   assert.equal(prediction.modelVersion, CURRENT_MODEL_VERSION);
@@ -193,8 +197,10 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
   const rejectedPrediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+    modelRegistry: { sports: { basketball: { champion: 'ml', approvedArtifactId: model.artifactId,
+      selectionReview: {status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
       evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
+    now: Date.parse('2100-01-01T00:00:00Z'),
     localMlModels: { sports: { basketball: { ...model, accepted: false } } }
   });
   assert.equal(rejectedPrediction.localMlModel.active, false);

@@ -74,7 +74,7 @@ function pairedIntervals(pairs,repetitions){
 
 function compare(pairs,repetitions){
   const primary=summarize(pairs,'primary'),reference=summarize(pairs,'reference');
-  return {primary,reference,
+  return {primary,reference,distinctEventDates:new Set(pairs.map(row=>row.eventDate)).size,
     differences:{accuracyImprovement:primary.games?primary.accuracy-reference.accuracy:null,
       brierImprovement:primary.games?reference.brier-primary.brier:null,
       logLossImprovement:primary.games?reference.logLoss-primary.logLoss:null},
@@ -122,7 +122,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
     if(!result){reject('unresolved');continue;}
     if(!SIDES.includes(result.actualSide)||!Number.isFinite(time(result.observedAt))||time(result.observedAt)<time(row.startTime)||time(result.observedAt)>time(result.resultRecordedAt)||result.scheduleChanged){reject('result_chronology_or_schedule_invalid');continue;}
     if(!probabilities||!SIDES.includes(row.selectedSide)||probabilities[row.selectedSide]!==Math.max(...Object.values(probabilities))){reject('invalid_primary_probabilities_or_pick');continue;}
-    const game=JSON.stringify([row.league,row.gameId,row.startTime]);
+    const game=JSON.stringify([row.league,row.gameId,new Date(time(row.startTime)).toISOString()]);
     eligible.push({row,result,probabilities,game});
   }
   const conflicts=new Set([...group(eligible,item=>item.game)].filter(([,items])=>new Set(items.map(item=>item.result.actualSide)).size>1).map(([key])=>key));
@@ -139,7 +139,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
         if(name==='market'&&!marketVerified(row)){skip('offered_price_timestamps_unverified');continue;}
         if((probabilities.draw>0)!==(candidate.draw>0)){skip('outcome_space_mismatch');continue;}
         const sides=probabilities.draw>0||result.actualSide==='draw'?SIDES:['away','home'];
-        pairs.push({game,primary:score(probabilities,result.actualSide,sides,row.selectedSide),reference:score(candidate,result.actualSide,sides),strata:strata(row)});
+        pairs.push({game,eventDate:new Date(time(row.startTime)).toISOString().slice(0,10),primary:score(probabilities,result.actualSide,sides,row.selectedSide),reference:score(candidate,result.actualSide,sides),strata:strata(row)});
       }
       const by={};
       for(const key of ['sport','league','horizon','confidence','favorite','season','seasonPhase','rosterTransition','injuryCoverage','lineupCoverage','sourceFreshness','marketData'])

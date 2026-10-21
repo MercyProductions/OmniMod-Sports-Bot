@@ -19,3 +19,5 @@ Continuation: [prediction lifecycle reliability](SPORTS_RELIABILITY_CONTINUATION
 Per-game evidence continuation: [frozen coverage and v6.0.2 corrections](SPORTS_EVIDENCE_COVERAGE.md), 147 passing Sports tests and syntax checks. Probable/confirmed roles, injury coverage bonuses and availability arithmetic repaired in development; real forecasting improvement remains unproven.
 
 Matched evaluation continuation: [paired game-weighted comparisons](SPORTS_MATCHED_EVALUATION.md), 157 passing Sports tests and syntax checks. Reference-population and repeated-horizon counting defects corrected; real matched accuracy improvement remains unverified.
+
+Model-selection continuation: [exact ML artifacts and preregistered holdout review](SPORTS_SELECTION_PROTOCOL.md), 167 passing tests and syntax checks. Stored-fit mismatch and retrospective-production provenance defects repaired; runtime automatic promotion disabled. No real trial or improved accuracy claim; hybrid governance and feature-learning chronology remain open.

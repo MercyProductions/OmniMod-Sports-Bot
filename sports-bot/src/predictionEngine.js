@@ -686,8 +686,9 @@ export function predictGame(game, index, modelContext = {}) {
     sourceQuality: evidenceQualityValue / 100
   });
   const localMlModel = modelContext.localMlModels?.sports?.[profile.key] || modelContext.localMlModels?.[profile.key] || null;
-  const mlCandidate = predictLocalMlCandidate(localMlModel, mlFeatureVector, evidenceProbabilities, { twoWay: profile.twoWay, leagueKey: game.leagueKey });
-  const mlActive = modelDecision.champion === 'ml' && mlCandidate.available && mlCandidate.accepted;
+  const mlCandidate = predictLocalMlCandidate(localMlModel, mlFeatureVector, evidenceProbabilities, { twoWay: profile.twoWay, leagueKey: game.leagueKey, now: evidenceNow });
+  const mlActive = modelDecision.champion === 'ml' && mlCandidate.available && mlCandidate.accepted
+    && Boolean(mlCandidate.artifactId) && modelDecision.approvedArtifactId === mlCandidate.artifactId;
   if (modelDecision.champion === 'hybrid' && specialist.available) probabilities = hybridProbabilities;
   if (mlActive) probabilities = mlCandidate.probabilities;
 
@@ -845,6 +846,7 @@ export function predictGame(game, index, modelContext = {}) {
     championModel: mlActive ? mlCandidate.modelId : modelDecision.champion === 'ml' ? 'evidence-ensemble-v6-safety-fallback' : modelDecision.championModelId,
     challengerModel: modelDecision.challengerModelId,
     championStatus: modelDecision.status,
+    candidateArtifactIds: { ml: mlCandidate.artifactId || null },
     candidateProbabilities: {
       evidence: Object.fromEntries(Object.entries(evidenceProbabilities).map(([side, value]) => [side, round(value, 5)])),
       hybrid: Object.fromEntries(Object.entries(hybridProbabilities).map(([side, value]) => [side, round(value, 5)])),
@@ -866,6 +868,8 @@ export function predictGame(game, index, modelContext = {}) {
     mlFeatureVector,
     localMlModel: {
       id: mlCandidate.modelId,
+      artifactId: mlCandidate.artifactId || null,
+      researchOnly: mlCandidate.researchOnly !== false,
       available: mlCandidate.available,
       accepted: mlCandidate.accepted,
       active: mlActive,
