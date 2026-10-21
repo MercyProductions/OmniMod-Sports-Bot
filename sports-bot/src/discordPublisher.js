@@ -14,6 +14,7 @@ import {
 } from 'discord.js';
 import { config } from './config.js';
 import { writeDailyCache } from './storage.js';
+import { withDailyPublication } from './dailyPublication.js';
 import { getGuildSettings } from './guildSettings.js';
 import { refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
 
@@ -345,7 +346,13 @@ export async function findDailySlateMessage(client, dateKey, guildId = '', { str
 }
 
 export async function postDailySlate(client, slate, options = {}) {
-  const resources = await setupGuildResources(client, options.guildId || slate.guildId);
+  const snapshot = structuredClone(slate), settings = structuredClone(options);
+  const resources = await setupGuildResources(client, settings.guildId || snapshot.guildId);
+  return withDailyPublication(snapshot.dateKey, resources.guild.id, snapshot.cacheRevision ?? 0,
+    verify => publishDailySlate(client, snapshot, settings, resources, verify));
+}
+
+async function publishDailySlate(client, slate, options, resources, verify) {
   const presentation = formatSlatePresentation(slate);
   const mention = resources.notifyRole ? `<@&${resources.notifyRole.id}> ` : '';
   const content = `${mention}Daily OmniMod Sports slate for **${slate.dateKey}**. Informational only; not wagering advice.`;
@@ -371,22 +378,25 @@ export async function postDailySlate(client, slate, options = {}) {
       }
     }
     if (existing) {
+      if (options.reuseExisting === false) await verify();
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
       payloadWritten = options.reuseExisting === false;
     }
   }
 
   // The Discord channel is the final duplicate guard when a cache file is
-  // missing, moved, or a second cPanel app root starts with the same token.
+  // missing, moved, or a second app root starts with the same token.
   if (!message && options.allowDuplicate !== true) {
     const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id, { strict: true });
     if (existing) {
+      if (options.reuseExisting === false) await verify();
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
       payloadWritten = options.reuseExisting === false;
     }
   }
 
   if (!message) {
+    await verify();
     message = await resources.sportsChannel.send(payload);
     created = true;
     payloadWritten = true;

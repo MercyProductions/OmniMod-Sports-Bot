@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {execFile} from 'node:child_process';
+import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {fakeDiscord} from '../test-support/discord-transport.mjs';
@@ -140,6 +140,8 @@ test('abrupt exit after remote acceptance recovers in new processes without dupl
  assert.equal(before.filter(row=>row.type==='forecast').length,1);assert.equal(delivered(before).length,0);
  const frozen=before.find(row=>row.type==='forecast');
  await run('retry');await run('retry');
+ const recovery=JSON.parse(await readFile(join(path,'daily-publication-claims','daily-transport-2099-01-01.json.claims','decision-0.json'),'utf8'));
+ assert.equal(recovery.state,'recovered');assert.equal(recovery.recovery,'same_host_owner_pid_absent');
  const after=await readPredictionJournal(file);
  assert.equal(after.filter(row=>row.type==='forecast').length,1);assert.equal(delivered(after).length,1);
  assert.deepEqual(after.find(row=>row.type==='forecast'),frozen);
@@ -176,4 +178,82 @@ test('delivery accepted during a concurrent cache update is journaled without re
  const rows=await readPredictionJournal(),forecast=rows.find(row=>row.type==='forecast'&&row.payload.gameId==='cache-conflict-delivery');
  assert.equal(delivered(rows).filter(row=>row.payload.forecastId===forecast.payload.forecastId).length,1);
  assert.equal(remote.counters.sends,1);
+});
+
+
+test('an obsolete publisher cannot edit a newer remote payload before its cache save rejects',async t=>{
+ const path=await remoteDirectory(t),value=slate('publication-old'),remote=await fakeDiscord(path);
+ await recordPredictionJournal(value);
+ const old=await postDailySlate(remote.client,value);
+ const fresh={...old,predictions:[{...old.predictions[0],predictedWinner:'Away',predictedSide:'away',outcomeProbabilities:{away:70,home:30,draw:0}}]};
+ await recordPredictionJournal(fresh);
+ const latest=await writeDailyCache(fresh.dateKey,fresh,fresh.guildId);
+ await postDailySlate(remote.client,latest,{reuseExisting:false});
+ const content=JSON.stringify(remote.rows[0]),edits=remote.counters.edits;
+ await assert.rejects(postDailySlate(remote.client,old,{reuseExisting:false}),{code:'DAILY_CACHE_CONFLICT'});
+ assert.equal(JSON.stringify(remote.rows[0]),content);assert.equal(remote.counters.edits,edits);
+});
+
+test('competing publishers of the same revision cannot both send a new daily post',async t=>{
+ const path=await remoteDirectory(t),value=slate('publication-race'),remote=await fakeDiscord(path);
+ await recordPredictionJournal(value);
+ const results=await Promise.allSettled([postDailySlate(remote.client,value),postDailySlate(remote.client,value)]);
+ assert.equal(results.filter(row=>row.status==='fulfilled').length,1);
+ assert.equal(results.filter(row=>row.status==='rejected'&&row.reason.code==='DAILY_CACHE_CONFLICT').length,1);
+ assert.equal(remote.counters.sends,1);assert.equal(remote.rows.length,1);
+});
+
+test('a publisher delayed before ownership cannot overwrite a newer completed publication',async t=>{
+ const path=await remoteDirectory(t),value=slate('publication-delayed'),remote=await fakeDiscord(path);
+ const old=await writeDailyCache(value.dateKey,value,value.guildId);
+ let entered,release;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const fetch=remote.client.guilds.fetch;
+ const delayedClient={...remote.client,guilds:{fetch:async(...args)=>{entered();await gate;return fetch(...args);}}};
+ const pending=postDailySlate(delayedClient,old,{reuseExisting:false});
+ const rejection=assert.rejects(pending,{code:'DAILY_CACHE_CONFLICT'});
+ await waiting;
+ try {
+  const fresh=await writeDailyCache(value.dateKey,{...old,source:'New source observation'},value.guildId);
+  await postDailySlate(remote.client,fresh,{reuseExisting:false});
+ } finally {release();}
+ await rejection;
+ assert.equal(remote.counters.sends,1);assert.equal(remote.counters.edits,0);
+ assert.equal((await readDailyCache(value.dateKey,value.guildId)).source,'New source observation');
+});
+
+test('publication freezes forecasts and transport options before asynchronous resource discovery',async t=>{
+ const path=await remoteDirectory(t),value=slate('publication-frozen'),remote=await fakeDiscord(path),options={reuseExisting:false};
+ await recordPredictionJournal(value);
+ const original=await postDailySlate(remote.client,value);
+ let entered,release;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const fetch=remote.client.guilds.fetch;
+ remote.client.guilds.fetch=async(...args)=>{entered();await gate;return fetch(...args);};
+ const pending=postDailySlate(remote.client,original,options);
+ await waiting;original.predictions[0].predictedWinner='Caller mutation';options.reuseExisting=true;release();
+ const posted=await pending;
+ assert.equal(posted.predictions[0].predictedWinner,'Home');
+ assert.equal(remote.counters.edits,1);
+ assert.doesNotMatch(JSON.stringify(remote.rows),/Caller mutation/);
+});
+
+test('a live publisher in another process blocks sends without stealing its ownership',async t=>{
+ const path=await remoteDirectory(t),value=slate('publication-owner');await writeFile(join(path,'slate.json'),JSON.stringify(value));await writeFile(join(path,'empty.env'),'');
+ const env={};for(const key of ['PATH','Path','SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key];
+ Object.assign(env,{NODE_ENV:'test',OMNIMOD_DISABLE_DATA_MIGRATION:'true',OMNIMOD_SPORTS_DATA_DIR:directory,DOTENV_CONFIG_PATH:join(path,'empty.env'),DOTENV_CONFIG_QUIET:'true',POST_ON_START:'false',REGISTER_COMMANDS:'false'});
+ const worker=fileURLToPath(new URL('../test-support/daily-publication-worker.mjs',import.meta.url));
+ const child=spawn(process.execPath,[worker,path],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+ t.after(()=>{if(child.exitCode===null)child.kill();});
+ const exited=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code));});
+ await new Promise((resolve,reject)=>{
+  const timeout=setTimeout(()=>reject(new Error('Publication worker readiness timed out')),10000);
+  const ready=()=>{clearTimeout(timeout);resolve();};
+  child.stdout.once('data',ready);
+  child.once('error',error=>{clearTimeout(timeout);reject(error);});
+  child.once('exit',()=>{clearTimeout(timeout);reject(new Error('Publication worker exited before readiness'));});
+ });
+ const remote=await fakeDiscord(path);
+ await assert.rejects(postDailySlate(remote.client,value),{code:'DAILY_PUBLICATION_BUSY'});
+ assert.equal(remote.counters.sends,0);assert.equal(remote.counters.edits,0);
+ child.stdin.end('release\n');assert.equal(await exited,0);
+ assert.equal(JSON.parse(await readFile(join(path,'fake-discord.json'),'utf8')).length,1);
 });
