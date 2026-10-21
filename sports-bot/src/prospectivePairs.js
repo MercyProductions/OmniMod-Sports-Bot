@@ -18,6 +18,21 @@ const probabilityVector=prediction=>{
 };
 const nameValid=value=>typeof value==='string'&&/^(baseline|challenger)-[a-z0-9-]+\.json$/.test(value);
 
+/** Observe the collector's actual clock catching up; never fabricate a receipt or accept future evidence. */
+export async function waitForCollectorClock(completedAt,{clock=Date.now,monotonic=()=>performance.now(),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),maxWaitMs=50}={}){
+ if(!Number.isInteger(maxWaitMs)||maxWaitMs<0||maxWaitMs>1000)throw new Error('Invalid collector clock wait bound');
+ const completed=epoch(completedAt),began=monotonic();
+ if(!Number.isFinite(completed))return false;
+ for(;;){
+  const observed=clock();
+  if(!Number.isFinite(observed))return false;
+  if(observed>=completed)return true;
+  const elapsed=monotonic()-began;
+  if(!Number.isFinite(elapsed)||elapsed<0||elapsed>=maxWaitMs||completed-observed>maxWaitMs)return false;
+  await pause(Math.min(5,maxWaitMs-elapsed));
+ }
+}
+
 export async function readCaptureLedger(directory){
  let bytes;try{bytes=await readFile(join(directory,'capture-ledger.jsonl'),'utf8');}catch(error){if(error.code==='ENOENT')return [];throw error;}
  if(bytes&&!bytes.endsWith('\n'))throw new Error('Incomplete capture receipt');

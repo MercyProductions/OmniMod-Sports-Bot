@@ -80,3 +80,7 @@ Development v6.0.11 replaces whole-container freshness with independent source s
 ## Measured feature continuation
 
 Development v6.0.12 repairs reproduced missing-as-zero comparisons, incomplete per-game denominators and discarded genuine-zero serve rates. [Mathematical controls, source references and explicit limits](SPORTS_MEASURED_FEATURES.md); latest suite 278 passing, syntax checks pass. This strengthens missing-value integrity without proving better predictive performance or full provider schema correctness.
+
+## Collector clock follow-up
+
+Post-commit verification measured 1-2 ms completion/receipt clock offsets. The collector now waits briefly for its actual wall clock before applying the unchanged strict writer validation. [Measured evidence and bounded-wait tests](SPORTS_COLLECTOR_CLOCK.md); latest complete suite 279 passing. Underlying host clock synchronization remains unverified; original capture timestamps and eligibility comparisons are preserved.

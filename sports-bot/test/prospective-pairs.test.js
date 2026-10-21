@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger,pendingProspectiveFinalQueries,loadProspectiveCaptures} from '../src/prospectivePairs.js';
+import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger,pendingProspectiveFinalQueries,loadProspectiveCaptures,waitForCollectorClock} from '../src/prospectivePairs.js';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -15,6 +15,19 @@ function entry(role,delta=0,{final=false,side='home',mode='live'}={}){
    slate:{games:[game],predictions:final?[]:[{gameId:'g',modelVersion:role,predictionMode:'pregame',predictionGeneratedAt:new Date(started+500).toISOString(),predictedSide:'home',outcomeProbabilities:vector}]}}};
 }
 const options={asOf:base+5*3600000};
+
+test('collector waits for an actually observed clock value and bounds persistent or larger skew',async()=>{
+ let observed=base,elapsed=0,pauses=0;
+ const injected={clock:()=>observed,monotonic:()=>elapsed,pause:async ms=>{pauses++;elapsed+=ms;observed+=ms;}};
+ assert.equal(await waitForCollectorClock(iso(2),injected),true);
+ assert.ok(pauses>0);assert.ok(observed>=base+2);
+ pauses=0;observed=base;elapsed=0;
+ assert.equal(await waitForCollectorClock(iso(3600000),injected),false);assert.equal(pauses,0);
+ assert.equal(await waitForCollectorClock(iso(2),{...injected,pause:async ms=>{elapsed+=ms;}}),false);
+ assert.ok(elapsed<=50);assert.equal(observed,base);
+ assert.equal(await waitForCollectorClock('invalid',injected),false);
+ await assert.rejects(waitForCollectorClock(iso(2),{...injected,maxWaitMs:1001}),/bound/);
+});
 
 test('cross-version scores use original pregame vectors and later observed finals',()=>{
  const rows=[entry('baseline'),entry('challenger',3000),entry('baseline',0,{final:true}),entry('challenger',0,{final:true})];

@@ -1,4 +1,4 @@
-import {recordCaptureReceipt,loadProspectiveCaptures,pendingProspectiveFinalQueries} from './prospectivePairs.js';
+import {recordCaptureReceipt,loadProspectiveCaptures,pendingProspectiveFinalQueries,waitForCollectorClock} from './prospectivePairs.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -96,6 +96,7 @@ export async function runProspectiveIsolation(directory,{live=false,timeout=1200
    }
    const response=await run(process.execPath,args,{cwd:root,env,timeout,maxBuffer:2000000,windowsHide:true});
    const summary=JSON.parse(response.stdout.trim().split('\n').at(-1));
+   await waitForCollectorClock(summary.completedAt);
    const receipt=await recordCaptureReceipt(root,{...summary,sourceCommit:manifest.sources[name].commit});
    captures.push({...summary,sourceCommit:manifest.sources[name].commit,receiptHash:receipt.eventHash});
   }
