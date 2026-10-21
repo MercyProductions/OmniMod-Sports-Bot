@@ -3,7 +3,7 @@ import {validScore,scoreOutcome} from './dataValidation.js';
 import {eventReference,scopedEventKey} from './slateEventIdentity.js';
 import {eventObservationHash} from './journalEventMatch.js';
 const iso=value=>Number.isFinite(Date.parse(value||''))?new Date(value).toISOString():null;
-const recordView=row=>({recordId:String(row.id||''),gameId:row.gameId||null,startTime:iso(row.startTime),awayScore:validScore(row.awayScore),homeScore:validScore(row.homeScore),scoreBasis:row.scoreBasis||'unknown',recordedAt:iso(row.recordedAt||row.updatedAt),observedAt:iso(row.observedAt),sourceChecked:row.sourceChecked===true,sourceReference:row.sourceReference||'',recordedBy:row.recordedBy||''});
+const recordView=row=>({recordId:String(row.id||''),manualRevision:row.manualRevision?structuredClone(row.manualRevision):null,gameId:row.gameId||null,startTime:iso(row.startTime),awayScore:validScore(row.awayScore),homeScore:validScore(row.homeScore),scoreBasis:row.scoreBasis||'unknown',recordedAt:iso(row.recordedAt||row.updatedAt),observedAt:iso(row.observedAt),sourceChecked:row.sourceChecked===true,sourceReference:row.sourceReference||'',recordedBy:row.recordedBy||''});
 
 /** Unique legacy matches remain usable; explicit scope is required for reviewed correction qualification. */
 export function applyManualResults(games=[],intelligence={},dateKey,{now=Date.now(),audit=[]}={}){
@@ -43,7 +43,7 @@ export function applyManualResults(games=[],intelligence={},dateKey,{now=Date.no
    target.away.score=selected.awayScore;target.home.score=selected.homeScore;target.away.winner=selected.awayScore>selected.homeScore;target.home.winner=selected.homeScore>selected.awayScore;
    target.statusKey='final';target.statusLabel='Final';target.detail=basis==='regulation'?'Final (local regulation result)':`Final (local result); ${previousDetail}`;
    target.manualResultEvidence={kind:'manual_result',eventIdentityVerified:scoped(selected),identityPolicy:scoped(selected)?'explicit_scope_and_unique_ordered_pair':'unique_legacy_pair_only',
-    recordIds:rows.slice(0,20).map(row=>row.recordId),recordedAt:selected.recordedAt,observedAt:selected.observedAt||selected.recordedAt,observedAtKind:selected.observedAt?'operator_supplied_observation':'local_recording_receipt',
+    recordIds:rows.slice(0,20).map(row=>row.recordId),manualRevision:selected.manualRevision,recordedAt:selected.recordedAt,observedAt:selected.observedAt||selected.recordedAt,observedAtKind:selected.observedAt?'operator_supplied_observation':'local_recording_receipt',
     recordedBy:selected.recordedBy,sourceChecked:reviewed.includes(selected),sourceReference:selected.sourceReference,scoreBasis:basis,underlyingPublicationVerified:false};
    target.source=String(target.source||'Manual source')+' + local result';
   }

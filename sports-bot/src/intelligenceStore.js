@@ -1,3 +1,5 @@
+import {readManualResultLedger,appendManualResultChanges} from './manualResultHistory.js';
+import {withAuditFileLock} from './auditFileLock.js';
 import {createHash} from 'node:crypto';
 import {validScore} from './dataValidation.js';
 import path from 'node:path';
@@ -309,7 +311,11 @@ const NORMALIZERS = {
 
 export async function readIntelligenceStore(guildId = '') {
   const raw = await readJson(storePath(guildId), null, { throwOnError: true });
-  if (!raw || typeof raw !== 'object') return emptyStore(guildId);
+  const history=await readManualResultLedger(storePath(guildId)+'.results.jsonl',guildId);
+  const head=history.records.at(-1),marker=raw?.manualResultHistory;
+  if((!head&&(marker||Object.values(raw?.results||{}).some(row=>row?.manualRevision)))
+   ||(marker&&(marker.sequence>(head?.sequence||0)||(marker.sequence===head?.sequence&&marker.eventHash!==head.eventHash))))throw new Error('Manual result history is missing or rolled back; preserve the ledger and snapshot for review.');
+  if (!raw || typeof raw !== 'object') return {...emptyStore(guildId),results:history.results||{},...(head?{manualResultHistory:{sequence:head.sequence,eventHash:head.eventHash}}:{})};
   return {
     ...emptyStore(guildId),
     ...raw,
@@ -317,7 +323,8 @@ export async function readIntelligenceStore(guildId = '') {
     players: asObject(raw.players),
     contexts: asObject(raw.contexts),
     games: asObject(raw.games),
-    results: asObject(raw.results)
+    results: history.results??asObject(raw.results),
+    ...(head?{manualResultHistory:{sequence:head.sequence,eventHash:head.eventHash}}:{})
   };
 }
 
@@ -330,7 +337,7 @@ async function saveStore(guildId, store) {
 async function withStoreWriteLock(guildId, task) {
   const key = safeGuildId(guildId);
   const previous = writeQueues.get(key) || Promise.resolve();
-  const next = previous.catch(() => {}).then(task);
+  const next = previous.catch(() => {}).then(()=>withAuditFileLock(storePath(guildId),task));
   writeQueues.set(key, next);
   try {
     return await next;
@@ -340,6 +347,7 @@ async function withStoreWriteLock(guildId, task) {
 }
 
 export async function upsertIntelligence(guildId, collection, row, actor = '') {
+  row=structuredClone(row);
   const normalizer = NORMALIZERS[collection];
   if (!normalizer) throw new Error(`Unsupported intelligence collection: ${collection}`);
   return withStoreWriteLock(guildId, async () => {
@@ -349,13 +357,14 @@ export async function upsertIntelligence(guildId, collection, row, actor = '') {
     const normalized = existing
       ? normalizer({ ...existing, ...nonEmptyPatch(row), ...(collection==='results'?{sourceChecked:booleanValue(row.sourceChecked,false)}:{}),id: existing.id }, actor)
       : candidate;
-    store[collection][normalized.id] = normalized;
+    if(collection==='results'){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,store.results,[{id:normalized.id,after:normalized}],{actor,operation:'upsert'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
+    else store[collection][normalized.id] = normalized;
     await saveStore(guildId, store);
-    return normalized;
+    return store[collection][normalized.id];
   });
 }
 
-export async function removeIntelligence(guildId, collection, idOrQuery) {
+export async function removeIntelligence(guildId, collection, idOrQuery, actor='') {
   if (!NORMALIZERS[collection]) throw new Error(`Unsupported intelligence collection: ${collection}`);
   return withStoreWriteLock(guildId, async () => {
     const store = await readIntelligenceStore(guildId);
@@ -367,7 +376,8 @@ export async function removeIntelligence(guildId, collection, idOrQuery) {
     });
     if (!found) return null;
     const removed = store[collection][found];
-    delete store[collection][found];
+    if(collection==='results'){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,store.results,[{id:found,after:null}],{actor,operation:'remove'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
+    else delete store[collection][found];
     await saveStore(guildId, store);
     return removed;
   });
@@ -396,6 +406,7 @@ function nonEmptyPatch(row) {
 }
 
 export async function importIntelligence(guildId, payload, options = {}) {
+  payload=structuredClone(payload);options=structuredClone(options);
   return withStoreWriteLock(guildId, async () => {
     const store = await readIntelligenceStore(guildId);
     const actor = options.actor || '';
@@ -404,12 +415,14 @@ export async function importIntelligence(guildId, payload, options = {}) {
     if (!source || typeof source !== 'object') throw new Error('Import payload must be a JSON object or array.');
 
     const counts = { teams: 0, players: 0, contexts: 0, games: 0, results: 0 };
-    const errors = [];
+    const errors = [],resultChanges=[];
+    const originalResults=structuredClone(store.results);
     for (const [collection, normalizer] of Object.entries(NORMALIZERS)) {
       const rows = collectionRows(source[collection]).slice(0, MAX_ROWS_PER_COLLECTION);
       for (let index = 0; index < rows.length; index += 1) {
         try {
           const normalized = normalizer(rows[index], actor);
+          if(collection==='results')resultChanges.push({id:normalized.id,after:normalized});
           store[collection][normalized.id] = normalized;
           counts[collection] += 1;
         } catch (error) {
@@ -420,6 +433,7 @@ export async function importIntelligence(guildId, payload, options = {}) {
     if (!Object.values(counts).some(Boolean) && errors.length === 0) {
       throw new Error('No recognized collections found. Use teams, players, contexts, games, or results.');
     }
+    if(resultChanges.length){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,originalResults,resultChanges,{actor,operation:'import'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
     await saveStore(guildId, store);
     return { counts, errors };
   });
@@ -475,4 +489,8 @@ export function intelligenceSchemaExample() {
     games: [{ dateKey: '2099-01-02', startTime: '2099-01-02T19:00:00-06:00', league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball', awayTeam: 'Away Team', homeTeam: 'Home Team', venue: 'Example Arena' }],
     results: [{ dateKey: '2098-12-20', league: 'NBA', leagueKey: 'nba', awayTeam: 'Away Team', homeTeam: 'Home Team', awayScore: 101, homeScore: 108 }]
   };
+}
+
+export async function readManualResultHistory(guildId=''){
+ return (await readManualResultLedger(storePath(guildId)+'.results.jsonl',guildId)).records;
 }

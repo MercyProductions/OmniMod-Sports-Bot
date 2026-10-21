@@ -158,7 +158,7 @@ export async function handleSportsDataCommand(interaction) {
   if (subcommand === 'remove') {
     const collection = option(interaction, 'getString', 'collection');
     const id = option(interaction, 'getString', 'id');
-    const removed = await removeIntelligence(guildId, collection, id);
+    const removed = await removeIntelligence(guildId, collection, id, interaction.user.id);
     await interaction.editReply(removed ? `Removed ${removed.id} from ${collection}.` : `No ${collection} record matched ${id}.`);
     return;
   }
