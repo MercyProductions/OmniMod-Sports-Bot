@@ -83,20 +83,30 @@ function playerIdentity(row = {}) {
   return String(row.athleteId || row.sourceAthleteId || normalizeEntityName(row.name));
 }
 
+export function samePlayerIdentity(left = {}, right = {}) {
+  const leftId = String(left.athleteId || left.sourceAthleteId || '');
+  const rightId = String(right.athleteId || right.sourceAthleteId || '');
+  if (leftId && rightId) return leftId === rightId;
+  const name = normalizeEntityName(left.name);
+  return Boolean(name) && name === normalizeEntityName(right.name);
+}
+
+const teamPlayerKey = row => `${normalizeEntityName(row.team)}::${playerIdentity(row)}`;
+
 export function attachParticipationProjections(game, playerProfiles = {}, findLearned = null) {
-  const lineupByPlayer = new Map((game.autoLineups || []).map((row) => [playerIdentity(row), row]));
+  const lineupByPlayer = new Map((game.autoLineups || []).map((row) => [teamPlayerKey(row), row]));
   const rows = new Map();
   for (const row of [...(game.autoLineups || []), ...(game.autoPlayers || [])]) {
-    const key = `${normalizeEntityName(row.team)}::${playerIdentity(row)}`;
+    const key = teamPlayerKey(row);
     rows.set(key, { ...(rows.get(key) || {}), ...row });
   }
   const projections = [];
   for (const [key, row] of rows) {
     const learned = typeof findLearned === 'function' ? findLearned(row) : Object.values(playerProfiles).find((profile) =>
       normalizeEntityName(profile.team) === normalizeEntityName(row.team) &&
-      ((row.athleteId && String(profile.athleteId) === String(row.athleteId)) || normalizeEntityName(profile.name) === normalizeEntityName(row.name))
+      samePlayerIdentity(row, profile)
     );
-    const lineup = lineupByPlayer.get(playerIdentity(row)) || row;
+    const lineup = lineupByPlayer.get(key) || row;
     const projection = projectPlayerParticipation(row, learned, sportProfile(game).key, {
       confirmedStarter: isConfirmedStarter(lineup),
       active: lineup.active

@@ -1,6 +1,6 @@
 # Sports requirement-to-evidence checkpoint
 
-This is a current-state index for the Sports reliability assignment, not a completion certificate. Earlier audit reports retain their original version, test count and historical observations. At this checkpoint the implementation identifies itself as v6.0.7; the archived prospective challenger remains commit `d73fd5f0c097c5c0cfa57f48801dce505c415073`. A later source repair does not retroactively change that experiment.
+This is a current-state index for the Sports reliability assignment, not a completion certificate. Earlier audit reports retain their original version, test count and historical observations. At the original checkpoint the implementation identified itself as v6.0.7; the archived prospective challenger remains commit `d73fd5f0c097c5c0cfa57f48801dce505c415073`. A later source repair does not retroactively change that experiment.
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
 
@@ -52,3 +52,7 @@ The read-only paired report was regenerated from verified private capture receip
 6. Maintain an explicit deployment review checklist. cPanel inspection is excluded, deployed state remains unknown, and no automatic deployment or promotion is permitted.
 
 Sports is unfinished. Crypto and Stocks remain queued in that order after Sports verification; this checkpoint does not redefine the complete goal around passing tests.
+
+## Player identity continuation
+
+Development v6.0.8 repairs team-scoped lineup joins and conflicting-ID historical matches; see [defects, fixtures and remaining limits](SPORTS_PLAYER_IDENTITY.md). The latest full suite passes 237 tests, zero failures/skips; syntax checks pass. The initial verification encountered intermittent capture chronology failures, documented in that report; chronology gates were preserved. Archived v6.0.7 pregame evidence is unchanged.

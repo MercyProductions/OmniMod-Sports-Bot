@@ -93,7 +93,7 @@ test('automatic team profiles derive shrunk power, form, offense, defense, and r
 
 test('summary parser maps injuries and exposes only a de-vigged single-book fallback', () => {
   const parsed = parseEspnSummary({
-    rosters: [{ roster: [{ starter: true, athlete: { id: '99' } }] }],
+    rosters: [{ team: { displayName: 'Home Team' }, roster: [{ starter: true, athlete: { id: '99' } }] }],
     injuries: [{
       team: { displayName: 'Home Team' },
       injuries: [{

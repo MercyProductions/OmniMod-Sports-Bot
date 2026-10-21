@@ -2,7 +2,7 @@ import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
-import { attachParticipationProjections, summarizeTeamParticipation } from './participationProjection.js';
+import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
 import { finiteNumber } from './dataValidation.js';
 
@@ -620,12 +620,10 @@ function matchesTeam(team, value) {
 function findPlayerProfile(profiles, game, team, player) {
   const league = normalizeEntityName(game.leagueKey || game.league);
   const teamName = normalizeEntityName(team?.name);
-  const id = String(player.athleteId || player.sourceAthleteId || '');
-  const name = normalizeEntityName(player.name);
   return Object.values(profiles).find((row) =>
     normalizeEntityName(row.leagueKey || row.league) === league &&
     normalizeEntityName(row.team) === teamName &&
-    ((id && String(row.athleteId) === id) || normalizeEntityName(row.name) === name)
+    samePlayerIdentity(player, row)
   ) || null;
 }
 

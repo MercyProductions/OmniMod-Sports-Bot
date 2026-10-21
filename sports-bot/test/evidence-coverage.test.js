@@ -5,6 +5,7 @@ import {buildEvidenceCoverage, summaryEvidence, summarizeEvidenceCoverage} from 
 import {attachParticipationProjections, projectPlayerParticipation} from '../src/participationProjection.js';
 import {predictGame} from '../src/predictionEngine.js';
 import {modelDecisionForSport} from '../src/modelRegistry.js';
+import {applyPlayerProfilesAndLineups} from '../src/advancedMetrics.js';
 
 const now=Date.parse('2026-10-20T18:00:00Z');
 const game=()=>({id:'coverage',leagueKey:'mlb',league:'MLB',sportGroup:'Baseball',statusKey:'scheduled',
@@ -112,6 +113,52 @@ test('availability is applied once to workload and unavailable confirmed starter
   assert.equal(uncertain.startProbability,healthy.startProbability*0.5);
   const out=projectPlayerParticipation({role:'Starting Pitcher',starter:true,status:'Out'},learned,'baseball',{confirmedStarter:true});
   assert.equal(out.startProbability,0);assert.equal(out.expectedShare,0);
+});
+
+test('participation lineup joins stay within the player team when names or IDs coincide',()=>{
+  for (const identity of [{name:'Shared Name'},{name:'Shared Name',sourceAthleteId:'shared'}]) {
+    const value=game();
+    value.autoLineups=[{...identity,team:'Away',starter:true,confirmedStarter:true,active:true},
+      {...identity,team:'Home',starter:false,confirmedStarter:false,active:false}];
+    value.autoPlayers=[{...identity,team:'Away',starter:true,availability:100},
+      {...identity,team:'Home',starter:false,availability:100}];
+    const rows=attachParticipationProjections(value);
+    assert.equal(rows.find(row=>row.team==='Away').startProbability,1);
+    assert.equal(rows.find(row=>row.team==='Home').startProbability,0);
+    assert.equal(value.autoPlayers[0].participationProjection.startProbability,1);
+  }
+});
+
+test('known conflicting athlete IDs cannot borrow same-name learned participation',()=>{
+  const value=game();
+  value.autoPlayers=[{name:'Shared Name',team:'Away',sourceAthleteId:'new-player',starter:true}];
+  const rows=attachParticipationProjections(value,{old:{name:'Shared Name',team:'Away',athleteId:'old-player',participation:.1,sampleSize:99}});
+  assert.equal(rows[0].historySamples,0);
+  const matching=attachParticipationProjections(value,{correct:{name:'Renamed Player',team:'Away',athleteId:'new-player',participation:.8,sampleSize:12}});
+  assert.equal(matching[0].historySamples,12);
+});
+
+test('advanced profile caller rejects conflicting IDs and matches stable IDs after a name change',()=>{
+  const value=game();
+  value.autoPlayers=[{name:'Shared Name',team:'Away',sourceAthleteId:'new-player',starter:true,availability:100}];
+  applyPlayerProfilesAndLineups([value],{old:{name:'Shared Name',team:'Away',leagueKey:'mlb',athleteId:'old-player',participation:.1,sampleSize:99,impact:8,form:10}});
+  assert.equal(value.autoPlayers[0].stats?.historicalBoxscoreGames,undefined);
+  assert.equal(value.autoPlayers[0].participationProjection.historySamples,0);
+  applyPlayerProfilesAndLineups([value],{correct:{name:'Renamed Player',team:'Away',leagueKey:'mlb',athleteId:'new-player',participation:.8,sampleSize:12,impact:4,form:60}});
+  assert.equal(value.autoPlayers[0].stats.historicalBoxscoreGames,12);
+  assert.equal(value.autoPlayers[0].participationProjection.historySamples,12);
+});
+
+test('event roster confirmation cannot transfer between teams through a colliding athlete ID',()=>{
+  const value=game();
+  const parsed=parseEspnSummary({rosters:[{team:{displayName:'Home'},roster:[{athlete:{id:'shared',displayName:'Home Player'},starter:true}]}],
+    header:{competitions:[{competitors:[{team:{displayName:'Away'},probables:[{athlete:{id:'shared',displayName:'Away Player'}}]}]}]}},value,
+    {fetchedAt:new Date(now).toISOString(),cacheState:'network'});
+  assert.equal(parsed.players[0].confirmedStarter,false);
+  const unknownTeam=parseEspnSummary({rosters:[{roster:[{athlete:{id:'shared'},starter:true}]}],
+    injuries:[{team:{displayName:'Away'},injuries:[{athlete:{id:'shared',displayName:'Away Player'},status:'Questionable'}]}]},value,
+    {fetchedAt:new Date(now).toISOString(),cacheState:'network'});
+  assert.equal(unknownTeam.players[0].confirmedStarter,false);
 });
 
 test('a champion supported only by v6.0.1 evidence stays inactive after evidence-semantic repairs',()=>{

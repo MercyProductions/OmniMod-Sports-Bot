@@ -454,9 +454,9 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
   for (const group of summary?.rosters || []) {
     for (const row of group.roster || []) {
       const athleteId = String(row.athlete?.id || '');
-      if (athleteId) starters.set(athleteId, row.starter === true);
       const athlete = row.athlete || {};
       const team = group.team?.displayName || group.team?.name || '';
+      if (athleteId && team) starters.set(`${normalizeEntityName(team)}__${athleteId}`, row.starter === true);
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (team && name) lineups.push({
         athleteId,
@@ -498,8 +498,8 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         status: probable.displayName || 'probable starter',
         form: probableForm(game, role, stats),
         starter: true,
-        confirmedStarter: starters.get(String(athlete.id || '')) === true,
-        confirmationStatus: starters.get(String(athlete.id || '')) === true ? 'provider_roster_starter' : 'projected',
+        confirmedStarter: starters.get(`${normalizeEntityName(teamName)}__${athlete.id || ''}`) === true,
+        confirmationStatus: starters.get(`${normalizeEntityName(teamName)}__${athlete.id || ''}`) === true ? 'provider_roster_starter' : 'projected',
         stats,
         notes: 'Named in provider probable starter data; confirmation requires an event-roster starter record.',
         source: 'ESPN automatic probable starter',
@@ -519,7 +519,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (!name || !teamName) continue;
       const role = athlete.position?.displayName || athlete.position?.name || athlete.position?.abbreviation || '';
-      const starter = starters.get(String(athlete.id || '')) || false;
+      const starter = starters.get(`${normalizeEntityName(teamName)}__${athlete.id || ''}`) || false;
       const status = String(injury.status || injury.type?.description || injury.type?.abbreviation || 'injury report');
       const row = {
         id: `auto-injury-${game.id}-${athlete.id || normalizeEntityName(name)}`,
