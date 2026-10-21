@@ -60,3 +60,7 @@ Development v6.0.8 repairs team-scoped lineup joins and conflicting-ID historica
 ## Lineup conflict continuation
 
 Development v6.0.9 introduces distinct-player reconciliation shared by advanced lineup features, participation and frozen coverage. Separate unavailable reports defeat contradictory roster confirmation; duplicate rows cannot manufacture a complete lineup. Capture write/reload also rejects malformed completion timestamps. See [verified mechanisms and unresolved reliability limits](SPORTS_LINEUP_CONFLICTS.md). Latest suite: 243 passing; syntax checks pass. Prospective accuracy, actual transport/process recovery and provider coverage remain unfinished.
+
+## Transport recovery continuation
+
+The actual publisher/cache/journal now has isolated send/edit/history failure tests and a real child-process exit/restart test at simulated remote acceptance. Delivery acknowledges exactly the formatter-retained rows. See [confirmed defects, 253-test result and explicit limits](SPORTS_TRANSPORT_RECOVERY.md). This strengthens the earlier module-reimport evidence; live Discord, distributed concurrency, all scheduler branches and mid-append crash recovery remain unverified. No deployment or performance improvement is asserted.

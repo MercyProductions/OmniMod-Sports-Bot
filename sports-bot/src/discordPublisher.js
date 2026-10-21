@@ -5,7 +5,8 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  RESTJSONErrorCodes
 } from 'discord.js';
 import { config } from './config.js';
 import { writeDailyCache } from './storage.js';
@@ -192,7 +193,7 @@ function predictionField(prediction, game = null) {
   };
 }
 
-export function formatSlateEmbeds(slate) {
+function formatSlatePresentation(slate) {
   const games = new Map((slate.games || []).map((game) => [String(game.id), game]));
   const predictions = (slate.predictions ?? []).map((prediction) => games.has(String(prediction.gameId)) ? refreshPredictionValue(prediction, games.get(String(prediction.gameId))) : prediction);
   const displayedPredictions = predictions.slice(0, 25);
@@ -286,7 +287,11 @@ export function formatSlateEmbeds(slate) {
     throw new Error(`Daily slate formatter exceeded Discord's embed limit (${finalLength}/${DISCORD_EMBED_TOTAL_LIMIT}).`);
   }
 
-  return embeds;
+  return { embeds, displayedPredictions: predictions.slice(0, shownCount) };
+}
+
+export function formatSlateEmbeds(slate) {
+  return formatSlatePresentation(slate).embeds;
 }
 
 export function alertRoleButtons() {
@@ -304,7 +309,7 @@ export function alertRoleButtons() {
   ];
 }
 
-export async function findDailySlateMessage(client, dateKey, guildId = '') {
+export async function findDailySlateMessage(client, dateKey, guildId = '', { strict = false } = {}) {
   try {
     const resources = await setupGuildResources(client, guildId);
     const expectedTitle = `OmniMod Sports Daily Slate | ${dateKey}`;
@@ -316,23 +321,29 @@ export async function findDailySlateMessage(client, dateKey, guildId = '') {
         message.embeds?.some((embed) => embed.title === expectedTitle)
       );
       if (match) return match;
-      if (messages.size < 100) break;
+      if (messages.size < 100) return null;
       before = messages.last()?.id;
-      if (!before) break;
+      if (!before) {
+        if (strict) throw new Error('Daily slate history search could not establish completeness.');
+        return null;
+      }
     }
+    if (strict) throw new Error('Daily slate history search limit reached; publication deferred.');
     return null;
-  } catch {
+  } catch (error) {
+    if (strict) throw new Error('Cannot verify daily slate history; publication deferred.', { cause: error });
     return null;
   }
 }
 
 export async function postDailySlate(client, slate, options = {}) {
   const resources = await setupGuildResources(client, options.guildId || slate.guildId);
+  const presentation = formatSlatePresentation(slate);
   const mention = resources.notifyRole ? `<@&${resources.notifyRole.id}> ` : '';
   const content = `${mention}Daily OmniMod Sports slate for **${slate.dateKey}**. Informational only; not wagering advice.`;
   const payload = {
     content,
-    embeds: formatSlateEmbeds(slate),
+    embeds: presentation.embeds,
     components: alertRoleButtons(),
     allowedMentions: resources.notifyRole ? { roles: [resources.notifyRole.id] } : { parse: [] }
   };
@@ -341,20 +352,26 @@ export async function postDailySlate(client, slate, options = {}) {
   let created = false;
   let payloadWritten = false;
   if (!options.forceNew && slate.messageId && slate.channelId) {
+    let existing;
     try {
       const channel = await client.channels.fetch(slate.channelId);
-      const existing = await channel.messages.fetch(slate.messageId);
+      existing = await channel.messages.fetch(slate.messageId);
+    } catch (error) {
+      // Only a confirmed missing resource permits discovery/replacement.
+      if (![RESTJSONErrorCodes.UnknownChannel, RESTJSONErrorCodes.UnknownMessage].includes(Number(error?.code))) {
+        throw new Error('Cannot verify cached slate message; publication deferred.', { cause: error });
+      }
+    }
+    if (existing) {
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
       payloadWritten = options.reuseExisting === false;
-    } catch {
-      message = null;
     }
   }
 
   // The Discord channel is the final duplicate guard when a cache file is
   // missing, moved, or a second cPanel app root starts with the same token.
   if (!message && options.allowDuplicate !== true) {
-    const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id);
+    const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id, { strict: true });
     if (existing) {
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
       payloadWritten = options.reuseExisting === false;
@@ -379,7 +396,7 @@ export async function postDailySlate(client, slate, options = {}) {
   if (created) {
     await logBotEvent(client, `Posted OmniMod Sports slate ${updated.dateKey} with ${updated.predictions.length} prediction(s).`, updated.guildId);
   }
-  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: (updated.predictions || []).slice(0, 25) }, { lifecycle: 'delivered' });
+  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: presentation.displayedPredictions }, { lifecycle: 'delivered' });
   return updated;
 }
 

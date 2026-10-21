@@ -40,11 +40,13 @@ test('ordinary reads, disabled budgets, non-admins and missing keys never call a
 });
 
 test('durable request slots enforce cooldown and daily cap across repeated callers', async () => {
-  const args = { now, dailyCap: 2, cooldownMinutes: 5, directory: path.join(directory, 'budget') };
+  // Keep these claims on one local date even when the suite runs near midnight.
+  const budgetNow=Date.parse('2026-10-20T18:00:00Z');
+  const args = { now:budgetNow, dailyCap: 2, cooldownMinutes: 5, directory: path.join(directory, 'budget') };
   assert.equal((await claimValueRefresh(args)).claimed, true);
-  assert.equal((await claimValueRefresh({ ...args, now: now + 1 })).status, 'cooldown');
-  assert.equal((await claimValueRefresh({ ...args, now: now + 6 * 60_000 })).claimed, true);
-  assert.equal((await claimValueRefresh({ ...args, now: now + 12 * 60_000 })).status, 'daily_cap');
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 1 })).status, 'cooldown');
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 6 * 60_000 })).claimed, true);
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 12 * 60_000 })).status, 'daily_cap');
   const claims = await fs.readdir(path.join(args.directory, 'value-refresh-claims'));
   assert.equal(claims.filter((name) => name.endsWith('.json')).length, 2);
 });
@@ -53,6 +55,16 @@ test('concurrent claims reserve at most one request, including the cooldown cons
   const args = { now, dailyCap: 5, cooldownMinutes: 5, directory: path.join(directory, 'concurrent') };
   const results = await Promise.all(Array.from({ length: 8 }, () => claimValueRefresh(args)));
   assert.equal(results.filter((row) => row.claimed).length, 1);
+});
+
+test('local date rollover resets the daily cap while retaining the cross-midnight cooldown',async()=>{
+  // October in America/Chicago: 04:59 UTC is 23:59 local, 05:00 UTC is the next date.
+  const beforeMidnight=Date.parse('2026-10-21T04:59:00Z');
+  const args={now:beforeMidnight,dailyCap:1,cooldownMinutes:5,directory:path.join(directory,'rollover-budget')};
+  assert.equal((await claimValueRefresh(args)).claimed,true);
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+2*60_000})).status,'cooldown');
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+6*60_000})).claimed,true);
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+12*60_000})).status,'daily_cap');
 });
 
 test('provider failure consumes its reservation and never exposes raw key-bearing errors', async () => {
