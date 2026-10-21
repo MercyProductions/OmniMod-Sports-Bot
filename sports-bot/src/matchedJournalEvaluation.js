@@ -1,3 +1,4 @@
+import {eventObservationHash} from './journalEventMatch.js';
 import {auditJournalForecastIdentities} from './journalForecastIdentity.js';
 import {quoteTimeEpoch as time} from './oddsPricing.js';
 import {validCandidateVector} from './candidateCohorts.js';
@@ -108,12 +109,13 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
   if(!Number.isFinite(asOf)||!Number.isFinite(new Date(asOf).getTime())||!Number.isInteger(repetitions)||repetitions<100||repetitions>2000)throw new Error('Invalid bounded evaluation settings');
   const rejects={},reject=reason=>{rejects[reason]=(rejects[reason]||0)+1;};
   const visible=records.filter(event=>Number.isFinite(time(event.recordedAt))&&time(event.recordedAt)<=asOf);
-  const results=new Map([...journalResultState(visible).eligible].map(([id,event])=>[id,{...event.payload,resultRecordedAt:event.recordedAt}]));
+  const resultState=journalResultState(visible);
+  const results=new Map([...resultState.eligible].map(([id,event])=>[id,{...event.payload,resultRecordedAt:event.recordedAt}]));
   const identities=auditJournalForecastIdentities(visible);
   if(identities.conflictingRecords)rejects.forecast_identity_conflict=identities.conflictingRecords;
   if(identities.duplicateRecords)rejects.duplicate_forecast_record=identities.duplicateRecords;
   if(identities.invalidIdRecords)rejects.forecast_identity_missing=identities.invalidIdRecords;
-  const first=new Map();
+  const first=new Map(),cohorts=new Map(),labels=new Map(),disputedGames=new Set();
   for(const event of identities.events){
     if(event.type!=='forecast')continue;
     const row=event.payload,generated=time(row.predictionGeneratedAt),issued=time(event.recordedAt),start=time(row.startTime);
@@ -121,9 +123,32 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
     if(![generated,issued,start].every(Number.isFinite)||generated>issued||issued>=start){reject('invalid_issuance_chronology');continue;}
     if(!['string','number'].includes(typeof row.gameId)||(typeof row.gameId==='number'&&!Number.isFinite(row.gameId))||!String(row.gameId).trim()
       ||typeof row.league!=='string'||!row.league.trim()||typeof row.modelVersion!=='string'||!row.modelVersion.trim()||typeof row.horizon!=='string'||!row.horizon.trim()){reject('identity_or_horizon_missing');continue;}
-    const key=JSON.stringify([row.guildId,row.league.trim().toLowerCase(),String(row.gameId),new Date(start).toISOString(),row.modelVersion,row.horizon.trim().toLowerCase()]);
-    if(!first.has(key))first.set(key,row);else reject('later_same_horizon_revision_not_selected');
+    const game=JSON.stringify([row.league.trim().toLowerCase(),String(row.gameId),new Date(start).toISOString()]);
+    const key=JSON.stringify([String(row.guildId||''),game,row.modelVersion,row.horizon.trim().toLowerCase()]);
+    if(!cohorts.has(key))cohorts.set(key,[]);
+    cohorts.get(key).push({row,issued});
+    if(resultState.conflicts.has(row.forecastId))disputedGames.add(game);
+    const result=results.get(row.forecastId),observed=time(result?.observedAt),recorded=time(result?.resultRecordedAt);
+    if(result&&!result.scheduleChanged&&SIDES.includes(result.actualSide)&&Number.isFinite(observed)&&Number.isFinite(recorded)
+      &&start<=observed&&observed<=recorded&&recorded<=asOf){
+      if(!labels.has(game))labels.set(game,new Set());
+      labels.get(game).add(result.actualSide);
+    }
   }
+  const frozenInputs=row=>{
+    const {forecastId,...payload}=row;
+    return eventObservationHash({...payload,guildId:String(row.guildId||''),league:row.league.trim().toLowerCase(),gameId:String(row.gameId),
+      startTime:new Date(time(row.startTime)).toISOString(),horizon:row.horizon.trim().toLowerCase(),
+      predictionGeneratedAt:new Date(time(row.predictionGeneratedAt)).toISOString()});
+  };
+  let ambiguousFirstCohorts=0;
+  for(const [key,items] of cohorts){
+    const earliest=items[0].issued,tied=items.filter(item=>item.issued===earliest);
+    if(items.length>1)rejects.later_same_horizon_revision_not_selected=(rejects.later_same_horizon_revision_not_selected||0)+items.length-1;
+    if(new Set(tied.map(item=>frozenInputs(item.row))).size>1){reject('ambiguous_first_issue');ambiguousFirstCohorts++;continue;}
+    first.set(key,items[0].row);
+  }
+  const conflicts=new Set([...labels].filter(([,sides])=>sides.size>1).map(([key])=>key));
   const eligible=[];
   for(const row of first.values()){
     const result=results.get(row.forecastId),probabilities=vector(journalOutcomeVector(row));
@@ -134,7 +159,6 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
     const game=JSON.stringify([row.league.trim().toLowerCase(),String(row.gameId),new Date(time(row.startTime)).toISOString()]);
     eligible.push({row,result,probabilities,game});
   }
-  const conflicts=new Set([...group(eligible,item=>item.game)].filter(([,items])=>new Set(items.map(item=>item.result.actualSide)).size>1).map(([key])=>key));
   const versions=Object.create(null);
   for(const [version,items] of group(eligible,item=>item.row.modelVersion)){
     versions[version]={};
@@ -143,6 +167,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
       for(const item of items){
         const {row,result,probabilities,game}=item;
         if(conflicts.has(game)){skip('conflicting_game_results');continue;}
+        if(disputedGames.has(game)){skip('unresolved_game_result_dispute');continue;}
         const direct=row.candidateProbabilities?.[name];
         const candidate=vector(direct||row.referenceBaselines?.[name]?.probabilities, direct?row.candidateModeledOutcomes?.[name]:row.referenceModeledOutcomes?.[name]);
         if(!candidate){skip('reference_missing_or_invalid');continue;}
@@ -157,10 +182,12 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
       versions[version][name]={...compare(pairs,repetitions),excluded,strata:by};
     }
   }
-  return {schema:'sports-matched-journal-v1',asOf:new Date(asOf).toISOString(),inputRecords:records.length,
+  return {schema:'sports-matched-journal-v2',asOf:new Date(asOf).toISOString(),inputRecords:records.length,
     visibleRecords:visible.length,unverifiableOrFutureRecordTimes:records.length-visible.length,
+    candidateCohorts:cohorts.size,ambiguousFirstCohorts,disputedGames:disputedGames.size,
     selectedForecasts:first.size,conflictingForecastIds:identities.conflictingIds.size,conflictingGames:conflicts.size,rejections:rejects,byVersion:versions,
-    selectionRule:'Earliest recorded eligible forecast per guild/canonical event/model-version/horizon after ID conflict/duplicate auditing; later revisions retained but not selected.',
+    selectionRule:'Earliest recorded eligible forecast per guild/canonical event/model-version/horizon after ID auditing; differing simultaneous inputs exclude the cohort. Result conflicts/disputes across all qualified issued revisions exclude the event; no later selection fallback.',
+    resultAuditPolicy:'All identity-audited, lifecycle/chronology/scope-qualified issued revisions visible at cutoff, before probability and first-cohort selection; active disputes bind their event until linked reconciliation. Source truth is not authenticated.',
     weighting:'One weight per league/event/start time, shared across its guild/horizon observations; versions evaluated separately.',
     intervalMethod:`${repetitions} paired game-cluster bootstrap replicates; null below 8 games; descriptive, no multiple-testing correction`,
     scoreDefinition:'Mean-coordinate multiclass Brier; multinomial log loss clipped at 1e-12; selected-outcome calibration.',
