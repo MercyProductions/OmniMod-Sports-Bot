@@ -72,3 +72,7 @@ Completion now agrees with durable journal issuance, not merely attempted issuan
 ## Derived input chronology continuation
 
 Development v6.0.10 closes reproduced parent/derived participation, roster, advanced and nested-receipt cutoff gaps. [Evidence, tests and remaining advanced-adapter defects](SPORTS_DERIVED_INPUT_CHRONOLOGY.md); latest suite 264 passing, syntax checks pass. Unknown provenance remains unknown and complete point-in-time integrity remains false. No claim of improved forecast performance or deployed verification.
+
+## Advanced source freshness continuation
+
+Development v6.0.11 replaces whole-container freshness with independent source success/retry state, preserves contributing row receipts through model attachment and freezes per-game source diagnostics. [Reproduced defects, synthetic request measurements and remaining limits](SPORTS_ADVANCED_SOURCE_FRESHNESS.md); latest suite 272 passing, syntax checks pass. No live source access, native publication verification or improved prediction performance is claimed.

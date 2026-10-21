@@ -1,3 +1,3 @@
 // Separate identity for repaired data/evaluation semantics; baseline remains tagged.
-export const CURRENT_MODEL_VERSION = 'OmniMod Evidence Ensemble v6.0.10';
+export const CURRENT_MODEL_VERSION = 'OmniMod Evidence Ensemble v6.0.11';
 export const EVALUATION_VERSION = 'versioned-game-horizon-v1';

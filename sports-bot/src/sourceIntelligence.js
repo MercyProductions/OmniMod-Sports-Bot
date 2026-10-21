@@ -154,12 +154,14 @@ export function corroborateScheduleRows(games = [], rows = [], options = {}) {
     game.sourceCorroboration ||= { providers: [], matches: [], conflicts: [] };
     const provider = options.provider || 'independent schedule dataset';
     if (!game.sourceCorroboration.providers.includes(provider)) game.sourceCorroboration.providers.push(provider);
-    game.sourceCorroboration.matches.push({ provider, eventId: row.game_id || row.id || '', fetchedAt: options.fetchedAt || '', conflict: false });
+    const receipt = row.sourceFetchedAt || options.fetchedAt || '';
+    game.sourceCorroboration.matches.push({ provider, eventId: row.game_id || row.id || '', fetchedAt: receipt, conflict: false });
     const factors = {};
     if (row.roof) factors.roofTypeKnown = 1;
     if (row.surface) factors.playingSurfaceKnown = 1;
     game.eventEnvironment = {
       ...(game.eventEnvironment || {}),
+      sourceReceiptTimes: [...(game.eventEnvironment?.sourceReceiptTimes || []), receipt || null],
       roof: row.roof || game.eventEnvironment?.roof || '',
       surface: row.surface || game.eventEnvironment?.surface || '',
       indoor: /closed|dome|indoors/i.test(String(row.roof || '')) || game.eventEnvironment?.indoor || false,
@@ -167,7 +169,9 @@ export function corroborateScheduleRows(games = [], rows = [], options = {}) {
       temperatureF: finite(row.temp, game.eventEnvironment?.temperatureF),
       windSpeedMph: finite(row.wind, game.eventEnvironment?.windSpeedMph)
     };
-    if (Object.keys(factors).length) mergeContext(game, { factors, source: provider, notes: [row.roof, row.surface].filter(Boolean).join(', ') });
+    if (Object.keys(factors).length) mergeContext(game, { factors, source: provider,
+      sourceReceiptTimes: [...(game.autoContext?.sourceReceiptTimes || []), receipt || null],
+      notes: [row.roof, row.surface].filter(Boolean).join(', ') });
   }
   return matched;
 }

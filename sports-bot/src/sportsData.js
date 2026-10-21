@@ -627,13 +627,15 @@ function derivedAdvancedDataset(game, awayProfile, homeProfile) {
   const away = awayProfile?.advancedMetrics || {};
   const home = homeProfile?.advancedMetrics || {};
   const profile = sportProfile(game).key;
+  const withProvenance = values => ({ ...values, sourceReceiptTimes: [awayProfile?.sourceFetchedAt || null, homeProfile?.sourceFetchedAt || null],
+    publicationTimeVerified: false, provenancePolicy: 'derived-history-receipts-v1' });
   const difference = (name) => Number(home[name] || 0) - Number(away[name] || 0);
   const play = { playValueDifference: difference('playValue'), playSuccessDifference: difference('playSuccessRate'), playTurnoverDifference: difference('playTurnoverRate'), playShotQualityDifference: difference('playShotQuality') };
-  if (profile === 'baseball') return { awayExpectedRuns: away.expectedRunsProxy, homeExpectedRuns: home.expectedRunsProxy, bullpenDifference: -difference('bullpenRunsAllowedProxy'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'basketball') return { pace: [away.possessions, home.possessions].filter(Number.isFinite).reduce((sum, value, _, rows) => sum + value / rows.length, 0) || null, efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'football') return { epaDifference: difference('epaProxy'), driveEfficiencyDifference: difference('driveEfficiency'), yardsPerPlayDifference: difference('yardsPerPlay'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'hockey') return { xgDifference: difference('expectedGoalsProxy'), gsaxDifference: difference('goalPreventionProxy'), shotVolumeDifference: difference('shotVolume'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'soccer') return { awayXg: away.expectedGoals, homeXg: home.expectedGoals, shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' };
+  if (profile === 'baseball') return withProvenance({ awayExpectedRuns: away.expectedRunsProxy, homeExpectedRuns: home.expectedRunsProxy, bullpenDifference: -difference('bullpenRunsAllowedProxy'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'basketball') return withProvenance({ pace: [away.possessions, home.possessions].filter(Number.isFinite).reduce((sum, value, _, rows) => sum + value / rows.length, 0) || null, efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'football') return withProvenance({ epaDifference: difference('epaProxy'), driveEfficiencyDifference: difference('driveEfficiency'), yardsPerPlayDifference: difference('yardsPerPlay'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'hockey') return withProvenance({ xgDifference: difference('expectedGoalsProxy'), gsaxDifference: difference('goalPreventionProxy'), shotVolumeDifference: difference('shotVolume'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'soccer') return withProvenance({ awayXg: away.expectedGoals, homeXg: home.expectedGoals, shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' });
   return null;
 }
 
@@ -802,9 +804,14 @@ export async function buildDailySlate(date = new Date(), options = {}) {
       truncated: Boolean(awayAuto?.sourceTruncated || homeAuto?.sourceTruncated)
     };
     game.autoTeamMetrics = { away: awayAuto || null, home: homeAuto || null };
+    const derived = derivedAdvancedDataset(game, awayAuto, homeAuto), external = game.advancedDataset;
     game.advancedDataset = {
-      ...(derivedAdvancedDataset(game, awayAuto, homeAuto) || {}),
-      ...(game.advancedDataset || {})
+      ...(derived || {}), ...(external || {}),
+      sourceReceiptTimes: [...(derived?.sourceReceiptTimes || []),
+        ...(Array.isArray(external?.sourceReceiptTimes) ? external.sourceReceiptTimes : external && Object.keys(external).length ? [null] : [])],
+      publicationTimeVerified: false,
+      provenancePolicy: derived && external ? 'mixed-derived-and-external-receipts-v1'
+        : external?.provenancePolicy || derived?.provenancePolicy || 'unknown_legacy'
     };
   }
   const includeOdds = options.includeOdds !== false && !localOnly;

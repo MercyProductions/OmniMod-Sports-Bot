@@ -36,6 +36,16 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     if (state !== 'receipt_available') missing.push(`${key}:${state}`);
   }
   if (!summary.receiptFresh) missing.push('summary:fresh_receipt_not_verified');
+  const advancedReceipts = Array.isArray(game.advancedDataset?.sourceReceiptTimes) ? game.advancedDataset.sourceReceiptTimes.map(timestamp) : [];
+  if (game.advancedDataset && (!advancedReceipts.length || advancedReceipts.some(value => value === null))) missing.push('advanced_dataset:receipt_times_unknown');
+  const advancedRefreshes = (game.advancedDataset?.sourceRefreshStatuses || []).map(row => {
+    const checkedAt = timestamp(row.checkedAt), available = checkedAt && Date.parse(checkedAt) <= now;
+    const lastSuccessAt = timestamp(row.lastSuccessAt);
+    return { sourceId: row.sourceId, state: available ? row.state : 'unknown_at_cutoff', checkedAt,
+      lastSuccessAt: lastSuccessAt && Date.parse(lastSuccessAt) <= now ? lastSuccessAt : null,
+      retryAfter: available ? timestamp(row.retryAfter) : null, providerRetryAfter: available ? timestamp(row.providerRetryAfter) : null };
+  });
+  if (advancedRefreshes.some(row => row.state === 'failed')) missing.push('advanced_dataset:refresh_failed');
   const sides = {};
   for (const side of ['away', 'home']) {
     const players = selectedPlayers?.[side] || (game.autoPlayers || []).filter(row => matches(game[side], row.team));
@@ -78,6 +88,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     venue: { neutral: typeof game.neutralSite === 'boolean' ? game.neutralSite : null,
       verification: 'provider_or_manual_assertion_not_independently_attested' },
     rosterTransitionRisk: finiteNumber(game.autoLineup?.rosterTransitionRisk),
+    advancedDatasetProvenance: { provider: game.advancedDataset?.provider || null,
+      receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
+      sourceRefreshStatuses: advancedRefreshes,
+      missingOrInvalidReceipts: advancedReceipts.filter(value => value === null).length,
+      nativePublicationVerified: false },
     advancedStatsAvailability: 'enumerated_player_stats_only_not_a_league_completeness_attestation',
     missing, completenessVerified: false };
 }

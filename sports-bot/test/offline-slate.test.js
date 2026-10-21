@@ -48,6 +48,10 @@ test('strict offline slate builds from local schedule, players, teams, and histo
   assert.ok(slate.predictions[0].localDataConfidenceValue > 20);
   assert.ok(Date.parse(slate.predictions[0].inputChronology.cutoffAt)<=Date.now());
   assert.equal(slate.modelSummary.externalCalls, 0);
+  assert.equal(slate.games[0].advancedDataset.sourceReceiptTimes.length,2);
+  assert.equal(slate.games[0].advancedDataset.publicationTimeVerified,false);
+  assert.deepEqual(slate.predictions[0].evidenceCoverage.advancedDatasetProvenance.sourceReceiptTimes,
+    slate.games[0].advancedDataset.sourceReceiptTimes);
 
   const inventory = await intelligenceInventory('guild-offline');
   assert.equal(inventory.teams, 3);
