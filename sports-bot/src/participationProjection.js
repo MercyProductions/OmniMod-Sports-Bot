@@ -2,17 +2,13 @@ import { isConfirmedStarter, reconcilePlayerEvidence, samePlayerIdentity } from 
 export { samePlayerIdentity } from './playerEvidence.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
-import { explicitlyUnavailable } from './dataValidation.js';
+import { explicitlyUnavailable, finiteNumber } from './dataValidation.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function finite(value, fallback = null) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
+const finite = finiteNumber;
 
 function statusAvailability(player = {}) {
   const text = `${player.status || ''} ${player.notes || ''}`.toLowerCase();
@@ -25,7 +21,7 @@ function statusAvailability(player = {}) {
   return clamp(availability > 1 ? availability / 100 : availability, 0, 1);
 }
 
-function roleScale(profileKey, role = '') {
+export function roleParticipationPrior(profileKey, role = '') {
   const text = String(role).toLowerCase();
   if (profileKey === 'baseball' && /starting pitcher|\bsp\b/.test(text)) return 0.72;
   if (profileKey === 'baseball' && /relief|closer|bullpen|\brp\b/.test(text)) return 0.24;
@@ -47,7 +43,9 @@ function workloadLabel(profileKey, share, role = '') {
 }
 
 export function projectPlayerParticipation(player = {}, learned = null, profileKey = 'default', lineup = {}) {
-  const historicalShare = clamp(finite(learned?.participation, finite(player.stats?.historicalParticipation, roleScale(profileKey, player.role))), 0.02, 1);
+  const candidateShare = finite(learned?.participation, finite(player.stats?.historicalParticipation));
+  const measuredShare = candidateShare !== null && candidateShare >= 0 && candidateShare <= 1 ? candidateShare : null;
+  const historicalShare = clamp(measuredShare ?? roleParticipationPrior(profileKey, player.role), 0, 1);
   const starterRate = clamp(finite(learned?.starterRate, player.starter ? 0.82 : 0.22), 0, 1);
   const confirmedStarter = Boolean(lineup.confirmedStarter ?? isConfirmedStarter(player));
   const confirmedActive = lineup.active !== false && player.active !== false;
@@ -60,7 +58,9 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
   const reserveShare = Math.min(historicalShare, profileKey === 'basketball' || profileKey === 'hockey' || profileKey === 'soccer' ? 0.34 : 0.2);
   const conditionalShare = clamp(conditionalStartProbability * historicalShare + (1 - conditionalStartProbability) * reserveShare, 0, 1);
   const expectedShare = clamp(availabilityProbability * conditionalShare, 0, 1);
-  const historySamples = finite(learned?.sampleSize, finite(player.stats?.historicalBoxscoreGames, 0));
+  const verifiedSamples = finite(learned?.participationSamples, finite(player.stats?.historicalParticipationSamples));
+  const declaredSamples = verifiedSamples ?? 0;
+  const historySamples = measuredShare !== null && measuredShare >= 0 && measuredShare <= 1 ? Math.max(0, declaredSamples) : 0;
   const evidenceReliability = clamp(historySamples / (historySamples + 6), 0, 0.92);
   const statusUncertainty = 4 * availabilityProbability * (1 - availabilityProbability);
   const roleUncertainty = 4 * conditionalStartProbability * (1 - conditionalStartProbability);
@@ -72,11 +72,12 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
     conditionalStartProbability,
     expectedShare,
     historicalShare,
+    historicalParticipationEvidence: measuredShare === null ? 'role_prior' : verifiedSamples === null ? 'legacy_workload_unknown_provenance' : 'boxscore_workload_proxy',
     expectedWorkload: Number(workload.value.toFixed(1)),
     workloadUnit: workload.unit,
     uncertainty: Number(uncertainty.toFixed(3)),
     historySamples,
-    source: learned ? 'historical participation + current status/lineup' : 'role prior + current status/lineup'
+    source: measuredShare !== null ? 'historical workload proxy + current status/lineup' : 'role prior + current status/lineup'
   };
 }
 

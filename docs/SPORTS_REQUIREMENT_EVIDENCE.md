@@ -96,3 +96,7 @@ Development v6.0.14 verifies declared NFL season/type, forbids weekly grain and 
 ## Venue and opponent-rating continuation
 
 Development v6.0.15 excludes invalid score observations, separates neutral/unknown venues from measured home advantage and requires numerical convergence before new opponent ratings. [Reproductions, controls, source references and limits](SPORTS_VENUE_AND_RATING_INTEGRITY.md); complete suite 297 passing. Actual prospective games remain unstarted; no demonstrated accuracy or after-cost improvement.
+
+## Historical player-workload continuation
+
+Development v6.0.16 separates observed workload proxies from role priors and unverifiable legacy estimates, repairs zero preservation and measures participation reliability with its own sample count. [Reproductions, end-to-end controls and limits](SPORTS_PLAYER_WORKLOAD_EVIDENCE.md); complete suite 304 passing. These remain heuristic inputs requiring forward validation; no deployment or demonstrated predictive improvement.

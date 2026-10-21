@@ -2,7 +2,7 @@ import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
-import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation } from './participationProjection.js';
+import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
 import { finiteNumber, validScore } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
@@ -167,20 +167,19 @@ function performanceScore(profileKey, groupName, stats) {
   return 0;
 }
 
-function participationScore(profileKey, groupName, stats, starter) {
+function participationScore(profileKey, groupName, stats) {
   const group = String(groupName || '').toLowerCase();
-  if (profileKey === 'basketball') return clamp(metric(stats, 'MIN', 'minutes') / 40, 0.08, 1);
+  let observed = null, denominator = null;
+  if (profileKey === 'basketball') { observed = optionalMetric(stats, 'MIN', 'minutes'); denominator = 40; }
+  if (profileKey === 'soccer') { observed = optionalMetric(stats, 'MIN', 'minutes'); denominator = 90; }
+  if (profileKey === 'hockey') { observed = optionalMetric(stats, 'TOI', 'minutes'); denominator = /goalie/.test(group) ? 60 : 22; }
   if (profileKey === 'baseball') {
-    if (/pitch/.test(group)) return clamp(metric(stats, 'IP', 'inningsPitched') / 6, 0.08, 1);
-    return clamp(metric(stats, 'AB', 'atBats', 'PA', 'plateAppearances') / 4.5, 0.08, 1);
+    observed = /pitch/.test(group) ? optionalMetric(stats, 'IP', 'inningsPitched') : optionalMetric(stats, 'PA', 'plateAppearances', 'AB', 'atBats');
+    denominator = /pitch/.test(group) ? 6 : 4.5;
   }
-  if (profileKey === 'football') {
-    const opportunities = metric(stats, 'cattattempted', 'ATT', 'attempts') + metric(stats, 'REC', 'receptions') + metric(stats, 'TACKLES', 'totalTackles');
-    return clamp((starter ? 0.65 : 0.2) + Math.min(0.35, opportunities / 80), 0.08, 1);
-  }
-  if (profileKey === 'hockey') return clamp(metric(stats, 'TOI', 'minutes') / (/goalie/.test(group) ? 60 : 22), 0.08, 1);
-  if (profileKey === 'soccer') return clamp(metric(stats, 'MIN', 'minutes') / 90 || (starter ? 0.85 : 0.3), 0.08, 1);
-  return starter ? 0.85 : 0.35;
+  // Attempts/receptions/tackles and starter status do not measure football snaps.
+  // Other unobserved workloads use explicit projection priors, never fake history.
+  return observed !== null && observed >= 0 && denominator ? clamp(observed / denominator, 0, 1) : null;
 }
 
 function mergePlayerRow(map, row) {
@@ -255,7 +254,8 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
     league: result.league,
     leagueKey: result.leagueKey,
     sportGroup: result.sportGroup,
-    participation: participationScore(profile.key, row.groupName || row.role, row.stats, row.starter),
+    participation: participationScore(profile.key, row.groupName || row.role, row.stats),
+    participationContract: 'observed-workload-v1',
     performance: performanceScore(profile.key, row.groupName || row.role, row.stats),
     source: 'ESPN historical box score'
   }));
@@ -302,13 +302,18 @@ export function buildAutomaticPlayerProfiles(samples = []) {
     rows.sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)));
     const latest = rows.at(-1);
     const recent = rows.slice(-5);
-    const participation = mean(rows.map((row) => row.participation));
+    const participationRows = rows.map(row => row.stats && typeof row.stats === 'object'
+      ? participationScore(sportProfile(row).key, row.groupName || row.role, row.stats)
+      : row.participationContract === 'observed-workload-v1' ? finite(row.participation) : null)
+      .filter(value => value !== null && value >= 0 && value <= 1);
+    const participation = participationRows.length ? mean(participationRows) : null;
     const performance = mean(rows.map((row) => row.performance));
     const recentPerformance = mean(recent.map((row) => row.performance));
     const starterRate = mean(rows.map((row) => row.starter ? 1 : 0));
-    const reliability = rows.length / (rows.length + 3);
+    const reliability = participationRows.length / (participationRows.length + 3);
     const profile = sportProfile(latest);
-    const rawImpact = 0.8 + participation * 3.7 + starterRate * 1.1 + clamp(performance, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
+    const participationPrior = roleParticipationPrior(profile.key, latest.role);
+    const rawImpact = 0.8 + (participation ?? participationPrior) * 3.7 + starterRate * 1.1 + clamp(performance, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
     const impact = clamp(1.1 + (rawImpact - 1.1) * (0.4 + reliability * 0.6), 0.6, 8.5);
     profiles[key] = {
       id: `auto-player__${key}`,
@@ -322,7 +327,9 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       form: clamp(50 + (recentPerformance - performance) * 6, 28, 76),
       starter: starterRate >= 0.5,
       starterRate,
-      participation,
+      participation, participationSamples: participationRows.length,
+      participationEvidence: participationRows.length ? 'boxscore_workload_proxy' : 'unknown',
+      impactEvidence: participationRows.length ? 'heuristic_with_workload_proxy' : 'heuristic_with_role_prior',
       performance,
       sampleSize: rows.length,
       lastSeen: latest.dateKey,
@@ -660,7 +667,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       if (!learned) continue;
       player.impact = learned.impact;
       player.form = learned.form;
-      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation };
+      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null };
       player.valueSource = learned.source;
       learnedInjuries += player.availability < 100 ? 1 : 0;
     }

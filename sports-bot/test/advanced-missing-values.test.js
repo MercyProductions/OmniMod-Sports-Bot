@@ -170,3 +170,77 @@ test('a slowly converging schedule cannot publish an unverified intermediate opp
   awayScore:0,homeScore:index===0?10:0,neutralSite:true}));
  assert.equal(opponentAdjustedRatings(games).size,0);
 });
+
+
+async function historicalPlayer(sportGroup,labels,values,starter=true){
+ const {parseHistoricalEventSummary}=await import('../src/advancedMetrics.js');
+ return parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:[{name:'players',labels,athletes:[{
+  starter,athlete:{id:'p',displayName:'Player',position:{displayName:'Player'}},stats:values
+ }]}]}]}},{id:'g',dateKey:'2099-01-01',sportGroup,leagueKey:'test',awayTeam:'Away',homeTeam:'Home',awayScore:0,homeScore:1});
+}
+
+test('historical workload distinguishes unknown duration from observed zero across timed sports',async()=>{
+ for(const sport of ['Basketball','Soccer','Hockey']){
+  const missing=await historicalPlayer(sport,['PTS'],['1']);
+  assert.equal(missing.players[0].participation,null);
+  const zero=await historicalPlayer(sport,[sport==='Hockey'?'TOI':'MIN'],['0:00']);
+  assert.equal(zero.players[0].participation,0);
+ }
+ const real=await historicalPlayer('Soccer',['MIN'],['45']);
+ assert.equal(real.players[0].participation,.5);
+});
+
+test('historical baseball workload requires observations and preserves zero opportunities',async()=>{
+ const absent=await historicalPlayer('Baseball',['H'],['1']);assert.equal(absent.players[0].participation,null);
+ const zero=await historicalPlayer('Baseball',['AB'],['0']);assert.equal(zero.players[0].participation,0);
+});
+
+test('football opportunity counters do not claim measured snap share',async()=>{
+ const sample=await historicalPlayer('Football',['ATT'],['20']);
+ assert.equal(sample.players[0].participation,null);
+});
+
+test('missing workload does not increase measured participation history or its projection reliability',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ const sample=await historicalPlayer('Basketball',['PTS'],['1']);
+ const learned=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+ assert.equal(learned.participation,null);assert.equal(learned.participationSamples,0);
+ const projection=projectPlayerParticipation({starter:true,role:'Player'},learned,'basketball');
+ assert.equal(projection.historySamples,0);assert.equal(projection.historicalParticipationEvidence,'role_prior');
+});
+
+test('real zero workload survives profile averaging and participation projection',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ const sample=await historicalPlayer('Soccer',['MIN'],['0']);
+ const learned=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+ assert.equal(learned.participation,0);assert.equal(learned.participationSamples,1);
+ const projection=projectPlayerParticipation({starter:true,role:'Player'},learned,'soccer');
+ assert.equal(projection.historicalShare,0);assert.equal(projection.expectedShare,0);assert.equal(projection.historySamples,1);
+});
+
+
+test('legacy participation estimates without observed workload cannot certify measured samples',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ const sample=await historicalPlayer('Soccer',['PTS'],['1']);
+ sample.players[0].participation=.85;delete sample.players[0].participationContract;
+ const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+ assert.equal(profile.participation,null);assert.equal(profile.participationSamples,0);
+ const projection=projectPlayerParticipation({starter:true},{participation:.85,sampleSize:20},'soccer');
+ assert.equal(projection.historySamples,0);assert.equal(projection.historicalParticipationEvidence,'legacy_workload_unknown_provenance');
+});
+
+
+test('current profile caller freezes workload evidence and sample counts in per-game coverage',async()=>{
+ const {buildAutomaticPlayerProfiles,applyPlayerProfilesAndLineups}=await import('../src/advancedMetrics.js');
+ const sample=await historicalPlayer('Soccer',['PTS'],['1']);
+ const profiles=buildAutomaticPlayerProfiles([sample]);
+ const game={id:'current',sportGroup:'Soccer',leagueKey:'test',away:{name:'Away'},home:{name:'Home'},
+  autoPlayers:[{name:'Player',sourceAthleteId:'p',team:'Away',starter:true,availability:100}]};
+ applyPlayerProfilesAndLineups([game],profiles);
+ const player=buildEvidenceCoverage(game).sides.away.modelInputs.players[0];
+ assert.equal(player.historicalParticipationSamples,0);
+ assert.equal(player.historicalParticipationEvidence,'role_prior');
+});

@@ -133,19 +133,19 @@ test('participation lineup joins stay within the player team when names or IDs c
 test('known conflicting athlete IDs cannot borrow same-name learned participation',()=>{
   const value=game();
   value.autoPlayers=[{name:'Shared Name',team:'Away',sourceAthleteId:'new-player',starter:true}];
-  const rows=attachParticipationProjections(value,{old:{name:'Shared Name',team:'Away',athleteId:'old-player',participation:.1,sampleSize:99}});
+  const rows=attachParticipationProjections(value,{old:{name:'Shared Name',team:'Away',athleteId:'old-player',participation:.1,participationSamples:99,sampleSize:99}});
   assert.equal(rows[0].historySamples,0);
-  const matching=attachParticipationProjections(value,{correct:{name:'Renamed Player',team:'Away',athleteId:'new-player',participation:.8,sampleSize:12}});
+  const matching=attachParticipationProjections(value,{correct:{name:'Renamed Player',team:'Away',athleteId:'new-player',participation:.8,participationSamples:12,sampleSize:12}});
   assert.equal(matching[0].historySamples,12);
 });
 
 test('advanced profile caller rejects conflicting IDs and matches stable IDs after a name change',()=>{
   const value=game();
   value.autoPlayers=[{name:'Shared Name',team:'Away',sourceAthleteId:'new-player',starter:true,availability:100}];
-  applyPlayerProfilesAndLineups([value],{old:{name:'Shared Name',team:'Away',leagueKey:'mlb',athleteId:'old-player',participation:.1,sampleSize:99,impact:8,form:10}});
+  applyPlayerProfilesAndLineups([value],{old:{name:'Shared Name',team:'Away',leagueKey:'mlb',athleteId:'old-player',participation:.1,participationSamples:99,sampleSize:99,impact:8,form:10}});
   assert.equal(value.autoPlayers[0].stats?.historicalBoxscoreGames,undefined);
   assert.equal(value.autoPlayers[0].participationProjection.historySamples,0);
-  applyPlayerProfilesAndLineups([value],{correct:{name:'Renamed Player',team:'Away',leagueKey:'mlb',athleteId:'new-player',participation:.8,sampleSize:12,impact:4,form:60}});
+  applyPlayerProfilesAndLineups([value],{correct:{name:'Renamed Player',team:'Away',leagueKey:'mlb',athleteId:'new-player',participation:.8,participationSamples:12,sampleSize:12,impact:4,form:60}});
   assert.equal(value.autoPlayers[0].stats.historicalBoxscoreGames,12);
   assert.equal(value.autoPlayers[0].participationProjection.historySamples,12);
 });
