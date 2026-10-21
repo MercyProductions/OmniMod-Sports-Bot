@@ -30,7 +30,13 @@ export function finalReplyMatches(slate,prediction){
  }catch{return false;}
 }
 export function correctionEvidence(game,prior,revision){
- if(game.manualResultEvidence||game.sourceMeta?.provider==='local')return false;
+ if(game.manualResultEvidence){
+  const evidence=game.manualResultEvidence,receipt=Date.parse(evidence.recordedAt||''),observed=Date.parse(evidence.observedAt||''),before=Date.parse(prior.resultObservedAt||''),after=Date.parse(revision.observedAt);
+  let publicReference=false;try{const url=new URL(evidence.sourceReference);publicReference=['http:','https:'].includes(url.protocol)&&!url.username&&!url.password;}catch{}
+  return evidence.eventIdentityVerified===true&&evidence.sourceChecked===true&&publicReference&&Boolean(evidence.recordedBy)
+   &&Number.isFinite(receipt)&&Number.isFinite(observed)&&observed>before&&receipt>=observed&&receipt<=after;
+ }
+ if(game.sourceMeta?.provider==='local')return false;
  const fetched=Date.parse(game.sourceMeta?.fetchedAt||''),observed=Date.parse(revision.observedAt),previous=Date.parse(prior.resultObservedAt||'');
  return ['network','revalidated','fresh'].includes(game.sourceMeta?.cacheState)&&Number.isFinite(fetched)&&Number.isFinite(previous)&&fetched>previous&&fetched<=observed;
 }

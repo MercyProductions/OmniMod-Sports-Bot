@@ -1,3 +1,5 @@
+import {applyManualResults} from './manualResultMatching.js';
+export {applyManualResults} from './manualResultMatching.js';
 import {finalReplyMatches} from './finalResultRevision.js';
 import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
 import {journalGameIndex} from './journalEventMatch.js';
@@ -611,6 +613,7 @@ export function mergeTargetedGames(freshGames, cachedSlate) {
     return {
       ...cached,
       ...fresh,
+      manualResultEvidence:fresh.manualResultEvidence||null,manualResultConflict:fresh.manualResultConflict||null,
       away: { ...cached.away, ...fresh.away },
       home: { ...cached.home, ...fresh.home },
       odds: fresh.odds || cached.odds || null
@@ -641,7 +644,7 @@ export function derivedAdvancedDataset(game, awayProfile, homeProfile) {
 export function attachFinalGrade(game, prediction, now = Date.now()) {
   if (game.statusKey !== 'final' || prediction.predictionMode === 'retrospective_ungraded') return prediction;
   const actualSide = finalOutcomeSide(game);
-  if (!actualSide) return { ...prediction, actualSide: '', actualWinner: '', predictionCorrect: null };
+  if (!actualSide) return { ...prediction, actualSide: '', actualWinner: '', predictionCorrect: null,finalScore:'' };
   const actualWinner = actualSide === 'draw' ? 'Draw' : game[actualSide].name;
   return {
     ...prediction,
@@ -698,26 +701,6 @@ function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refresh
   return previous===legacyPrevious?{...graded,legacyFrozenIdentityUnverified:true,eligibleForCalibration:false,predictionCorrect:null}:graded;
 }
 
-function applyManualResults(games, intelligence, dateKey) {
-  for (const result of Object.values(intelligence?.results || {})) {
-    if (String(result.dateKey) !== String(dateKey)) continue;
-    const target = games.find((game) =>
-      normalizeName(game.leagueKey || game.league) === normalizeName(result.leagueKey || result.league) &&
-      normalizeName(game.away.name) === normalizeName(result.awayTeam) &&
-      normalizeName(game.home.name) === normalizeName(result.homeTeam));
-    if (!target || validScore(result.awayScore) === null || validScore(result.homeScore) === null) continue;
-    target.away.score = Number(result.awayScore);
-    target.home.score = Number(result.homeScore);
-    target.away.winner = target.away.score > target.home.score;
-    target.home.winner = target.home.score > target.away.score;
-    target.statusKey = 'final';
-    target.statusLabel = 'Final';
-    target.detail = 'Final (local result)';
-    target.manualResultEvidence={kind:'manual_result',updatedAt:result.updatedAt||null,source:result.source||'manual result',eventIdentityVerified:false};
-    target.source = `${target.source} + local result`;
-  }
-  return games;
-}
 
 function selectBalancedSlate(games, limit) {
   const max = Math.max(1, Number(limit) || 25);
@@ -760,7 +743,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   ]);
   let games = mergeLocalGames(scoreboard.games, intelligence, dateKey);
   if (options.targetedPregame) games = mergeTargetedGames(games, options.cachedSlate);
-  games = applyManualResults(games, intelligence, dateKey);
+  const manualResultAudit=[];
+  games = applyManualResults(games, intelligence, dateKey,{audit:manualResultAudit});
   games = carryForwardOdds(games, options.cachedSlate);
   games = selectBalancedSlate(games, config.maxGamesPerPost);
   const automatic = await enrichGamesAutomatically(games, date, {
@@ -947,12 +931,13 @@ export async function buildDailySlate(date = new Date(), options = {}) {
       ...odds.diagnostics,
       `Local intelligence: ${Object.keys(inventory.teams || {}).length} teams, ${Object.keys(inventory.players || {}).length} players, ${Object.keys(inventory.contexts || {}).length} contexts, ${Object.keys(inventory.results || {}).length} results.`,
       `Automatic intelligence: ${automatic.historyResults.length} historical finals, ${Object.keys(automatic.teamProfiles).length} team profiles, ${Object.keys(automatic.playerProfiles || {}).length} learned player profiles, ${automatic.playByPlayGames || 0} play-by-play game(s), ${automatic.confirmedLineups} confirmed lineup side(s), ${automatic.officialMatches + (advancedDatasets.sourceCorroborations || 0)} corroborated source match(es).`,
+      `Manual result audit: ${manualResultAudit.filter(row=>row.status==='applied').length} applied, ${manualResultAudit.filter(row=>row.status==='rejected').length} rejected.`,
       `Calibration history: ${modelContext.history.overall.sampleSize} eligible pregame prediction(s).`
     ],
     alerts: odds.alerts ?? [],
     messageId: options.cachedSlate?.messageId || '',
     channelId: options.cachedSlate?.channelId || '',
-    finalReplies,
+    finalReplies,manualResultAudit,
     lastFinalCorrectionCheckAt:options.cachedSlate?.lastFinalCorrectionCheckAt||''
   };
   await recordPredictionJournal(slate, { lifecycle: options.targetedPregame ? 'provisional' : 'issued' });
@@ -967,7 +952,8 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
   const leagueKeys = [...new Set((cachedSlate.games || []).map((game) => game.leagueKey).filter(Boolean))];
   const scoreboard = await fetchEspnGames(date, { ...options, leagueKeys });
   let freshGames = mergeLocalGames(scoreboard.games, modelContext.intelligence, cachedSlate.dateKey);
-  freshGames = applyManualResults(freshGames, modelContext.intelligence, cachedSlate.dateKey);
+  const manualResultAudit=[];
+  freshGames = applyManualResults(freshGames, modelContext.intelligence, cachedSlate.dateKey,{audit:manualResultAudit});
   const cachedIndex=journalGameIndex(cachedSlate.games||[]),associations=new Map(),rejections=[];
   for(const cachedGame of cachedSlate.games||[]){
     const match=matchSourceEvent(freshGames,cachedGame),key=scopedEventKey(eventReference(cachedGame));
@@ -994,8 +980,8 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
     return !fresh?cachedGame:String(fresh.id)===String(cachedGame.id)?fresh:{...fresh,id:cachedGame.id,upstreamEventId:fresh.id};
   });
   const refreshed = { ...cachedSlate, refreshedAt: new Date().toISOString(), games, predictions,
-    finalAssociationRejections:rejections,
-    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.',`Final source association rejections: ${rejections.length}`],
+    finalAssociationRejections:rejections,manualResultAudit,
+    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.',`Final source association rejections: ${rejections.length}`,`Manual result audit: ${manualResultAudit.filter(row=>row.status==='applied').length} applied, ${manualResultAudit.filter(row=>row.status==='rejected').length} rejected.`],
     alerts: [], newFinals: finals };
   // Save outcomes before Discord delivery: a transport failure cannot erase the result observation.
   await recordPredictionJournal(refreshed, { lifecycle: 'results_only' });

@@ -1,3 +1,5 @@
+import {createHash} from 'node:crypto';
+import {validScore} from './dataValidation.js';
 import path from 'node:path';
 import { dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
@@ -94,7 +96,9 @@ function gameKey(row) {
 }
 
 function resultKey(row) {
-  return cleanText(row.id, 180) || recordKey([
+  if(row.id)return cleanText(row.id,180);
+  if(row.gameId||row.startTime)return 'manual-result-v2-'+createHash('sha256').update(JSON.stringify([row.dateKey,normalizeEntityName(row.leagueKey||row.league),normalizeEntityName(row.awayTeam),normalizeEntityName(row.homeTeam),row.gameId||null,row.startTime||null,row.awayScore,row.homeScore])).digest('hex');
+  return recordKey([
     row.dateKey || row.date,
     row.league || row.leagueKey,
     row.awayTeam || row.away,
@@ -257,14 +261,28 @@ function normalizeResult(row = {}, actor = '') {
   const homeTeam = cleanText(row.homeTeam ?? row.home, 120);
   const league = cleanText(row.league ?? row.leagueKey, 50);
   const dateKey = cleanText(row.dateKey ?? row.date, 20);
-  const awayScore = finiteOrNull(row.awayScore);
-  const homeScore = finiteOrNull(row.homeScore);
+  const awayScore = validScore(row.awayScore);
+  const homeScore = validScore(row.homeScore);
   if (!awayTeam || !homeTeam || !league || !dateKey || awayScore === null || homeScore === null) {
     throw new Error('Every result row needs dateKey, league, awayTeam, homeTeam, awayScore, and homeScore.');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error('Result dateKey must use YYYY-MM-DD format.');
+  const time=(value,label)=>{
+    if(value===undefined||value===null||value==='')return null;
+    if(typeof value!=='string'||!/[Tt].*(?:[Zz]|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(Date.parse(value)))throw new Error(label+' must be a timestamp with an explicit timezone');
+    return new Date(value).toISOString();
+  };
+  const gameId=cleanText(row.gameId,180)||null,startTime=time(row.startTime,'Result startTime'),observedAt=time(row.observedAt,'Result observedAt');
+  if(observedAt&&Date.parse(observedAt)>Date.now())throw new Error('Result observedAt cannot be in the future');
+  const scoreBasis=cleanText(row.scoreBasis||'unknown',30).toLowerCase();
+  if(!['unknown','regulation','full_game'].includes(scoreBasis))throw new Error('Result scoreBasis must be unknown, regulation or full_game');
+  const sourceReference=cleanText(row.sourceReference,1500);
+  if(sourceReference){let reference;try{reference=new URL(sourceReference);}catch{throw new Error('Result sourceReference must be a public HTTP(S) URL');}
+    if(!['http:','https:'].includes(reference.protocol)||reference.username||reference.password)throw new Error('Result sourceReference must be HTTP(S) without embedded credentials');}
+
   return {
-    id: resultKey({ ...row, awayTeam, homeTeam, league, dateKey, awayScore, homeScore }),
+    id: resultKey({ ...row,gameId,startTime, awayTeam, homeTeam, league, dateKey, awayScore, homeScore }),
+    gameId,startTime,observedAt,scoreBasis,sourceReference,sourceChecked:booleanValue(row.sourceChecked,false),
     dateKey,
     league,
     leagueKey: cleanText(row.leagueKey, 50) || league.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -273,7 +291,7 @@ function normalizeResult(row = {}, actor = '') {
     homeTeam,
     awayScore,
     homeScore,
-    neutralSite: booleanValue(row.neutralSite, false),
+    neutralSite: booleanValue(row.neutralSite, null),
     source: cleanText(row.source, 120) || 'manual result',
     notes: cleanText(row.notes, 1000),
     recordedAt: new Date().toISOString(),
@@ -329,7 +347,7 @@ export async function upsertIntelligence(guildId, collection, row, actor = '') {
     const candidate = normalizer(row, actor);
     const existing = store[collection][candidate.id];
     const normalized = existing
-      ? normalizer({ ...existing, ...nonEmptyPatch(row), id: existing.id }, actor)
+      ? normalizer({ ...existing, ...nonEmptyPatch(row), ...(collection==='results'?{sourceChecked:booleanValue(row.sourceChecked,false)}:{}),id: existing.id }, actor)
       : candidate;
     store[collection][normalized.id] = normalized;
     await saveStore(guildId, store);

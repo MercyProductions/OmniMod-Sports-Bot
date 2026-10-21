@@ -45,7 +45,8 @@ export function scoreOutcome(awayValue, homeValue) {
 }
 
 export function finalOutcomeSide(game = {}) {
-  if (game.statusKey !== 'final') return '';
+  if (game.statusKey !== 'final'||game.manualResultConflict) return '';
+  if(/soccer/i.test(game.sportGroup||'')&&game.manualResultEvidence&&game.manualResultEvidence.scoreBasis!=='regulation')return '';
   // Soccer h2h is a regulation-time market. A final after extra time/penalties
   // does not establish its result without a separate regulation score.
   if (/soccer/i.test(game.sportGroup || '') && /extra time|penalt|\baet\b|\bpen\b/i.test(game.detail || '')) return '';

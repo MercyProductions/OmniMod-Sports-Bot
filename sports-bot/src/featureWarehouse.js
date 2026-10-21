@@ -350,8 +350,9 @@ export async function recordSlateSnapshot(slate = {}, {now=Date.now()} = {}) {
   });
   const finals=new Map(),conflicts=new Set(),finalObservations=new Map();
   for(const game of games){
+    if(game.manualResultConflict){const key=datedEventKey({...game,dateKey:game.dateKey||slate.dateKey});conflicts.add(key);finalObservations.set(key,(game.manualResultConflict.observations||[]).map(row=>({...row,signature:JSON.stringify([row.actualSide,row.awayScore,row.homeScore])})));continue;}
     const actualSide=finalOutcomeSide(game);if(!actualSide)continue;
-    const key=datedEventKey({...game,dateKey:game.dateKey||slate.dateKey}),final={actualSide,actualWinner:actualSide==='draw'?'Draw':game[actualSide]?.name||'',awayScore:finiteNumber(game.away?.score),homeScore:finiteNumber(game.home?.score)};
+    const key=datedEventKey({...game,dateKey:game.dateKey||slate.dateKey}),final={actualSide,actualWinner:actualSide==='draw'?'Draw':game[actualSide]?.name||'',awayScore:finiteNumber(game.away?.score),homeScore:finiteNumber(game.home?.score),resultSource:game.manualResultEvidence?{kind:'manual',...structuredClone(game.manualResultEvidence)}:{kind:'provider',fetchedAt:game.sourceMeta?.fetchedAt||null}};
     const signature=JSON.stringify([actualSide,finiteNumber(game.away?.score),finiteNumber(game.home?.score)]);
     if(!finalObservations.has(key))finalObservations.set(key,[]);
     const observations=finalObservations.get(key);
@@ -390,7 +391,7 @@ export async function recordSlateSnapshot(slate = {}, {now=Date.now()} = {}) {
             lastUndisputedGrade:{actualSide:row.actualSide,actualWinner:row.actualWinner,predictionCorrect:row.predictionCorrect,resolvedAt:row.resolvedAt},
             conflictingFinalObservations:[{...approved},{actualSide:final.actualSide,awayScore:final.awayScore,homeScore:final.homeScore}],conflictingFinalObservationsTruncated:false};
         }
-        return { ...row, actualSide:final.actualSide,actualWinner:final.actualWinner, predictionCorrect: row.predictedSide === final.actualSide,
+        return { ...row, actualSide:final.actualSide,actualWinner:final.actualWinner, predictionCorrect: row.predictedSide === final.actualSide,resultSource:final.resultSource,
           resolvedAt: row.resolvedAt || slate.refreshedAt || new Date(now).toISOString(),
           resolvedAtSource: row.resolvedAtSource || 'first_observed_final'
         };

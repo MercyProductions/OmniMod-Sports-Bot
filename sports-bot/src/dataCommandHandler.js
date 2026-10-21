@@ -147,9 +147,11 @@ export async function handleSportsDataCommand(interaction) {
       homeTeam: option(interaction, 'getString', 'home'),
       awayScore: option(interaction, 'getNumber', 'away_score'),
       homeScore: option(interaction, 'getNumber', 'home_score'),
-      neutralSite: option(interaction, 'getBoolean', 'neutral')
+      neutralSite: option(interaction, 'getBoolean', 'neutral'),
+      id:option(interaction,'getString','result_id'),gameId:option(interaction,'getString','game_id'),startTime:option(interaction,'getString','start_time'),
+      scoreBasis:option(interaction,'getString','score_basis'),sourceReference:option(interaction,'getString','source_reference'),sourceChecked:option(interaction,'getBoolean','source_checked'),observedAt:option(interaction,'getString','observed_at')
     }, interaction.user.id);
-    await interaction.editReply(`Added historical result **${row.awayTeam} ${row.awayScore} - ${row.homeTeam} ${row.homeScore}**. It will feed the next Elo/model recalculation.`);
+    await interaction.editReply(`Saved manual result **${row.awayTeam} ${row.awayScore} - ${row.homeTeam} ${row.homeScore}**. Record: ${row.id}. Event binding and receipt checks apply before grading or learning.`);
     return;
   }
 

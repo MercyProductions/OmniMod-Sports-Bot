@@ -264,11 +264,16 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           }
           continue;
         }
+        if(game.manualResultConflict){
+          const associationId=rejectAssociation(issued,{reason:'conflicting_manual_results',candidateCount:game.manualResultConflict.observationCount,observations:[{evidenceHash:game.manualResultConflict.evidenceHash}],observationsTruncated:game.manualResultConflict.truncated},'results');
+          if(activeConflicts.get(issued.forecastId)?.payload.conflictId!==associationId){add('result_conflict',{forecastId:issued.forecastId,conflictId:associationId,observedAt:new Date(now).toISOString(),reason:'conflicting_manual_results'});activeConflicts.set(issued.forecastId,pending.at(-1));}continue;
+        }
         const actualSide = finalOutcomeSide(game);
         if (!issued || !actualSide) continue;
         const payload = { forecastId: issued.forecastId, actualSide, selectedSide: issued.selectedSide,
           correct: issued.selectedSide === actualSide, awayScore: finiteNumber(game.away?.score), homeScore: finiteNumber(game.home?.score),
-          observedAt: new Date(now).toISOString(), providerFetchedAt: iso(game.sourceMeta?.fetchedAt),
+          observedAt: new Date(now).toISOString(), providerFetchedAt:game.manualResultEvidence?null:iso(game.sourceMeta?.fetchedAt),
+          resultSource:game.manualResultEvidence?{kind:'manual',...structuredClone(game.manualResultEvidence)}:{kind:'provider'},
           scheduleChanged: issued.startTime !== iso(game.startTime),
           provenance: 'first/later observed final; no historical completion time is inferred' };
         const conflict=activeConflicts.get(issued.forecastId);
