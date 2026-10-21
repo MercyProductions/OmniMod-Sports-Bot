@@ -86,7 +86,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
   return { forecastId: digest(identity), ...identity, startTime, snapshotStage: prediction.snapshotStage || 'daily',
     recordEligibility,
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
-    outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
+    outcomePercentages: vector, modeledOutcomes: Object.keys(prediction.outcomeProbabilities || {}).sort(), recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,
     marketTimestampEvidence:structuredClone(prediction.marketTimestampEvidence||null),
     learningInputAudit: prediction.learningInputAudit || null,
