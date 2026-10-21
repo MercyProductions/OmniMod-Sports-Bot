@@ -53,7 +53,7 @@ async function corroborateMlb(games, dateKey) {
   const diagnostics = [];
   let externalCalls = 0;
   let matched = 0;
-  let confirmedStarters = 0;
+  let probableStarters = 0;
   const url = new URL('https://statsapi.mlb.com/api/v1/schedule');
   url.searchParams.set('sportId', '1');
   url.searchParams.set('date', dateKey);
@@ -65,7 +65,7 @@ async function corroborateMlb(games, dateKey) {
     timeoutMs: 12_000
   });
   externalCalls += providerCall(result);
-  if (!result.ok || !result.json) return { diagnostics: [`MLB official source: unavailable (${result.error || 'no data'}).`], externalCalls, matched, confirmedStarters };
+  if (!result.ok || !result.json) return { diagnostics: [`MLB official source: unavailable (${result.error || 'no data'}).`], externalCalls, matched, confirmedStarters: 0, probableStarters };
   const officialGames = result.json.dates?.flatMap((row) => row.games || []) || [];
   for (const game of games.filter((row) => row.leagueKey === 'mlb')) {
     const official = officialGames.find((row) =>
@@ -91,7 +91,7 @@ async function corroborateMlb(games, dateKey) {
     for (const side of ['away', 'home']) {
       const probable = official.teams?.[side]?.probablePitcher;
       if (!probable?.fullName) continue;
-      confirmedStarters += 1;
+      probableStarters += 1;
       players.push({
         id: `official-mlb-${official.gamePk}-${probable.id}`,
         sourceAthleteId: String(probable.id || ''),
@@ -102,8 +102,11 @@ async function corroborateMlb(games, dateKey) {
         role: 'Starting Pitcher',
         impact: 6,
         availability: 100,
+        availabilityEvidence: 'role_prior_not_injury_clearance',
         status: 'probable starter on official MLB schedule',
         starter: true,
+        confirmedStarter: false,
+        confirmationStatus: 'projected',
         form: 50,
         stats: {},
         source: 'MLB StatsAPI probable pitcher',
@@ -114,8 +117,8 @@ async function corroborateMlb(games, dateKey) {
     }
     mergeOfficialPlayers(game, players);
   }
-  diagnostics.push(`MLB official source: corroborated ${matched}/${games.filter((row) => row.leagueKey === 'mlb').length} game(s), ${confirmedStarters} probable starter(s), source=${result.cacheState}.`);
-  return { diagnostics, externalCalls, matched, confirmedStarters };
+  diagnostics.push(`MLB official source: corroborated ${matched}/${games.filter((row) => row.leagueKey === 'mlb').length} game(s), ${probableStarters} probable starter(s), source=${result.cacheState}.`);
+  return { diagnostics, externalCalls, matched, confirmedStarters: 0, probableStarters };
 }
 
 function nhlStatus(row) {
@@ -173,6 +176,7 @@ export async function corroborateOfficialSources(games, dateKey, options = {}) {
     diagnostics: results.flatMap((row) => row.diagnostics),
     externalCalls: results.reduce((total, row) => total + row.externalCalls, 0),
     matched: results.reduce((total, row) => total + row.matched, 0),
+    probableStarters: results.reduce((total, row) => total + (row.probableStarters || 0), 0),
     confirmedStarters: results.reduce((total, row) => total + row.confirmedStarters, 0)
   };
 }

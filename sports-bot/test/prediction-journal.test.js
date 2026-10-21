@@ -33,17 +33,20 @@ async function fixture(t) {
 
 test('journal freezes every pregame forecast including withheld rows, odds and original source timestamps', async t => {
   const file = await fixture(t), first = slate();
+  first.predictions[0].evidenceCoverage = { schema: 'sports-evidence-coverage-v1', missing: ['home:critical_starter_unconfirmed'] };
   await recordPredictionJournal(first, { file, now });
   const changed = structuredClone(first);
   changed.predictions[0].outcomeProbabilities.home = 90;
   changed.predictions[0].outcomeProbabilities.away = 10;
   changed.games[0].odds.h2h.home.price = -500;
+  changed.predictions[0].evidenceCoverage.missing = [];
   await recordPredictionJournal(changed, { file, now: now + 1000 });
   const rows = await readPredictionJournal(file);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].type, 'forecast');
   assert.equal(rows[0].payload.outcomePercentages.home, 65);
   assert.equal(rows[0].payload.recommendationStatus, 'withheld');
+  assert.deepEqual(rows[0].payload.evidenceCoverage.missing, ['home:critical_starter_unconfirmed']);
   assert.equal(rows[0].payload.odds.outcomes.home.offeredQuotes[0].priceAmerican, -110);
   assert.equal(rows[0].payload.dataTimestamps.schedule.fetchedAt, time(-2000));
 });

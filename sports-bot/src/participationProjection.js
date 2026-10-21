@@ -1,3 +1,4 @@
+import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 
@@ -16,7 +17,8 @@ function statusAvailability(player = {}) {
   if (/ruled out|\bout\b|inactive|suspend|injured reserve|\bir\b/.test(text)) return 0;
   if (/doubtful/.test(text)) return 0.2;
   if (/questionable|game.?time|day.?to.?day/.test(text)) return 0.52;
-  if (/probable|limited/.test(text)) return 0.84;
+  // A schedule's probable starter label describes role, not a medical 'probable' status.
+  if (/limited/.test(text) || (player.availabilityEvidence !== 'role_prior_not_injury_clearance' && /probable/.test(text))) return 0.84;
   const availability = finite(player.availability, 100);
   return clamp(availability > 1 ? availability / 100 : availability, 0, 1);
 }
@@ -45,24 +47,27 @@ function workloadLabel(profileKey, share, role = '') {
 export function projectPlayerParticipation(player = {}, learned = null, profileKey = 'default', lineup = {}) {
   const historicalShare = clamp(finite(learned?.participation, finite(player.stats?.historicalParticipation, roleScale(profileKey, player.role))), 0.02, 1);
   const starterRate = clamp(finite(learned?.starterRate, player.starter ? 0.82 : 0.22), 0, 1);
-  const confirmedStarter = Boolean(lineup.confirmedStarter ?? player.starter);
+  const confirmedStarter = Boolean(lineup.confirmedStarter ?? isConfirmedStarter(player));
   const confirmedActive = lineup.active !== false && player.active !== false;
   const availabilityProbability = confirmedActive ? statusAvailability(player) : 0;
-  const startProbability = confirmedStarter
-    ? Math.max(0.96, availabilityProbability)
-    : clamp(starterRate * 0.76 + (player.starter ? 0.2 : 0), 0.03, 0.9) * availabilityProbability;
+  // Distinguish starting conditional on participation from unconditional start probability.
+  // Availability belongs once in expected workload, not both inside and outside the mixture.
+  const conditionalStartProbability = confirmedStarter
+    ? 1 : clamp(starterRate * 0.76 + (player.starter ? 0.2 : 0), 0.03, 0.9);
+  const startProbability = conditionalStartProbability * availabilityProbability;
   const reserveShare = Math.min(historicalShare, profileKey === 'basketball' || profileKey === 'hockey' || profileKey === 'soccer' ? 0.34 : 0.2);
-  const conditionalShare = clamp(startProbability * historicalShare + (1 - startProbability) * reserveShare, 0, 1);
+  const conditionalShare = clamp(conditionalStartProbability * historicalShare + (1 - conditionalStartProbability) * reserveShare, 0, 1);
   const expectedShare = clamp(availabilityProbability * conditionalShare, 0, 1);
   const historySamples = finite(learned?.sampleSize, finite(player.stats?.historicalBoxscoreGames, 0));
   const evidenceReliability = clamp(historySamples / (historySamples + 6), 0, 0.92);
   const statusUncertainty = 4 * availabilityProbability * (1 - availabilityProbability);
-  const roleUncertainty = 4 * startProbability * (1 - startProbability);
+  const roleUncertainty = 4 * conditionalStartProbability * (1 - conditionalStartProbability);
   const uncertainty = clamp((1 - evidenceReliability) * 0.5 + statusUncertainty * 0.32 + roleUncertainty * 0.18, 0.04, 1);
   const workload = workloadLabel(profileKey, expectedShare, player.role);
   return {
     availabilityProbability,
     startProbability,
+    conditionalStartProbability,
     expectedShare,
     historicalShare,
     expectedWorkload: Number(workload.value.toFixed(1)),
@@ -92,7 +97,7 @@ export function attachParticipationProjections(game, playerProfiles = {}, findLe
     );
     const lineup = lineupByPlayer.get(playerIdentity(row)) || row;
     const projection = projectPlayerParticipation(row, learned, sportProfile(game).key, {
-      confirmedStarter: Boolean(lineup.starter),
+      confirmedStarter: isConfirmedStarter(lineup),
       active: lineup.active
     });
     const target = (game.autoPlayers || []).find((candidate) =>

@@ -1,3 +1,4 @@
+import { buildEvidenceCoverage, summaryEvidence } from './evidenceCoverage.js';
 import { calibrateSelectedProbability, lookupElo } from './modelEvaluation.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { normalizeMlFeatureVector, predictLocalMlCandidate } from './localMl.js';
@@ -390,7 +391,7 @@ function headToHeadScore(game, results = []) {
   };
 }
 
-function apiConfidence(game, market, awayTeam, homeTeam) {
+function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
   const externalScoreboard = /espn|api|provider/i.test(`${game.source || ''} ${game.sourceMeta?.provider || ''}`) && !/manual/i.test(game.source || '');
   let score = externalScoreboard ? 28 : 0;
   if (externalScoreboard && game.id && game.startTime && game.away?.name && game.home?.name) score += 12;
@@ -409,8 +410,10 @@ function apiConfidence(game, market, awayTeam, homeTeam) {
   if (game.autoHistory?.cacheState === 'stale') score -= 5;
   if (game.autoHistory?.truncated) score -= 10;
   if (game.autoEnrichment) {
-    score += 5;
-    if (game.autoEnrichment.injuryGroupsPresent) score += 5;
+    const summary = summaryEvidence(game, now);
+    if (summary.receiptFresh) score += 5;
+    if (summary.receiptFresh && summary.injuryCoveredSides.length === 2) score += 5;
+    else if (summary.receiptFresh && summary.injuryCoveredSides.length === 1) score += 2;
     if (game.autoEnrichment.rosterGroups > 0) score += 3;
     if (game.autoEnrichment.cacheState === 'stale') score -= 5;
   }
@@ -626,7 +629,7 @@ export function predictGame(game, index, modelContext = {}) {
   };
 
   const market = marketVector(game, profile);
-  const apiConfidenceValue = apiConfidence(game, market, awayTeam, homeTeam);
+  const apiConfidenceValue = apiConfidence(game, market, awayTeam, homeTeam, evidenceNow);
   const localConfidenceValue = localDataConfidence(awayTeam, homeTeam, manualAwayPlayers, manualHomePlayers, manualContext, modelContext.history);
   const drift = modelContext.drift?.[profile.key] || modelContext.drift?.all || { status: 'insufficient', penalty: 0 };
   const driftPenalty = clamp(finite(drift.penalty, 0), 0, 0.35);
@@ -770,6 +773,7 @@ export function predictGame(game, index, modelContext = {}) {
 
   return {
     gameId: game.id,
+    evidenceCoverage: buildEvidenceCoverage(game, { now: evidenceNow, players: { away: awayPlayerRows, home: homePlayerRows }, teams: { away: awayTeam, home: homeTeam } }),
     index: index + 1,
     league: game.league,
     leagueKey: game.leagueKey,

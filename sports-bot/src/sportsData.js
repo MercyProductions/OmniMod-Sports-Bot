@@ -913,6 +913,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         historicalBoxscores: automatic.historicalBoxscores,
         learnedInjuries: automatic.learnedInjuries,
         confirmedLineups: automatic.confirmedLineups,
+        officialProbableStarters: automatic.officialProbableStarters || 0,
         officialMatches: automatic.officialMatches,
         officialStarters: automatic.officialStarters,
         starterRestMatches: automatic.starterRestMatches,

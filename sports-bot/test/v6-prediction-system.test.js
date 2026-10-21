@@ -1,3 +1,4 @@
+import { CURRENT_MODEL_VERSION } from '../src/modelIdentity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluatePredictionHorizons, predictionHorizon } from '../src/horizonEvaluation.js';
@@ -180,10 +181,10 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
     modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
-      evaluation: { cohort: { prospectiveRecordsVerified: true, key: 'production|OmniMod Evidence Ensemble v6.0.1|Daily' } } } } },
+      evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
     localMlModels: { sports: { basketball: model } }
   });
-  assert.match(prediction.modelVersion, /v6\.0\.1/);
+  assert.equal(prediction.modelVersion, CURRENT_MODEL_VERSION);
   assert.equal(prediction.localMlModel.active, true);
   assert.ok(prediction.candidateProbabilities.ml);
   assert.ok(prediction.factors.some((factor) => factor.label === 'Projected participation' && factor.present));
@@ -193,7 +194,7 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
     modelRegistry: { sports: { basketball: { champion: 'ml', championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
-      evaluation: { cohort: { prospectiveRecordsVerified: true, key: 'production|OmniMod Evidence Ensemble v6.0.1|Daily' } } } } },
+      evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
     localMlModels: { sports: { basketball: { ...model, accepted: false } } }
   });
   assert.equal(rejectedPrediction.localMlModel.active, false);

@@ -67,6 +67,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
       ? 'observed_pregame' : 'unverifiable_or_late_observation',
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
     outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
+    evidenceCoverage: prediction.evidenceCoverage || null,
     candidateProbabilities: prediction.candidateProbabilities || null,
     referenceBaselines: prediction.referenceBaselines || null,
     issuanceScope: 'Computed pregame slate; Discord delivery is not attested by this journal.',

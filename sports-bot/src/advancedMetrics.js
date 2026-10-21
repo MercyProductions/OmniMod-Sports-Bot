@@ -1,3 +1,4 @@
+import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
@@ -711,6 +712,8 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
         interactionRating,
         lineupRating,
         criticalStarterCount: criticalPlayers.length,
+        criticalConfirmedStarterCount: criticalPlayers.filter(isConfirmedStarter).length,
+        criticalProjectedStarterCount: criticalPlayers.filter(row => !isConfirmedStarter(row)).length,
         criticalForm,
         source: 'ESPN current roster/probables + cached historical box scores and starter-pair residuals'
       };

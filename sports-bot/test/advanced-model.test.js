@@ -1,3 +1,4 @@
+import { CURRENT_MODEL_VERSION } from '../src/modelIdentity.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -256,7 +257,8 @@ test('official MLB source corroborates games and probable starters, then reuses 
   const first = await corroborateOfficialSources([firstGame], '2099-07-01');
   const second = await corroborateOfficialSources([makeGame()], '2099-07-01');
   assert.equal(first.matched, 1);
-  assert.equal(first.confirmedStarters, 2);
+  assert.equal(first.confirmedStarters, 0);
+  assert.equal(first.probableStarters, 2);
   assert.equal(firstGame.sourceCorroboration.conflicts.length, 0);
   assert.equal(firstGame.autoPlayers.filter((row) => row.starter).length, 2);
   assert.equal(calls, 1);
@@ -319,7 +321,7 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
     games: [{ id, statusKey: 'final', leagueKey: 'nba', sportGroup: 'Basketball', away: { name: 'A', score: 90 }, home: { name: 'H', score: 100 } }],
     predictions: [{
       gameId: id, predictionCorrect: true, eligibleForCalibration: true, predictionMode: 'pregame',
-      modelVersion: 'OmniMod Evidence Ensemble v6.0.1', predictionProbability: 0.7,
+      modelVersion: CURRENT_MODEL_VERSION, predictionProbability: 0.7,
       predictionGeneratedAt: `${dateKey}T08:00:00Z`, startTime: `${dateKey}T20:00:00Z`,
       sportProfile: 'basketball', factors: [{ label: 'Power', value: 0.2 }]
     }]
