@@ -23,3 +23,5 @@ Matched evaluation continuation: [paired game-weighted comparisons](SPORTS_MATCH
 Model-selection continuation: [exact ML artifacts and preregistered holdout review](SPORTS_SELECTION_PROTOCOL.md), 167 passing tests and syntax checks. Stored-fit mismatch and retrospective-production provenance defects repaired; runtime automatic promotion disabled. No real trial or improved accuracy claim; hybrid governance and feature-learning chronology remain open.
 
 Original-price research continuation: [frozen offers and cost sensitivity](SPORTS_PRICE_RESEARCH.md), 178 passing Sports tests and syntax checks. Missing timestamp provenance and malformed probability vectors now fail closed; price refreshes have separate journal records. Zero eligible local price scenarios; actual settlement, execution and prospective costed performance remain unverified.
+
+Operational continuation: [durable refresh attempts and read-only diagnostics](SPORTS_OPERATIONAL_VALIDATION.md), 185 passing Sports tests and syntax checks. Local development journal has no issued forecasts or attempts; deployed runtime and isolated prospective baseline/challenger execution remain unverified.

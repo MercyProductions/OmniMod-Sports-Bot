@@ -103,10 +103,10 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
 }
 
 /** Mandatory prospective audit trail, independent of optional warehouse retention. */
-export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now(), lifecycle = 'issued', reason = '' } = {}) {
+export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now(), lifecycle = 'issued', reason = '', refreshAttempt = null } = {}) {
   const operation = writeChain.then(async () => {
     if (!Number.isFinite(now)) throw new Error('A valid journal observation time is required.');
-    if (!['provisional', 'issued', 'rejected', 'delivered', 'results_only', 'prices_only'].includes(lifecycle)) throw new Error('Invalid forecast lifecycle operation.');
+    if (!['provisional', 'issued', 'rejected', 'delivered', 'results_only', 'prices_only', 'refresh_attempt'].includes(lifecycle)) throw new Error('Invalid forecast lifecycle operation.');
     await mkdir(dirname(file), { recursive: true });
     let lock;
     try { lock = await open(`${file}.lock`, 'wx', 0o600); }
@@ -123,6 +123,32 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         if (row.type === 'result') results.set(row.payload.forecastId, row.payload);
       }
       const pending = [];
+      if (lifecycle === 'refresh_attempt') {
+        const started = iso(refreshAttempt?.attemptedAt), ended = iso(refreshAttempt?.completedAt);
+        const games = refreshAttempt?.games;
+        if (!started || !ended || Date.parse(ended) < Date.parse(started) || Date.parse(ended) > now
+          || !Array.isArray(games) || !games.length || games.some(row => !row.gameId || !['completed','rejected','build_failed'].includes(row.status))) {
+          throw new Error('Invalid refresh attempt evidence');
+        }
+        const payload = { guildId: String(slate.guildId || ''), attemptedAt: started, completedAt: ended,
+          durationMs: Date.parse(ended) - Date.parse(started), games: games.map(row => ({
+            gameId: String(row.gameId), status: row.status,
+            reasons: (row.reasons || []).filter(value => ['build_failed','game_not_scheduled','start_or_completion_invalid',
+              'summary_not_revalidated','summary_receipt_outside_attempt','pregame_forecast_not_verified'].includes(value)),
+            dueWindows: (row.dueWindows || []).filter(value => Number.isInteger(value) && value > 0 && value <= 720)
+          })) };
+        const attemptId = digest({ guildId: payload.guildId, attemptedAt: started, gameIds: payload.games.map(row => row.gameId).sort() });
+        const prior = records.find(row => row.type === 'refresh_attempt' && row.payload.attemptId === attemptId);
+        if (prior && digest(prior.payload) !== digest({ attemptId, ...payload })) throw new Error('Refresh attempt identity already has different terminal evidence');
+        if (!prior) {
+          const body = { schemaVersion: 1, sequence: records.length + 1, previousHash: records.at(-1)?.eventHash || null,
+            recordedAt: new Date(now).toISOString(), type: 'refresh_attempt', payload: { attemptId, ...payload } };
+          const handle = await open(file, 'a', 0o600);
+          try { await handle.writeFile(JSON.stringify({ ...body, eventHash: digest(body) }) + '\n'); await handle.sync(); }
+          finally { await handle.close(); }
+        }
+        return { appended: prior ? 0 : 1, refreshAttempts: prior ? 0 : 1, totalRecords: records.length + (prior ? 0 : 1) };
+      }
       let sequence = records.length, previousHash = records.at(-1)?.eventHash || null;
       const add = (type, payload) => {
         const body = { schemaVersion: 1, sequence: ++sequence, previousHash, recordedAt: new Date(now).toISOString(), type, payload };

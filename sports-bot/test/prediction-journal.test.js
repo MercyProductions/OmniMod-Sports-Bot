@@ -10,7 +10,7 @@ import { evaluateCandidateModels, applyCandidateDecision } from '../src/modelReg
 import { summarizePredictionJournal } from '../src/journalEvaluation.js';
 
 // Existing scoring assertions inspect eligible forecasts/results; the full reader still checks every hash-chain event.
-const readPredictionJournal = async file => (await readFullPredictionJournal(file)).filter(row => !['provisional_forecast', 'forecast_lifecycle'].includes(row.type));
+const readPredictionJournal = async file => (await readFullPredictionJournal(file)).filter(row => !['provisional_forecast', 'forecast_lifecycle', 'refresh_attempt'].includes(row.type));
 
 const now = Date.parse('2026-10-20T18:00:00Z');
 const time = offset => new Date(now + offset).toISOString();
@@ -185,7 +185,7 @@ test('stale targeted refresh stays provisional/rejected and cannot enter eligibl
   assert.equal(attempt.completed.length, 0);
   await recordPredictionJournal(rebuilt, { file, now: now + 1200 });
   const rows = await readFullPredictionJournal(file);
-  assert.deepEqual(rows.map(r => r.type), ['provisional_forecast', 'forecast_lifecycle']);
+  assert.deepEqual(rows.map(r => r.type), ['provisional_forecast', 'forecast_lifecycle', 'refresh_attempt']);
   assert.equal(rows[1].payload.state, 'REJECTED');
   assert.equal(summarizePredictionJournal(rows).forecasts, 0);
 });
@@ -197,7 +197,7 @@ test('valid refresh issues before transport, then delivery and grading append im
   await recordPredictionJournal(rebuilt, { file, now: now + 800, lifecycle: 'provisional' });
   await completeAndJournalPregameRefresh(previous, rebuilt, [{gameId:'game',dueWindows:[30]}], time(0), time(1000), {file});
   let rows = await readFullPredictionJournal(file);
-  assert.deepEqual(rows.map(r=>r.type), ['provisional_forecast','forecast_lifecycle','forecast']);
+  assert.deepEqual(rows.map(r=>r.type), ['provisional_forecast','forecast_lifecycle','forecast','refresh_attempt']);
   assert.equal(rows[1].payload.state, 'VALIDATED');
   assert.equal(rows[2].payload.lifecycleState, 'ISSUED');
   // Transport failure sends no acknowledgement; issued forecasts survive a fresh module instance.

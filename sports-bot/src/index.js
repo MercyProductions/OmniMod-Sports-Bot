@@ -10,7 +10,7 @@ import { buildCommands } from './commands.js';
 import { formatValueDetails, refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
 import { refreshValueQuotes } from './valueQuoteRefresh.js';
 import { buildDailySlate, refreshFinalGrades, supportedLeagues } from './sportsData.js';
-import { duePregameRefreshes, completeAndJournalPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
+import { duePregameRefreshes, completeAndJournalPregameRefresh, buildJournaledPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
 import { recordSlateSnapshot } from './featureWarehouse.js';
 import { pendingFinalDateKeys } from './finalReconciliation.js';
 import { localDateKey, isDailyPostTime } from './time.js';
@@ -402,7 +402,7 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
     const dueLeagues = [...new Set((cached.games || []).filter((game) => refreshIds.includes(String(game.id))).map((game) => game.leagueKey).filter(Boolean))];
     const stages = Object.fromEntries(due.map((row) => [row.gameId, row.stage]));
     const attemptedAt = nowLabel();
-    const slate = await buildDailySlate(new Date(), {
+    const slate = await buildJournaledPregameRefresh(cached, due, attemptedAt, () => buildDailySlate(new Date(), {
       guildId,
       includeOdds: false,
       cachedSlate: cached,
@@ -411,7 +411,7 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
       refreshGameIds: refreshIds,
       leagueKeys: dueLeagues,
       marketStages: stages
-    });
+    }));
     const refreshedAt = nowLabel();
     const latest = await readDailyCache(dateKey, guildId) || cached;
     const attempt = await completeAndJournalPregameRefresh(latest, {

@@ -65,7 +65,13 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
       && fetched !== null && fetched >= began && fetched <= ended
       && prediction?.predictionMode === 'pregame' && generated !== null && generated >= fetched && generated <= ended;
     if (valid) completed.push(row);
-    else rejected.push({ gameId: row.gameId, reason: 'fresh_summary_and_new_pregame_forecast_not_verified' });
+    else rejected.push({ gameId: row.gameId, reason: 'fresh_summary_and_new_pregame_forecast_not_verified', reasons: [
+      ...(game?.statusKey !== 'scheduled' ? ['game_not_scheduled'] : []),
+      ...(start === null || ended >= start ? ['start_or_completion_invalid'] : []),
+      ...(!['network','revalidated'].includes(game?.autoEnrichment?.cacheState) ? ['summary_not_revalidated'] : []),
+      ...(fetched === null || fetched < began || fetched > ended ? ['summary_receipt_outside_attempt'] : []),
+      ...(prediction?.predictionMode !== 'pregame' || generated === null || fetched === null || generated < fetched || generated > ended ? ['pregame_forecast_not_verified'] : [])
+    ] });
   }
   const failed = new Set(rejected.map(row => row.gameId));
   const previousGames = new Map((previous.games || []).map(game => [String(game.id), game]));
@@ -115,5 +121,23 @@ export async function completeAndJournalPregameRefresh(previous, rebuilt, due, a
   await recordPredictionJournal(subset(rejected), { ...journalOptions, now, lifecycle: 'rejected',
     reason: 'fresh_summary_and_new_pregame_forecast_not_verified' });
   await recordPredictionJournal(subset(completed), { ...journalOptions, now, lifecycle: 'issued' });
+  await recordPredictionJournal(rebuilt, { ...journalOptions, now, lifecycle: 'refresh_attempt', refreshAttempt: {
+    attemptedAt, completedAt, games: due.map(row => ({ gameId: String(row.gameId), dueWindows: row.dueWindows,
+      status: completed.has(String(row.gameId)) ? 'completed' : 'rejected',
+      reasons: attempt.rejected.find(rejected => String(rejected.gameId) === String(row.gameId))?.reasons || [] }))
+  } });
   return attempt;
+}
+
+/** Capture build/provider exceptions even when no prediction exists. Exception text is never persisted. */
+export async function buildJournaledPregameRefresh(slate, due, attemptedAt, build, { clock = Date.now, ...journalOptions } = {}) {
+  try { return await build(); }
+  catch (error) {
+    const now = clock();
+    await recordPredictionJournal(slate, { ...journalOptions, now, lifecycle: 'refresh_attempt', refreshAttempt: {
+      attemptedAt, completedAt: new Date(now).toISOString(), games: due.map(row => ({
+        gameId: String(row.gameId), dueWindows: row.dueWindows, status: 'build_failed', reasons: ['build_failed'] }))
+    } });
+    throw error;
+  }
 }
