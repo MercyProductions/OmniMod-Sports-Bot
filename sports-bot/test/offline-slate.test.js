@@ -108,6 +108,9 @@ test('recalculation preserves a frozen prediction after the event start', async 
   assert.equal(slate.predictions[0].predictedWinner, 'Frozen Away');
   assert.equal(slate.predictions[0].confidenceValue, 61.2);
   assert.equal(slate.predictions[0].frozenAfterStart, true);
+  assert.equal(slate.predictions[0].legacyFrozenIdentityUnverified,true);
+  assert.equal(slate.predictions[0].eligibleForCalibration,false);
+  assert.equal(slate.predictions[0].predictionCorrect,null);
 });
 
 test('provider cache avoids duplicate calls and never persists secret query values', async () => {
@@ -216,4 +219,30 @@ test('actual targeted slate builder journals provisionally until the scheduler a
   records=all.filter(row=>forecastIds.has(row.payload.forecastId));
   assert.equal(records.filter(row=>row.type==='forecast').length,0);
   assert.ok(records.some(row=>row.type==='forecast_lifecycle'&&row.payload.state==='REJECTED'));
+});
+
+
+test('real local-only targeted slate refresh preserves the other league when native IDs collide',async()=>{
+ const {scopedEventKey,eventReference}=await import('../src/slateEventIdentity.js');
+ const generatedAt=new Date(Date.now()-1000).toISOString(),startTime='2099-01-02T19:00:00Z';
+ const games=['nba','nhl'].map(leagueKey=>({id:'collision',leagueKey,league:leagueKey.toUpperCase(),sportGroup:leagueKey==='nba'?'Basketball':'Hockey',statusKey:'scheduled',startTime,startTimeLocal:'Fixture',matchup:leagueKey+' Away @ Home',away:{id:leagueKey+'-away',name:leagueKey+' Away',abbr:'AW'},home:{id:leagueKey+'-home',name:leagueKey+' Home',abbr:'HM'}}));
+ const cachedSlate={games,predictions:games.map((game,i)=>({...eventReference(game),index:i+1,league:game.league,modelVersion:'frozen-'+game.leagueKey,matchup:game.matchup,predictionMode:'pregame',predictionGeneratedAt:generatedAt,predictedSide:'away',predictedWinner:game.away.name,outcomeProbabilities:{away:61,home:39,draw:0},snapshotStage:'daily'})),generatedAt,guildId:'guild-scoped-target',dateKey:'2099-01-02'};
+ const target=eventReference(games[0]);
+ const value=await buildDailySlate(new Date('2099-01-02T18:00:00Z'),{guildId:cachedSlate.guildId,localOnly:true,targetedPregame:true,cachedSlate,refreshGameIds:['collision'],refreshEvents:[target],marketStages:{['event:'+scopedEventKey(target)]:'t-30'}});
+ const nba=value.predictions.find(row=>row.leagueKey==='nba'),nhl=value.predictions.find(row=>row.leagueKey==='nhl');
+ assert.equal(value.predictions.length,2);assert.notEqual(nba.modelVersion,'frozen-nba');assert.equal(nba.snapshotStage,'t-30');
+ assert.equal(nhl.modelVersion,'frozen-nhl');assert.deepEqual(nhl.outcomeProbabilities,{away:61,home:39,draw:0});assert.equal(nhl.snapshotStage,'daily');assert.equal(nhl.predictionGeneratedAt,generatedAt);
+});
+
+
+test('market snapshots and refresh horizons cannot mix leagues or starts that share an ID',async()=>{
+ const {captureMarketSnapshots,readFeatureWarehouse}=await import('../src/featureWarehouse.js');
+ const {scopedEventKey,eventReference}=await import('../src/slateEventIdentity.js');
+ const games=['nba','nhl','nba'].map((leagueKey,i)=>({id:'market-collision',leagueKey,startTime:i===2?'2099-01-03T19:00:00Z':'2099-01-02T19:00:00Z',odds:{h2h:{away:{fairProbability:i===1?.8:.4},home:{fairProbability:i===1?.2:.6}}}}));
+ const guildId='guild-market-scoped';await captureMarketSnapshots(games,{guildId,capturedAt:'2099-01-02T18:00:00Z'});
+ assert.equal(games[0].marketMovement.current.home,.6);assert.equal(games[1].marketMovement.current.home,.2);assert.equal(games[2].marketMovement.snapshots,1);
+ const target=eventReference(games[0]);games[0].odds.h2h.home.fairProbability=.7;games[0].odds.h2h.away.fairProbability=.3;
+ assert.equal(await captureMarketSnapshots(games,{guildId,capturedAt:'2099-01-02T18:30:00Z',events:[target],gameIds:['market-collision'],stages:{['event:'+scopedEventKey(target)]:'t-30'}}),1);
+ const markets=(await readFeatureWarehouse()).markets.filter(row=>row.guildId===guildId);assert.equal(markets.length,4);assert.equal(markets.find(row=>row.stage==='t-30').leagueKey,'nba');
+ assert.equal(games[0].marketMovement.snapshots,2);assert.equal(games[0].marketMovement.movementPoints.home,10);assert.equal(games[1].marketMovement.snapshots,1);assert.equal(games[2].marketMovement.snapshots,1);
 });

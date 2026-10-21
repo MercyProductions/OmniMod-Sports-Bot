@@ -118,7 +118,7 @@ test('existing owner lock is preserved and concurrent calls do not duplicate a f
 
 test('pregame completion preserves earlier windows and retries stale or failed evidence', () => {
   const previous = slate();
-  previous.pregameRefreshes = { game: { windows: { 90: time(-100_000) } } };
+  previous.pregameRefreshes = { game: {eventKey:JSON.stringify(['nba','game',time(3_600_000)]), windows: { 90: time(-100_000) } } };
   const due = [{ gameId: 'game', dueWindows: [30], stage: 't-30' }];
   const rebuilt = slate();
   rebuilt.games[0].autoEnrichment.fetchedAt = time(500);

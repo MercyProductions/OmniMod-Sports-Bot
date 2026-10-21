@@ -1,3 +1,4 @@
+import {scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
 import {normalizeOddsPrice} from './oddsPricing.js';
 import { config } from './config.js';
 import { enrichGamesAutomatically } from './autoEnrichment.js';
@@ -655,13 +656,17 @@ export function attachFinalGrade(game, prediction, now = Date.now()) {
   };
 }
 
-function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refreshGameIds = null) {
+function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refreshGameIds = null, refreshEventKeys = null, frozenPredictions = scopedSlatePredictions(cachedSlate||{})) {
   const previousGame = (cachedSlate?.games || []).find((candidate) => gamesMatch(game, candidate));
-  const previous = (cachedSlate?.predictions || []).find((prediction) =>
-    String(prediction.gameId) === String(game.id) || (previousGame && String(prediction.gameId) === String(previousGame.id)));
+  const sameLeague=previousGame&&String(previousGame.leagueKey||'').toLowerCase()===String(game.leagueKey||'').toLowerCase();
+  const legacyPrevious=sameLeague&&!Number.isFinite(Date.parse(previousGame.startTime||''))
+    ?frozenPredictions.get(scopedEventKey(eventReference(previousGame))):null;
+  const previous=frozenPredictions.get(scopedEventKey(eventReference(game)))
+    || (sameLeague&&String(previousGame.id)!==String(game.id)&&eventReference(previousGame).startTime===eventReference(game).startTime
+      ?frozenPredictions.get(scopedEventKey(eventReference(previousGame))):null)||legacyPrevious;
   const start = new Date(game.startTime).getTime();
   const hasStarted = game.statusKey === 'live' || game.statusKey === 'final' || (Number.isFinite(start) && start <= Date.now());
-  if (previous && !hasStarted && refreshGameIds && !refreshGameIds.has(String(game.id))) {
+  if (previous && !hasStarted && (refreshEventKeys?!refreshEventKeys.has(scopedEventKey(eventReference(game))):refreshGameIds&&!refreshGameIds.has(String(game.id)))) {
     return {
       ...previous,
       index: index + 1,
@@ -690,7 +695,8 @@ function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refresh
     predictionGeneratedAt: previous.predictionGeneratedAt || cachedSlate?.generatedAt || '',
     frozenAfterStart: true
   };
-  return attachFinalGrade(game, frozen);
+  const graded=attachFinalGrade(game,frozen);
+  return previous===legacyPrevious?{...graded,legacyFrozenIdentityUnverified:true,eligibleForCalibration:false,predictionCorrect:null}:graded;
 }
 
 function applyManualResults(games, intelligence, dateKey) {
@@ -827,14 +833,17 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         stage: options.marketStage || 'daily',
         stages: options.marketStages || {},
         gameIds: options.refreshGameIds || [],
+        events: options.refreshEvents || [],
         capturedAt: new Date().toISOString()
       })
     : 0;
   const refreshGameIds = options.refreshGameIds?.length ? new Set(options.refreshGameIds.map(String)) : null;
-  const predictions = games.map((game, index) => frozenOrFreshPrediction(game, index, modelContext, options.cachedSlate, refreshGameIds));
+  const refreshEventKeys=options.refreshEvents?.length?new Set(options.refreshEvents.map(scopedEventKey)):null;
+  const frozenPredictions=scopedSlatePredictions(options.cachedSlate||{});
+  const predictions = games.map((game, index) => frozenOrFreshPrediction(game, index, modelContext, options.cachedSlate, refreshGameIds,refreshEventKeys,frozenPredictions));
   for (const prediction of predictions) {
-    const refreshed = !options.cachedSlate || !refreshGameIds || refreshGameIds.has(String(prediction.gameId));
-    if (refreshed) prediction.snapshotStage = options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';
+    const refreshed = !options.cachedSlate || (refreshEventKeys?refreshEventKeys.has(scopedEventKey(prediction)):!refreshGameIds||refreshGameIds.has(String(prediction.gameId)));
+    if (refreshed) prediction.snapshotStage = options.marketStages?.['event:'+scopedEventKey(prediction)] || options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';
   }
   const finalReplies = { ...(options.cachedSlate?.finalReplies || {}) };
   for (const prediction of predictions) {

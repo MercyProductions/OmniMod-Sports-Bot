@@ -30,7 +30,7 @@ test('late first sightings never publish a retrospective pick as a pregame signa
 test('high-uncertainty pregame rows identify the projected winner and distinguish feed quality', () => {
   const [embed] = formatSlateEmbeds({
     dateKey: '2026-09-20', timezone: 'America/Chicago', generatedAt: new Date().toISOString(),
-    games: [{ id: 'nfl-game', statusKey: 'scheduled' }],
+    games: [{ id: 'nfl-game',leagueKey:'nfl', statusKey: 'scheduled' }],
     predictions: [{ index: 9, gameId: 'nfl-game', league: 'NFL', matchup: 'NYG @ LAR', startTimeLocal: '7:15 PM',
       statusKey: 'scheduled', predictionMode: 'pregame', recommendationStatus: 'withheld', predictedWinner: 'Rams',
       predictionConfidence: '52.7%', predictionUncertaintyPoints: 21, apiConfidence: '94%', riskTier: 'Higher',

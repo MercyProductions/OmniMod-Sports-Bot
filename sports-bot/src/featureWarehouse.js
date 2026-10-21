@@ -1,3 +1,4 @@
+import {scopedEventKey,eventReference} from './slateEventIdentity.js';
 import {journalResultState} from './journalResults.js';
 import path from 'node:path';
 import { withAuditFileLock } from './auditFileLock.js';
@@ -79,7 +80,7 @@ const observedBoolean=value=>typeof value==='boolean'?value:null;
 const observedCount=value=>{const number=finiteNumber(value);return Number.isSafeInteger(number)&&number>=0?number:null;};
 
 function marketKey(row = {}) {
-  return [row.guildId || 'default', row.leagueKey || row.league, row.gameId, row.capturedAt, row.stage].join(':');
+  return JSON.stringify([row.guildId||'default',scopedEventKey(row),row.capturedAt,row.stage]);
 }
 
 function mergeRows(existing, incoming, keyFn, limit, sortField = 'dateKey') {
@@ -250,7 +251,7 @@ function compactMarket(game = {}, meta = {}) {
     leagueKey: game.leagueKey || '',
     startTime: game.startTime || '',
     capturedAt: meta.capturedAt || new Date().toISOString(),
-    stage: meta.stages?.[String(game.id)] || meta.stage || 'daily',
+    stage: meta.stages?.['event:'+scopedEventKey(eventReference(game))] || meta.stages?.[String(game.id)] || meta.stage || 'daily',
     minutesToStart: Number.isFinite(Number(meta.minutesToStart)) ? Number(meta.minutesToStart) : null,
     away: vector.away,
     home: vector.home,
@@ -402,10 +403,11 @@ export async function captureMarketSnapshots(games = [], meta = {}) {
   const current = await readFeatureWarehouse();
   const capturedAt = meta.capturedAt || new Date().toISOString();
   const captureIds = meta.gameIds?.length ? new Set(meta.gameIds.map(String)) : null;
-  const incoming = games.filter((game) => !captureIds || captureIds.has(String(game.id))).map((game) => compactMarket(game, { ...meta, capturedAt })).filter(Boolean);
+  const captureEvents=meta.events?.length?new Set(meta.events.map(scopedEventKey)):null;
+  const incoming = games.filter((game) => captureEvents?captureEvents.has(scopedEventKey(eventReference(game))):!captureIds || captureIds.has(String(game.id))).map((game) => compactMarket(game, { ...meta, capturedAt })).filter(Boolean);
   for (const game of games) {
     const rows = [...current.markets, ...incoming]
-      .filter((row) => String(row.gameId) === String(game.id) && String(row.guildId || '') === String(meta.guildId || ''))
+      .filter((row) => scopedEventKey(row)===scopedEventKey(eventReference(game)) && String(row.guildId || '') === String(meta.guildId || ''))
       .sort((a, b) => String(a.capturedAt).localeCompare(String(b.capturedAt)));
     if (!rows.length) continue;
     game.marketMovement = calculateMarketMovement(rows);

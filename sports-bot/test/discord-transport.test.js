@@ -142,3 +142,16 @@ test('abrupt exit after remote acceptance recovers in new processes without dupl
  assert.deepEqual(after.find(row=>row.type==='forecast'),frozen);
  assert.equal(JSON.parse(await readFile(join(path,'fake-discord.json'),'utf8')).length,1);
 });
+
+
+test('hidden ambiguous rows never receive a Discord forecast-delivery acknowledgement',async t=>{
+ const path=await remoteDirectory(t),value=slate('ambiguous-delivery');value.predictions[0].leagueKey='nba';
+ value.games.push({...structuredClone(value.games[0]),leagueKey:'nhl'});value.predictions.push({...structuredClone(value.predictions[0]),leagueKey:'nhl',league:'NHL',index:2});
+ await recordPredictionJournal(value);const forecasts=(await readPredictionJournal()).filter(row=>row.type==='forecast'&&row.payload.gameId==='ambiguous-delivery');assert.equal(forecasts.length,2);
+ value.games.push({...structuredClone(value.games[0]),statusKey:'postponed'});
+ const remote=await fakeDiscord(path);await postDailySlate(remote.client,value,{reuseExisting:false});
+ const acknowledgements=delivered(await readPredictionJournal());
+ assert.equal(acknowledgements.some(row=>row.payload.forecastId===forecasts.find(row=>row.payload.league==='nba').payload.forecastId),false);
+ assert.equal(acknowledgements.some(row=>row.payload.forecastId===forecasts.find(row=>row.payload.league==='nhl').payload.forecastId),true);
+ assert.match(remote.rows[0].embeds[0].fields[0].value,/could not be matched uniquely/);
+});

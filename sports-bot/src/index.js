@@ -1,3 +1,4 @@
+import {scopedEventKey} from './slateEventIdentity.js';
 import {recordPredictionJournal} from './predictionJournal.js';
 import {
   Client,
@@ -399,8 +400,8 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
     runtimeState.nextPregameRefreshAt = next?.dueAt || '';
     if (!due.length) return null;
     const refreshIds = due.map((row) => row.gameId);
-    const dueLeagues = [...new Set((cached.games || []).filter((game) => refreshIds.includes(String(game.id))).map((game) => game.leagueKey).filter(Boolean))];
-    const stages = Object.fromEntries(due.map((row) => [row.gameId, row.stage]));
+    const dueLeagues = [...new Set(due.map(row=>row.leagueKey).filter(Boolean))];
+    const stages = Object.fromEntries(due.map((row) => ['event:'+scopedEventKey(row), row.stage]));
     const attemptedAt = nowLabel();
     const slate = await buildJournaledPregameRefresh(cached, due, attemptedAt, () => buildDailySlate(new Date(), {
       guildId,
@@ -409,6 +410,7 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
       targetedPregame: true,
       forceSummaryGameIds: refreshIds,
       refreshGameIds: refreshIds,
+      refreshEvents: due,
       leagueKeys: dueLeagues,
       marketStages: stages
     }));

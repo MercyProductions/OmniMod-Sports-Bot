@@ -1,3 +1,5 @@
+import {journalGameIndex} from './journalEventMatch.js';
+import {resolveSlateGame} from './slateEventIdentity.js';
 import { recordPredictionJournal } from './predictionJournal.js';
 import {
   ActionRowBuilder,
@@ -163,6 +165,7 @@ function compactText(value, maxLength, fallback = 'n/a') {
 }
 
 function predictionField(prediction, game = null) {
+  if(prediction.eventAssociationRejected)return {name:compactText(`#${prediction.index} ${prediction.league||'Sports'} | Event data unavailable`,120),value:`${compactText(prediction.matchup,72)}\nEvent observations could not be matched uniquely. Forecast and price details are hidden pending reconciliation.`,inline:false};
   if (['retrospective_ungraded', 'late_pregame', 'in_play'].includes(prediction.predictionMode)) {
     const score = game?.statusKey === 'final' && Number.isFinite(game.away?.score) && Number.isFinite(game.home?.score)
       ? `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
@@ -194,8 +197,11 @@ function predictionField(prediction, game = null) {
 }
 
 function formatSlatePresentation(slate) {
-  const games = new Map((slate.games || []).map((game) => [String(game.id), game]));
-  const predictions = (slate.predictions ?? []).map((prediction) => games.has(String(prediction.gameId)) ? refreshPredictionValue(prediction, games.get(String(prediction.gameId))) : prediction);
+  const games=journalGameIndex(slate.games||[]);
+  const predictions=(slate.predictions??[]).map(prediction=>{
+    const association=resolveSlateGame(games,prediction);
+    return association.game?refreshPredictionValue(prediction,association.game):{...prediction,eventAssociationRejected:association.reason};
+  });
   const displayedPredictions = predictions.slice(0, 25);
   const embeds = [];
   const total = predictions.length;
@@ -230,7 +236,7 @@ function formatSlatePresentation(slate) {
         inline: false
       });
     } else {
-      embed.addFields(chunk.map((prediction) => predictionField(prediction, games.get(String(prediction.gameId)))));
+      embed.addFields(chunk.map((prediction) => predictionField(prediction, resolveSlateGame(games,prediction).game)));
     }
 
     embeds.push(embed);
@@ -287,7 +293,7 @@ function formatSlatePresentation(slate) {
     throw new Error(`Daily slate formatter exceeded Discord's embed limit (${finalLength}/${DISCORD_EMBED_TOTAL_LIMIT}).`);
   }
 
-  return { embeds, displayedPredictions: predictions.slice(0, shownCount) };
+  return { embeds, displayedPredictions: predictions.slice(0, shownCount).filter(row=>!row.eventAssociationRejected) };
 }
 
 export function formatSlateEmbeds(slate) {
