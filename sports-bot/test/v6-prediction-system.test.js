@@ -111,7 +111,7 @@ test('horizon evaluation grades T-90, T-30, T-10 independently with closing-line
       outcomeProbabilities: actualSide === 'home' ? { away: 35, home: 65 } : { away: 65, home: 35 },
       inputSnapshot: { seasonType: index % 10 === 0 ? 3 : 2 }
     });
-    markets.push({ guildId: '', gameId: String(index), stage: 't-10', capturedAt: '2099-01-01T00:00:00Z', away: 0.5, home: 0.5, draw: 0 });
+    markets.push({ guildId: '', gameId: String(index), leagueKey:'nba', startTime:predictions.at(-1).startTime, stage: 't-10', capturedAt: '2099-01-01T00:00:00Z', away: 0.5, home: 0.5, draw: 0 });
   }
   const report = evaluatePredictionHorizons(predictions, markets);
   assert.equal(report.overall.sampleSize, 30);
@@ -127,7 +127,7 @@ test('horizon evaluation grades T-90, T-30, T-10 independently with closing-line
     guildId: '', gameId: 'soccer', leagueKey: 'epl', snapshotStage: 't-10',
     predictionGeneratedAt: '2099-01-01T00:00:00Z', startTime: '2099-01-01T01:00:00Z', predictionMode: 'pregame', predictedSide: 'home', actualSide: 'home',
     outcomeProbabilities: { away: 30, home: 44, draw: 26 }
-  }], [{ guildId: '', gameId: 'soccer', stage: 't-10', capturedAt: '2099-01-01T00:00:00Z', away: 0.31, home: 0.43, draw: 0.26 }]);
+  }], [{ guildId: '', gameId: 'soccer', leagueKey:'epl', startTime:'2099-01-01T01:00:00Z', stage: 't-10', capturedAt: '2099-01-01T00:00:00Z', away: 0.31, home: 0.43, draw: 0.26 }]);
   assert.equal(soccer.byFavoriteClass.favorite.sampleSize, 1);
 
   const excluded = evaluatePredictionHorizons([{ ...predictions[0], gameId: 'live', predictionMode: 'in_play' }], []);

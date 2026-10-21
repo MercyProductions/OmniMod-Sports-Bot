@@ -1,3 +1,5 @@
+import { quoteTimeEpoch as instant } from './oddsPricing.js';
+import { validCandidateVector } from './candidateCohorts.js';
 import { journalOutcomeVector } from './journalOutcomeSpace.js';
 import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import { finiteNumber } from './dataValidation.js';
@@ -101,13 +103,28 @@ function summarize(rows = []) {
   };
 }
 
-function closingMarket(markets = [], prediction = {}) {
-  const start = Date.parse(prediction.startTime || '');
-  return [...markets]
-    .filter((row) => String(row.gameId) === String(prediction.gameId) && String(row.guildId || '') === String(prediction.guildId || ''))
-    .filter((row) => Number.isFinite(start) && Number.isFinite(Date.parse(row.capturedAt || '')) && Date.parse(row.capturedAt) < start)
-    .sort((a, b) => String(b.capturedAt || '').localeCompare(String(a.capturedAt || '')))
-    .find((row) => row.stage === 'closing' || row.stage === 't-10') || null;
+const leagueKey = row => String(row.leagueKey || row.league || '').trim().toLowerCase();
+const eventKey = row => JSON.stringify([String(row.guildId || ''),leagueKey(row),String(row.gameId),
+  Number.isFinite(instant(row.startTime)) ? new Date(instant(row.startTime)).toISOString() : null]);
+function closingMarket(markets = [], prediction = {}, probabilities) {
+  const start = instant(prediction.startTime);
+  if (!leagueKey(prediction) || prediction.gameId == null || !String(prediction.gameId).trim() || !Number.isFinite(start))
+    return {row:null,status:'prediction_scope_unverified'};
+  const scoped = markets.filter(row => eventKey(row) === eventKey(prediction)
+    && ['closing','t-10'].includes(row.stage));
+  const timed = scoped.filter(row => Number.isFinite(instant(row.capturedAt)) && instant(row.capturedAt) < start)
+    .sort((a,b) => instant(b.capturedAt) - instant(a.capturedAt));
+  if (!timed.length) return {row:null,status:scoped.length?'no_valid_prestart_receipt':'no_scoped_snapshot'};
+  const latest = timed.filter(row => instant(row.capturedAt) === instant(timed[0].capturedAt));
+  const vectors = latest.map(row => ({away:row.away,home:row.home,draw:row.draw}));
+  if (vectors.some(vector => !validCandidateVector(vector))) return {row:null,status:'latest_vector_invalid'};
+  const normalized = vectors.map(vector => {
+    const total = vector.away + vector.home + vector.draw;
+    return Object.fromEntries(Object.entries(vector).map(([side,p]) => [side,p/total]));
+  });
+  if (new Set(normalized.map(vector => JSON.stringify(vector))).size > 1) return {row:null,status:'latest_snapshot_conflict'};
+  if ((normalized[0].draw > 0) !== (probabilities.vector.draw > 0)) return {row:null,status:'outcome_space_mismatch'};
+  return {row:{...timed[0],...normalized[0]},status:'scoped_prestart_snapshot'};
 }
 
 function seasonPhase(row = {}) {
@@ -125,15 +142,15 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     if (row.quoteRefreshOnly) continue;
     if (!['away', 'home', 'draw'].includes(row.actualSide)) continue;
     if (row.predictionMode !== 'pregame') continue;
-    const generatedAt = new Date(row.predictionGeneratedAt || '').getTime();
-    const startTime = new Date(row.startTime || '').getTime();
+    const generatedAt = instant(row.predictionGeneratedAt);
+    const startTime = instant(row.startTime);
     if (!Number.isFinite(generatedAt) || !Number.isFinite(startTime) || generatedAt >= startTime) continue;
     const horizon = predictionHorizon(row);
-    const key = `${row.guildId || ''}:${row.leagueKey || row.league || ''}:${row.gameId}:${selectedVersion}:${horizon}`;
+    const key = JSON.stringify([eventKey(row),selectedVersion,horizon]);
     const prior = deduped.get(key);
-    if (!prior || String(row.predictionGeneratedAt || '') > String(prior.predictionGeneratedAt || '')) deduped.set(key, row);
+    if (!prior || instant(row.predictionGeneratedAt) > instant(prior.predictionGeneratedAt)) deduped.set(key, row);
   }
-  const scored = [], scoringExclusions = {};
+  const scored = [], scoringExclusions = {}, closingSnapshotStatuses = {};
   const exclude = reason => { scoringExclusions[reason] = (scoringExclusions[reason] || 0) + 1; };
   for (const row of deduped.values()) {
     const prediction = normalizedPrediction(row);
@@ -144,7 +161,9 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     }
     const selectedProbability = prediction.vector[selectedSide];
     const brier = prediction.sides.reduce((sum, side) => sum + (prediction.vector[side] - Number(side === row.actualSide)) ** 2, 0) / prediction.sides.length;
-    const closing = closingMarket(markets, row);
+    const closingSelection = closingMarket(markets, row, prediction);
+    closingSnapshotStatuses[closingSelection.status] = (closingSnapshotStatuses[closingSelection.status] || 0) + 1;
+    const closing = closingSelection.row;
     const closingProbability = closing ? finiteNumber(closing[selectedSide]) : null;
     const closingSides = closing
       ? ['away', 'home', 'draw'].filter((side) => Number.isFinite(Number(closing[side])) && Number(closing[side]) > 0)
@@ -168,9 +187,9 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
   const group = (key) => Object.fromEntries([...new Set(scored.map((row) => row[key]))].sort().map((value) => [value, summarize(scored.filter((row) => row[key] === value))]));
   const latestByGame = new Map();
   for (const scoredRow of scored) {
-    const row = scoredRow.row, key = [row.guildId || '', row.leagueKey || row.league || '', row.gameId].join(':');
+    const row = scoredRow.row, key = eventKey(row);
     const prior = latestByGame.get(key);
-    if (!prior || Date.parse(row.predictionGeneratedAt) > Date.parse(prior.row.predictionGeneratedAt)) latestByGame.set(key, scoredRow);
+    if (!prior || instant(row.predictionGeneratedAt) > instant(prior.row.predictionGeneratedAt)) latestByGame.set(key, scoredRow);
   }
   return {
     generatedAt: new Date().toISOString(),
@@ -178,7 +197,8 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     modelVersion: selectedVersion,
     versionsAvailable: versions,
     logLossProtocol: LOG_LOSS_PROTOCOL,
-    scoringCandidates: deduped.size, scoringExclusions,
+    scoringCandidates: deduped.size, scoringExclusions, closingSnapshotStatuses,
+    closingComparisonPolicy: 'Latest scoped league/event/start/guild snapshot with an explicit-zone receipt before start; equal-time conflicts excluded. Receipt and stage do not prove an actual closing, fresh provider, executable or independent price. Status counts are per scored forecast/horizon.',
     scoreDefinition: 'Full-outcome Brier (mean over outcome coordinates) and multinomial log loss; distinct from selected-outcome binary scores.',
     overall: summarize([...latestByGame.values()]),
     byHorizon: group('horizon'),
