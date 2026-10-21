@@ -17,3 +17,5 @@ See [the audit](SPORTS_ACCURACY_AUDIT.md) for changed modules, known limitations
 Continuation: [prediction lifecycle reliability](SPORTS_RELIABILITY_CONTINUATION.md) records the confirmed targeted-refresh ordering defect, its issuance barrier, append-only lifecycle, and 139-test verification. The broader coverage, matched-accuracy, selection/value and prospective operational phases remain unfinished; no deployment or model promotion occurred.
 
 Per-game evidence continuation: [frozen coverage and v6.0.2 corrections](SPORTS_EVIDENCE_COVERAGE.md), 147 passing Sports tests and syntax checks. Probable/confirmed roles, injury coverage bonuses and availability arithmetic repaired in development; real forecasting improvement remains unproven.
+
+Matched evaluation continuation: [paired game-weighted comparisons](SPORTS_MATCHED_EVALUATION.md), 157 passing Sports tests and syntax checks. Reference-population and repeated-horizon counting defects corrected; real matched accuracy improvement remains unverified.

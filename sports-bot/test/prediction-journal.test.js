@@ -80,6 +80,8 @@ test('a final resolves all previously journaled horizons even when the slate onl
   const rows = await readPredictionJournal(file);
   assert.equal(rows.filter(row => row.type === 'forecast').length, 2);
   assert.equal(rows.filter(row => row.type === 'result').length, 2);
+  const summary = summarizePredictionJournal(await readFullPredictionJournal(file));
+  assert.equal(summary.byVersion['OmniMod Evidence Ensemble v6.0.1'].selectedOutcomeBinary.sampleSize, 1);
 });
 
 test('unavailable odds remain unavailable and late imports never become prospective forecasts', async t => {

@@ -68,6 +68,8 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
     outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,
+    eventContext: { sport: prediction.sportProfile || game.sportGroup || null,
+      season: game.seasonYear ?? game.season?.year ?? null, seasonType: game.seasonType ?? game.season?.type ?? null },
     candidateProbabilities: prediction.candidateProbabilities || null,
     referenceBaselines: prediction.referenceBaselines || null,
     issuanceScope: 'Computed pregame slate; Discord delivery is not attested by this journal.',

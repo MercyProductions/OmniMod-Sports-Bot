@@ -29,7 +29,7 @@ These fixtures verify lifecycle correctness, not real provider coverage, live Di
 | Verify previous repairs | In progress | Baseline reproduced; remaining source-to-test mappings for every earlier repair need a complete review. |
 | Journal sequencing and lifecycle | In progress | Critical ordering defect corrected; live provider failures, missed windows and actual Discord restart behavior still need isolated operational evidence. |
 | Per-game evidence coverage | In progress | Frozen per-game reports and v6.0.2 input/workload corrections implemented and tested; actual provider and sport-specific coverage still needs prospective validation. See SPORTS_EVIDENCE_COVERAGE.md. |
-| Matched accuracy evaluation | Pending | Lifecycle-eligible champion/baseline/challenger forecasts, original odds, matured results and game-clustered uncertainty. Missing past records must not be fabricated. |
+| Matched accuracy evaluation | In progress | Same-issue paired evaluation, first-issue selection, game-cluster uncertainty and coverage strata implemented/tested; real matched baseline/challenger outcomes still missing. See SPORTS_MATCHED_EVALUATION.md. |
 | Model selection/calibration | Pending | Chronological like-for-like evidence per sport and safeguards against holdout reuse. No new model promoted. |
 | Realistic odds/value research | Pending | Timestamped offered prices, settlement conventions, market dependence and realistic costs; winner accuracy is not economic value. |
 | Operational/prospective validation | Pending | Actual Sports source/runtime/model/config/jobs inspection and isolated forward research. No deployment authorized by this goal. |

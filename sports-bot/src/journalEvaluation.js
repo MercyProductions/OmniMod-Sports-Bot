@@ -1,3 +1,5 @@
+import {evaluateMatchedJournal} from './matchedJournalEvaluation.js';
+import {validCandidateVector} from './candidateCohorts.js';
 import { evaluatePredictionHorizons } from './horizonEvaluation.js';
 import { evaluatePredictionRows } from './modelEvaluation.js';
 
@@ -19,9 +21,14 @@ export function summarizePredictionJournal(records = []) {
       predictionMode: 'pregame', outcomeProbabilities: probabilities
     });
     const modelRows = graded.map(row => convert(row));
+    const firstPerGame = new Map();
+    for (const row of graded) {
+      const key = JSON.stringify([row.league, row.gameId, row.startTime]);
+      if (!firstPerGame.has(key)) firstPerGame.set(key, row);
+    }
     const baselineComparisons = {};
     for (const baseline of ['elo', 'market']) {
-      const matched = graded.filter(row => row.referenceBaselines?.[baseline]?.probabilities);
+      const matched = graded.filter(row => validCandidateVector(row.referenceBaselines?.[baseline]?.probabilities));
       const referenceRows = matched.map(row => {
         const vector = row.referenceBaselines[baseline].probabilities;
         return convert(row, Object.fromEntries(Object.entries(vector).map(([side, p]) => [side, p * 100])), selectedSide(vector));
@@ -36,10 +43,10 @@ export function summarizePredictionJournal(records = []) {
     byVersion[version] = {
       forecasts: versionRows.length, graded: graded.length, unresolved: versionRows.length - graded.length,
       outcomes: evaluatePredictionHorizons(modelRows, [], { modelVersion: version }),
-      selectedOutcomeBinary: evaluatePredictionRows(graded.map(row => ({
+      selectedOutcomeBinary: { ...evaluatePredictionRows([...firstPerGame.values()].map(row => ({
         correct: row.selectedSide === results.get(row.forecastId).actualSide,
         prediction: { predictionProbability: row.outcomePercentages[row.selectedSide] / 100 }
-      }))),
+      }))), selectionRule: 'First issued record per event/model-version across guilds and horizons; no duplicated game counts.' },
       referenceComparisons: baselineComparisons
     };
   }
@@ -54,6 +61,7 @@ export function summarizePredictionJournal(records = []) {
     forecastsWithOdds: forecasts.filter(row => row.odds.status === 'available').length,
     gradedForecasts: forecasts.filter(row => results.has(row.forecastId)).length,
     byVersion,
+    matchedForecastComparisons: evaluateMatchedJournal(records),
     limitations: [
       'Descriptive frozen-forecast scores; no improvement or profitability conclusion is inferred.',
       'Models/versions/horizons and matched reference populations are explicit. Different horizon groups remain correlated.',
