@@ -4,10 +4,13 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, nonemptyText } from './advancedDatasetContracts.js';
+export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
 const DAY_MS = 86_400_000;
 let syncPromise = null;
+let syncRequestKey = null;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -126,19 +129,26 @@ export async function readAdvancedDatasetSnapshot() {
 }
 
 export async function syncAdvancedDatasets(options = {}) {
+  const request = advancedDatasetRequest(options);
   if (!config.advancedDatasetsEnabled || options.localOnly || config.localOnly) {
-    return { snapshot: await readAdvancedDatasetSnapshot(), externalCalls: 0, diagnostics: ['Advanced dataset sync skipped by configuration/local-only mode.'] };
+    return { ...request, snapshot: await readAdvancedDatasetSnapshot(), externalCalls: 0, diagnostics: ['Advanced dataset sync skipped by configuration/local-only mode.'] };
   }
-  if (syncPromise) return syncPromise;
+  const requestKey = JSON.stringify(request.requestIdentities);
+  if (syncPromise) {
+    if (syncRequestKey === requestKey) return syncPromise;
+    await syncPromise;
+    return syncAdvancedDatasets(options);
+  }
+  syncRequestKey = requestKey;
   syncPromise = (async () => {
     const current = await readAdvancedDatasetSnapshot();
-    const clock = options.clock || Date.now, now = clock();
-    if (!Number.isFinite(now)) throw new Error('Valid advanced dataset observation time required');
+    const clock = options.clock || Date.now, { now, year, seasonStart, requestIdentities } = request;
     const statuses = new Map((current.sources || []).map(row => [row.id, row]));
     const sourceDue = id => {
       const row = statuses.get(id), checked = Date.parse(row?.checkedAt || '');
       if (Date.parse(row?.providerRetryAfter || '') > now) return false;
       if (options.force) return true;
+      if (row?.requestKey !== requestIdentities[id]) return true;
       if (!Number.isFinite(checked) || checked > now) return true;
       if (row.ok === false) return !(Date.parse(row.retryAfter || '') > now);
       if (row.ok !== true) return true;
@@ -148,9 +158,8 @@ export async function syncAdvancedDatasets(options = {}) {
     const sourceIds = ['tennis-atp', 'tennis-wta', 'baseball-savant-batter', 'baseball-savant-pitcher',
       'nflverse-team-stats', 'nflverse-schedules', 'moneypuck-team-xg', 'statsbomb-open-data',
       ...(config.advancedNbaStatsEnabled ? ['nba-advanced-teams'] : [])];
-    if (!sourceIds.some(sourceDue)) return { snapshot: current, externalCalls: 0,
+    if (!sourceIds.some(sourceDue)) return { ...request, snapshot: current, externalCalls: 0,
       diagnostics: ['Advanced datasets: each enabled source is within its success cache or retry delay; retained row receipts are unchanged.'] };
-    const year = Number(options.year || new Date(now).getUTCFullYear());
     const snapshot = { tennis: {}, baseballPlayers: {}, footballTeams: {}, footballSchedules: [], hockeyTeams: {}, basketballTeams: {}, soccerCompetitions: [], ...current,
       version: 2, receiptPolicy: 'per-source-received-rows-v1', sources: [...statuses.values()], updatedAt: new Date(now).toISOString() };
     let externalCalls = 0;
@@ -158,10 +167,12 @@ export async function syncAdvancedDatasets(options = {}) {
     const fetchImpl = (...args) => { externalCalls += 1; return providerFetch(...args); };
     const sourceText = (url, timeoutMs) => fetchText(url, fetchImpl, timeoutMs, clock);
     const recordStatus = (id, url, ok, details) => {
-      const row = sourceStatus(id, url, ok, details, statuses.get(id), clock());
+      const previous = statuses.get(id);
+      const row = sourceStatus(id, url, ok, { ...details, requestKey: requestIdentities[id],
+        lastSuccessRequestKey: ok ? requestIdentities[id] : previous?.lastSuccessRequestKey || (previous?.ok ? previous.requestKey : null) || null }, previous, clock());
       statuses.set(id, row); snapshot.sources = [...statuses.values()];
     };
-    const stamp = (row, sourceDatasetId) => ({ ...row, sourceDatasetId, sourceFetchedAt: new Date(clock()).toISOString() });
+    const stamp = (row, sourceDatasetId) => ({ ...row, sourceDatasetId, sourceRequestKey: requestIdentities[sourceDatasetId], sourceFetchedAt: new Date(clock()).toISOString() });
     const diagnostics = [];
 
     const tennisSources = [
@@ -180,9 +191,15 @@ export async function syncAdvancedDatasets(options = {}) {
           text = await sourceText(fallbackUrl);
           usedUrl = fallbackUrl;
         }
-        const rows = parseCsv(text);
+        const parsed = checkedDatasetRows(parseCsv(text), { source: `tennis-${tour}`,
+          keys: [['winner_name'],['loser_name'],['tourney_date']],
+          identity: row => nonemptyText(row.winner_name) && nonemptyText(row.loser_name) && Boolean(calendarDay(row.tourney_date)) });
+        const rows = parsed.rows.filter(row => calendarDay(row.tourney_date).startsWith(String(year)))
+          .map(row => ({ ...row, tourney_date: calendarDay(row.tourney_date).replaceAll('-', '') }));
+        if (!rows.length) throw new Error(`Advanced source tennis-${tour}: no observations for requested year`);
         snapshot.tennis[tour] = Object.fromEntries(Object.entries(buildTennisDataset(rows, tour)).map(([key, row]) => [key, stamp(row, `tennis-${tour}`)]));
-        recordStatus(`tennis-${tour}`, usedUrl, true, { rows: rows.length, players: Object.keys(snapshot.tennis[tour]).length, license: 'non-commercial attribution/share-alike; see source repository' });
+        recordStatus(`tennis-${tour}`, usedUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows,
+          excludedPeriodRows: parsed.rows.length - rows.length, players: Object.keys(snapshot.tennis[tour]).length, license: 'non-commercial attribution/share-alike; see source repository' });
         diagnostics.push(`${tour.toUpperCase()} advanced snapshot: ${rows.length} match(es), ${Object.keys(snapshot.tennis[tour]).length} player(s).`);
       } catch (error) {
         recordStatus(`tennis-${tour}`, primaryUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -197,7 +214,10 @@ export async function syncAdvancedDatasets(options = {}) {
     for (const [role, url] of statcastSources) {
       if (!sourceDue(`baseball-savant-${role}`)) continue;
       try {
-        const rows = parseCsv(await sourceText(url));
+        const parsed = checkedDatasetRows(parseCsv(await sourceText(url)), { source: `baseball-savant-${role}`,
+          keys: [['last_name, first_name','player_name'],['est_ba','est_slg','est_woba']], features: ['est_ba','est_slg','est_woba'],
+          identity: row => nonemptyText(row['last_name, first_name'] || row.player_name) });
+        const rows = parsed.rows;
         for (const row of rows) {
           const name = row['last_name, first_name'] || row.player_name || '';
           if (!name) continue;
@@ -209,7 +229,7 @@ export async function syncAdvancedDatasets(options = {}) {
             sampleSize: finite(row.pa ?? row.bip)
           }, `baseball-savant-${role}`);
         }
-        recordStatus(`baseball-savant-${role}`, url, true, { rows: rows.length, license: 'MLB Baseball Savant public CSV' });
+        recordStatus(`baseball-savant-${role}`, url, true, { rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'MLB Baseball Savant public CSV' });
         diagnostics.push(`Baseball Savant ${role}: ${rows.length} expected-stat row(s).`);
       } catch (error) {
         recordStatus(`baseball-savant-${role}`, url, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -217,11 +237,13 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
 
-    const footballSeason = new Date(now).getUTCMonth() < 8 ? year - 1 : year;
+    const footballSeason = seasonStart;
     const nflUrl = `https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_reg_${footballSeason}.csv`;
     if (sourceDue('nflverse-team-stats')) {
       try {
-        const rows = parseCsv(await sourceText(nflUrl));
+        const parsed = checkedDatasetRows(parseCsv(await sourceText(nflUrl)), { source: 'nflverse-team-stats',
+          keys: [['team'],['passing_epa','rushing_epa','passing_cpoe']], features: ['passing_epa','rushing_epa','passing_cpoe'], identity: row => nonemptyText(row.team) });
+        const rows = parsed.rows;
         snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').toUpperCase(), stamp({
           team: String(row.team || '').toUpperCase(), games: finite(row.games),
           epaPerGame: perGame(measuredCalculation([row.passing_epa, row.rushing_epa], (passing, rushing) => passing + rushing), row.games),
@@ -229,7 +251,7 @@ export async function syncAdvancedDatasets(options = {}) {
           rushingEpaPerGame: perGame(row.rushing_epa, row.games),
           cpoe: finite(row.passing_cpoe)
         }, 'nflverse-team-stats')]));
-        recordStatus('nflverse-team-stats', nflUrl, true, { rows: rows.length, license: 'CC BY 4.0' });
+        recordStatus('nflverse-team-stats', nflUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'CC BY 4.0' });
         diagnostics.push(`nflverse team stats: ${rows.length} team row(s) for ${footballSeason}.`);
       } catch (error) {
         recordStatus('nflverse-team-stats', nflUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -240,8 +262,11 @@ export async function syncAdvancedDatasets(options = {}) {
     const nflScheduleUrl = 'https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv';
     if (sourceDue('nflverse-schedules')) {
       try {
-        const rows = parseCsv(await sourceText(nflScheduleUrl));
-        snapshot.footballSchedules = rows
+        const parsed = checkedDatasetRows(parseCsv(await sourceText(nflScheduleUrl)), { source: 'nflverse-schedules',
+          keys: [['season'],['gameday'],['away_team'],['home_team']],
+          identity: row => finite(row.season) !== null && Boolean(calendarDay(row.gameday)) && nonemptyText(row.away_team) && nonemptyText(row.home_team) });
+        const rows = parsed.rows;
+        const schedules = rows
           .filter((row) => finite(row.season, 0) >= footballSeason - 1)
           .map((row) => stamp({
             game_id: row.game_id,
@@ -259,7 +284,9 @@ export async function syncAdvancedDatasets(options = {}) {
             referee: row.referee,
             stadium: row.stadium
           }, 'nflverse-schedules'));
-        recordStatus('nflverse-schedules', nflScheduleUrl, true, { rows: snapshot.footballSchedules.length, license: 'CC BY 4.0' });
+        if (!schedules.length) throw new Error('Advanced source nflverse-schedules: no observations for requested seasons');
+        snapshot.footballSchedules = schedules;
+        recordStatus('nflverse-schedules', nflScheduleUrl, true, { rows: schedules.length, rejectedRows: parsed.rejectedRows, excludedPeriodRows: rows.length - schedules.length, license: 'CC BY 4.0' });
         diagnostics.push(`nflverse schedule redundancy: ${snapshot.footballSchedules.length} recent game row(s).`);
       } catch (error) {
         recordStatus('nflverse-schedules', nflScheduleUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -267,19 +294,23 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
 
-    const hockeySeason = new Date(now).getUTCMonth() < 8 ? year - 1 : year;
+    const hockeySeason = seasonStart;
     const moneyPuckUrl = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${hockeySeason}/regular/teams.csv`;
     if (sourceDue('moneypuck-team-xg')) {
       try {
-        const rows = parseCsv(await sourceText(moneyPuckUrl));
+        const parsed = checkedDatasetRows(parseCsv(await sourceText(moneyPuckUrl)), { source: 'moneypuck-team-xg',
+          keys: [['team'],['situation'],['xGoalsFor','xGoalsAgainst','goalsFor','goalsAgainst']],
+          features: ['xGoalsFor','xGoalsAgainst','goalsFor','goalsAgainst'], identity: row => nonemptyText(row.team) && nonemptyText(row.situation) });
+        const rows = parsed.rows;
         const allSituations = rows.filter((row) => String(row.situation).toLowerCase() === 'all');
+        if (!allSituations.length) throw new Error('Advanced source moneypuck-team-xg: no all-situations observations');
         snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').toUpperCase(), stamp({
           team: String(row.team || '').toUpperCase(), games: finite(row.games_played),
           xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
           flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
           goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)
         }, 'moneypuck-team-xg')]));
-        recordStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, attribution: 'MoneyPuck.com' });
+        recordStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, rejectedRows: parsed.rejectedRows, attribution: 'MoneyPuck.com' });
         diagnostics.push(`MoneyPuck team xG: ${allSituations.length} team row(s) for ${hockeySeason}.`);
       } catch (error) {
         recordStatus('moneypuck-team-xg', moneyPuckUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -288,19 +319,22 @@ export async function syncAdvancedDatasets(options = {}) {
     }
 
     if (config.advancedNbaStatsEnabled && sourceDue('nba-advanced-teams')) {
-      const seasonStart = new Date(now).getUTCMonth() < 8 ? year - 1 : year;
       const seasonLabel = `${seasonStart}-${String(seasonStart + 1).slice(-2)}`;
       const nbaUrl = `https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&LastNGames=0&LeagueID=00&Location=&MeasureType=Advanced&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlusMinus=N&Rank=N&Season=${seasonLabel}&SeasonType=Regular%20Season&TeamID=0`;
       try {
         const payload = JSON.parse(await sourceText(nbaUrl, 8_000));
         const resultSet = payload.resultSets?.[0] || payload.resultSet || {};
-        const headers = resultSet.headers || [];
-        const rows = (resultSet.rowSet || []).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]])));
+        const headers = resultSet.headers, dataRows = resultSet.rowSet;
+        if (!Array.isArray(headers) || !Array.isArray(dataRows) || dataRows.some(row => !Array.isArray(row))) throw new Error('Advanced source nba-advanced-teams: unsupported payload schema');
+        const parsed = checkedDatasetRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))),
+          { source: 'nba-advanced-teams', keys: [['TEAM_NAME'],['PACE','NET_RATING','OFF_RATING','DEF_RATING']],
+            features: ['PACE','NET_RATING','OFF_RATING','DEF_RATING'], identity: row => nonemptyText(row.TEAM_NAME) });
+        const rows = parsed.rows;
         snapshot.basketballTeams = Object.fromEntries(rows.map((row) => [normalizeEntityName(row.TEAM_NAME), stamp({
           team: row.TEAM_NAME, teamId: row.TEAM_ID, games: row.GP, pace: row.PACE,
           offensiveRating: row.OFF_RATING, defensiveRating: row.DEF_RATING, netRating: row.NET_RATING
         }, 'nba-advanced-teams')]));
-        recordStatus('nba-advanced-teams', nbaUrl, true, { rows: rows.length });
+        recordStatus('nba-advanced-teams', nbaUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows });
         diagnostics.push(`NBA advanced teams: ${rows.length} team row(s) for ${seasonLabel}.`);
       } catch (error) {
         recordStatus('nba-advanced-teams', nbaUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -314,15 +348,17 @@ export async function syncAdvancedDatasets(options = {}) {
     if (sourceDue('statsbomb-open-data')) {
       try {
         const text = await sourceText(statsBombUrl);
-        const rows = JSON.parse(text);
-        snapshot.soccerCompetitions = Array.isArray(rows) ? rows.map((row) => stamp({
+        const parsed = checkedDatasetRows(JSON.parse(text), { source: 'statsbomb-open-data', keys: [['competition_id'],['season_id']],
+          identity: row => Number.isInteger(finite(row.competition_id)) && Number.isInteger(finite(row.season_id)) });
+        const rows = parsed.rows;
+        snapshot.soccerCompetitions = rows.map((row) => stamp({
           competitionId: row.competition_id,
           seasonId: row.season_id,
           competition: row.competition_name,
           season: row.season_name,
           matchAvailable: row.match_available
-        }, 'statsbomb-open-data')) : [];
-        recordStatus('statsbomb-open-data', statsBombUrl, true, { competitions: snapshot.soccerCompetitions.length, license: 'StatsBomb Open Data terms' });
+        }, 'statsbomb-open-data'));
+        recordStatus('statsbomb-open-data', statsBombUrl, true, { competitions: snapshot.soccerCompetitions.length, rejectedRows: parsed.rejectedRows, license: 'StatsBomb Open Data terms' });
         diagnostics.push(`StatsBomb open-data catalog: ${snapshot.soccerCompetitions.length} competition-season record(s).`);
       } catch (error) {
         recordStatus('statsbomb-open-data', statsBombUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -330,9 +366,10 @@ export async function syncAdvancedDatasets(options = {}) {
       }
     }
     await writeJson(snapshotFile, snapshot, { compact: true, backup: true, mode: 0o600 });
-    return { snapshot, externalCalls, diagnostics };
+    return { ...request, snapshot, externalCalls, diagnostics };
   })();
-  try { return await syncPromise; } finally { syncPromise = null; }
+  const operation = syncPromise;
+  try { return await operation; } finally { if (syncPromise === operation) { syncPromise = null; syncRequestKey = null; } }
 }
 
 function playerRecord(snapshot, tour, name) {
@@ -344,30 +381,46 @@ function receiptProvenance(previous, rows) {
   const inherited = Array.isArray(previous?.sourceReceiptTimes) ? previous.sourceReceiptTimes
     : previous && Object.keys(previous).length ? [null] : [];
   return { sourceReceiptTimes: [...inherited, ...rows.map(row => row?.sourceFetchedAt || null)],
+    sourceRequestKeys: [...(previous?.sourceRequestKeys || []), ...rows.map(row => row?.sourceRequestKey || null)],
     publicationTimeVerified: false, provenancePolicy: 'contributing-row-receipts-v1' };
 }
 
 export async function attachAdvancedDatasetContext(games = [], options = {}) {
   const sync = await syncAdvancedDatasets(options);
+  const explicitPeriod = options.year !== undefined || options.seasonStart !== undefined;
+  const eligibleRow = (row, sourceId) => !row ? null : row.sourceRequestKey
+    ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod ? null : row;
   let matched = 0;
   const provenance = (previous, rows, sourceId) => {
     const status = (sync.snapshot.sources || []).find(row => row.id === sourceId);
-    return { ...receiptProvenance(previous, rows), sourceRefreshStatuses: [...(previous?.sourceRefreshStatuses || []), {
+    return { ...receiptProvenance(previous, rows), requestedSourceKey: sync.requestIdentities[sourceId], sourceRefreshStatuses: [...(previous?.sourceRefreshStatuses || []), {
       sourceId, state: status?.ok === true ? 'success' : status?.ok === false ? 'failed' : 'unknown',
+      requestKey: status?.requestKey || null, lastSuccessRequestKey: status?.lastSuccessRequestKey || null,
       checkedAt: status?.checkedAt || null, lastSuccessAt: status?.lastSuccessAt || (status?.ok ? status.checkedAt : null) || null,
       retryAfter: status?.retryAfter || null, providerRetryAfter: status?.providerRetryAfter || null
     }] };
   };
-  const sourceCorroborations = config.sourceRedundancyEnabled ? corroborateScheduleRows(games.filter((game) => game.leagueKey === 'nfl'), sync.snapshot.footballSchedules || [], {
+  const sourceCorroborations = config.sourceRedundancyEnabled ? corroborateScheduleRows(games.filter((game) => game.leagueKey === 'nfl'),
+    (sync.snapshot.footballSchedules || []).filter(row => eligibleRow(row, 'nflverse-schedules')), {
     provider: 'nflverse independent schedule'
   }) : 0;
   for (const game of games) {
+    if (game.advancedDataset) {
+      const keys = Array.isArray(game.advancedDataset.sourceRequestKeys) ? game.advancedDataset.sourceRequestKeys : [];
+      const incompatible = keys.some(key => {
+        if (!key) return explicitPeriod;
+        try { const source = JSON.parse(key).source; return sync.requestIdentities[source] !== key; }
+        catch { return true; }
+      });
+      if (incompatible || explicitPeriod && !keys.length || game.advancedDataset.sourceRequestKeys && !Array.isArray(game.advancedDataset.sourceRequestKeys)) delete game.advancedDataset;
+    }
     const leagueKey = String(game.leagueKey || '').toLowerCase();
     if (leagueKey === 'mlb') {
       const sideMetric = (side) => {
         const team = normalizeEntityName(game[side]?.name);
         const rows = (game.autoPlayers || []).filter((row) => normalizeEntityName(row.team) === team)
           .map((row) => sync.snapshot.baseballPlayers?.[normalizeEntityName(row.name)])
+          .map(row => eligibleRow(row, 'baseball-savant-batter'))
           .filter((row) => row?.role === 'batter' && Number.isFinite(row.expectedWoba));
         return { rows, value: rows.length ? rows.reduce((sum, row) => sum + row.expectedWoba, 0) / rows.length : null };
       };
@@ -383,8 +436,8 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       continue;
     }
     if (leagueKey === 'nfl') {
-      const away = sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()];
-      const home = sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()];
+      const away = eligibleRow(sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()], 'nflverse-team-stats');
+      const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
       if (away && home) {
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'), provider: 'nflverse team stats', epaDifference: difference(home.epaPerGame, away.epaPerGame, 60), passingEpaDifference: difference(home.passingEpaPerGame, away.passingEpaPerGame, 38), rushingEpaDifference: difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24), cpoeDifference: difference(home.cpoe, away.cpoe) };
         matched += 1;
@@ -392,8 +445,8 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       continue;
     }
     if (leagueKey === 'nhl') {
-      const away = sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()];
-      const home = sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()];
+      const away = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
+      const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
       if (away && home) {
         const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com',
@@ -405,8 +458,8 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       continue;
     }
     if (leagueKey === 'nba') {
-      const away = sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)];
-      const home = sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)];
+      const away = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)], 'nba-advanced-teams');
+      const home = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)], 'nba-advanced-teams');
       if (away && home) {
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: measuredCalculation([away.pace, home.pace], (a, h) => (a + h) / 2), efficiencyDifference: difference(home.netRating, away.netRating) };
         matched += 1;
@@ -415,8 +468,8 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     }
     if (!['atp', 'wta'].includes(leagueKey)) continue;
     const tour = String(game.leagueKey).toLowerCase();
-    const away = playerRecord(sync.snapshot, tour, game.away?.name);
-    const home = playerRecord(sync.snapshot, tour, game.home?.name);
+    const away = eligibleRow(playerRecord(sync.snapshot, tour, game.away?.name), `tennis-${tour}`);
+    const home = eligibleRow(playerRecord(sync.snapshot, tour, game.home?.name), `tennis-${tour}`);
     if (!away || !home) continue;
     const surface = String(game.autoContext?.surface || game.autoContext?.factors?.surface || '').toLowerCase();
     const awaySurface = finite(away.surfaces?.[surface], finite(away.elo));

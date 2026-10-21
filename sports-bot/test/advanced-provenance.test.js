@@ -6,7 +6,7 @@ import {join} from 'node:path';
 const directory=await mkdtemp(join(tmpdir(),'sports-advanced-receipts-'));
 process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
 process.env.ADVANCED_DATASETS_ENABLED='true';process.env.LOCAL_ONLY='false';process.env.ADVANCED_NBA_STATS_ENABLED='true';
-const {syncAdvancedDatasets,attachAdvancedDatasetContext,advancedDatasetSnapshotFile}=await import('../src/advancedDatasets.js');
+const {syncAdvancedDatasets,attachAdvancedDatasetContext,advancedDatasetSnapshotFile,advancedDatasetRequest}=await import('../src/advancedDatasets.js');
 const {writeJson}=await import('../src/storage.js');
 const {observedInputState,predictionInputsAt}=await import('../src/inputChronology.js');
 const {buildEvidenceCoverage}=await import('../src/evidenceCoverage.js');
@@ -69,7 +69,8 @@ test('unknown legacy row receipts remain unknown despite a fresh container times
 test('explicit provider Retry-After is respected even by a forced sync',async()=>{
  const fresh=new Date(now).toISOString();
  for(const delay of [String(6*3600),new Date(now+6*3600000).toUTCString()]){
- await seed({sources:ids.filter(id=>id!=='nflverse-team-stats').map(id=>({id,ok:true,checkedAt:fresh,lastSuccessAt:fresh}))});
+ await seed({sources:ids.filter(id=>id!=='nflverse-team-stats').map(id=>({id,ok:true,checkedAt:fresh,lastSuccessAt:fresh,
+  requestKey:advancedDatasetRequest({clock:()=>now}).requestIdentities[id]}))});
  let calls=0;const fetchImpl=async()=>{calls++;return {ok:false,status:429,headers:{get:()=>delay}};};
  await syncAdvancedDatasets({clock:()=>now,fetchImpl});assert.equal(calls,1);
  await syncAdvancedDatasets({clock:()=>now+2*3600000,force:true,fetchImpl});

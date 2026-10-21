@@ -84,3 +84,7 @@ Development v6.0.12 repairs reproduced missing-as-zero comparisons, incomplete p
 ## Collector clock follow-up
 
 Post-commit verification measured 1-2 ms completion/receipt clock offsets. The collector now waits briefly for its actual wall clock before applying the unchanged strict writer validation. [Measured evidence and bounded-wait tests](SPORTS_COLLECTOR_CLOCK.md); latest complete suite 279 passing. Underlying host clock synchronization remains unverified; original capture timestamps and eligibility comparisons are preserved.
+
+## Advanced payload and period continuation
+
+Development v6.0.13 validates usable adapter payloads before replacement and binds cache/attachment/concurrent refreshes to requested periods. [Reproductions, controls and limits](SPORTS_ADVANCED_PAYLOAD_CONTRACTS.md); complete suite 290 passing, syntax checks pass. Request identity is not native publication or returned-season certification. Statistical improvement, complete point-in-time integrity and deployed verification remain unproven.
