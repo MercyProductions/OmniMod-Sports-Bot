@@ -6,7 +6,7 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 21, 2026
 
-Forecast model identity remains **v6.0.45**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v2`; it does not rewrite or relabel forecast captures. Current full suite: **701 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 692 passing tests. Test counts establish exercised code behavior, not forecasting quality.
+Forecast model identity remains **v6.0.45**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v2`; it does not rewrite or relabel forecast captures. Current full suite: **706 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 701 passing tests. Test counts establish exercised code behavior, not forecasting quality.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |

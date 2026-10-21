@@ -1,3 +1,4 @@
+import { quoteTimeEpoch as instant } from './oddsPricing.js';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import { config, dataDir } from './config.js';
@@ -152,11 +153,11 @@ function scoreRows(rows, model = null) {
     const baseline = normalizeVector(row.candidateProbabilities.evidence, twoWay);
     const binary = model ? predictBinary(model, rowFeatures(row), baseline, row.leagueKey) : evidenceBinaryHome(baseline);
     const predicted = predictionFromBinary(binary, baseline, twoWay);
-    const sides = twoWay ? ['away', 'home'] : ['away', 'home', 'draw'];
+    const sides = twoWay && row.actualSide !== 'draw' ? ['away', 'home'] : ['away', 'home', 'draw'];
     baselineBrier += sides.reduce((sum, side) => sum + (baseline[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
     modelBrier += sides.reduce((sum, side) => sum + (predicted[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
-    baselineLogLoss += -Math.log(clamp(baseline[row.actualSide], 0.001, 0.999));
-    modelLogLoss += -Math.log(clamp(predicted[row.actualSide], 0.001, 0.999));
+    baselineLogLoss += -Math.log(Math.max(1e-12, baseline[row.actualSide]));
+    modelLogLoss += -Math.log(Math.max(1e-12, predicted[row.actualSide]));
   }
   const count = rows.length;
   return {
@@ -196,7 +197,8 @@ export function trainLocalMlModels(rows = [], options = {}) {
   const sports = {};
   const evaluationRows = [];
   for (const [sport, sportRows] of groups) {
-    const sorted = [...sportRows].sort((a, b) => String(a.startTime || a.dateKey || '').localeCompare(String(b.startTime || b.dateKey || '')));
+    const orderTime = row => Number.isFinite(instant(row.startTime)) ? instant(row.startTime) : Infinity;
+    const sorted = [...sportRows].sort((a, b) => orderTime(a) - orderTime(b) || String(a.gameId).localeCompare(String(b.gameId)));
     const split = Math.max(30, Math.min(sorted.length - 30, Math.floor(sorted.length * 0.7)));
     const validation = sorted.slice(split);
     const firstValidationForecast = Math.min(...validation.map(row => Date.parse(row.predictionGeneratedAt || '')));
@@ -220,7 +222,8 @@ export function trainLocalMlModels(rows = [], options = {}) {
       ...artifactSpec,
       artifactFormat: 'sports-local-ml-artifact-v2',
       modelId: `local-gbdt-hierarchical-${sport}-v2-${artifactId.slice(0, 16)}`,
-      artifactId, trainingHash, validationProtocol: 'fixed-22-round-fit-before-chronological-validation-v2',
+      artifactId, trainingHash, validationProtocol: 'fixed-22-round-fit-before-chronological-validation-v3',
+      evaluationProtocol: 'mean-coordinate-brier-observed-outcomes-log-floor-1e-12-v2',
       promotionAllowed: false, researchOnly: true,
       lastTrainingOutcomeAt: training.length ? new Date(Math.max(...training.map(row => Date.parse(row.resolvedAt)))).toISOString() : null,
       purgedTrainingRows: split - training.length,
