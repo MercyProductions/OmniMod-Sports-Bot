@@ -196,6 +196,9 @@ function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = D
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
     marketTimestampEvidence:structuredClone(prediction.marketTimestampEvidence||null),
+    lineMarkets:{spread:structuredClone(game.odds?.spread||null),total:structuredClone(game.odds?.total||null)},
+    lineMarketIntegrity:structuredClone(game.odds?.lineMarketIntegrity||null),
+    settlementEvidence:structuredClone(game.odds?.h2h?.settlementEvidence||null),
     bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),
     attemptedBookmakerIntegrity:structuredClone(game.oddsBookmakerEvidence||null),
     oddsMatchEvidence:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null),
@@ -264,6 +267,9 @@ function compactMarket(game = {}, meta = {}) {
     dispersion: Number(game.odds?.h2h?.dispersion || 0),
     provider: game.odds?.provider || game.odds?.freeProvider || '',
     cacheState: game.odds?.cacheState || '',
+    lineMarkets:{spread:structuredClone(game.odds?.spread||null),total:structuredClone(game.odds?.total||null)},
+    lineMarketIntegrity:structuredClone(game.odds?.lineMarketIntegrity||null),
+    settlementEvidence:structuredClone(game.odds?.h2h?.settlementEvidence||null),
     bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),
     eventIdentity:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null)
   };

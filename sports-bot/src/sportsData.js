@@ -1,3 +1,4 @@
+import {selectLineMarkets} from './lineMarketIntegrity.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {collectH2HBooks} from './bookmakerIntegrity.js';
 import {inspectOddsEventCandidate,inspectOddsEventMatch,matchOddsEventCohort} from './oddsEventIdentity.js';
@@ -432,6 +433,7 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
   const dispersion = Math.max(...['away', 'home', 'draw'].map((side) => standardDeviation(quoteGroups[side].map((row) => row.fairProbability))));
   return {
     ...output,
+    settlementEvidence:{classificationSource:'sport_profile_and_outcome_set',bookSpecificTermsVerified:false,executionVerified:false},
     rules: !twoWay ? 'regulation_3way' : ['baseball', 'basketball', 'hockey'].includes(sportProfile(game).key) ? 'full_game_2way' : 'unverified_settlement',
     bookmakerCount: fairRows.length,
     bookmakerIntegrity:audit,
@@ -441,50 +443,8 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
   };
 }
 
-export function bestSpreadTotalMarkets(bookmakers, game) {
-  const aliases = {
-    away: [normalizeName(game.away.name), normalizeName(game.away.abbr)],
-    home: [normalizeName(game.home.name), normalizeName(game.home.abbr)]
-  };
-  const spreadRows = { away: [], home: [] };
-  const totalRows = { over: [], under: [] };
-  for (const bookmaker of Array.isArray(bookmakers)?bookmakers:[]) {
-    if(!bookmaker||!Array.isArray(bookmaker.markets))continue;
-    for (const market of bookmaker.markets) {
-      if(!market||!Array.isArray(market.outcomes))continue;
-      if (market.key === 'spreads') {
-        for (const outcome of market.outcomes) {
-          if(!outcome)continue;
-          const normalized = normalizeName(outcome.name);
-          const side = aliases.away.includes(normalized) ? 'away' : aliases.home.includes(normalized) ? 'home' : '';
-          const point = finiteNumber(outcome.point);
-          if (!side || point === null || americanToProbability(outcome.price) === null) continue;
-          spreadRows[side].push({ side, bookmaker: bookmaker.title || bookmaker.key || 'Book', price: Number(outcome.price), point, lastUpdate: market.last_update || bookmaker.last_update || '' });
-        }
-      }
-      if (market.key === 'totals') {
-        for (const outcome of market.outcomes) {
-          if(!outcome)continue;
-          const side = /over/i.test(outcome.name) ? 'over' : /under/i.test(outcome.name) ? 'under' : '';
-          const point = finiteNumber(outcome.point);
-          if (!side || point === null || americanToProbability(outcome.price) === null) continue;
-          totalRows[side].push({ bookmaker: bookmaker.title || bookmaker.key || 'Book', price: Number(outcome.price), point, lastUpdate: market.last_update || bookmaker.last_update || '' });
-        }
-      }
-    }
-  }
-  const spread = {};
-  for (const side of ['away', 'home']) {
-    const point = median(spreadRows[side].map((row) => row.point));
-    spread[side] = point === null ? null : [...spreadRows[side]].sort((a, b) => Math.abs(a.point - point) - Math.abs(b.point - point))[0];
-  }
-  spread.favorite = [spread.away, spread.home].filter(Boolean).sort((a, b) => a.point - b.point)[0] || null;
-  const total = {};
-  for (const side of ['over', 'under']) {
-    const point = median(totalRows[side].map((row) => row.point));
-    total[side] = point === null ? null : [...totalRows[side]].sort((a, b) => Math.abs(a.point - point) - Math.abs(b.point - point))[0];
-  }
-  return { spread: spread.favorite ? spread : null, total: total.over || total.under ? total : null };
+export function bestSpreadTotalMarkets(bookmakers,game){
+  return selectLineMarkets(bookmakers,game);
 }
 
 export function oddsEventMatches(game,event){
@@ -551,6 +511,7 @@ async function enrichWithOdds(games, options = {}) {
         eventIdentity:match.evidence,
         commenceTime: event.commence_time,
         h2h,
+        lineMarketIntegrity:extra.integrity,
         spread: extra.spread,
         total: extra.total,
         matchStatus: h2h.away && h2h.home ? 'matched' : 'partial',
@@ -568,6 +529,7 @@ async function enrichWithOdds(games, options = {}) {
           ...game.odds,
           spread: extra.spread || game.odds.spread,
           total: extra.total || game.odds.total,
+          lineMarketIntegrity:extra.integrity,
           paidFallbackRejected: 'incomplete winner market'
         };
       }

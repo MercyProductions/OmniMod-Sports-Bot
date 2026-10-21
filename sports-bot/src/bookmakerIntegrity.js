@@ -24,6 +24,10 @@ function parseMarket(market,bookmaker,game,twoWay,oddsFormat){
 
 /** Validate each provider book independently; never assemble a complete book from fragments. */
 export function collectH2HBooks(bookmakers,game,{twoWay=true,oddsFormat='american'}={}){
+ return collectProviderMarkets(bookmakers,{marketKey:'h2h',parse:(market,row)=>parseMarket(market,row,game,twoWay,oddsFormat),signature});
+}
+
+export function collectProviderMarkets(bookmakers,{marketKey,parse,signature}){
  const groups=new Map(),audit={version:1,rawBookCount:Array.isArray(bookmakers)?bookmakers.length:0,acceptedBooks:0,rejectedBooks:0,observations:[],observationsTruncated:false},books=[];
  const record=row=>{if(audit.observations.length<100)audit.observations.push(row);else audit.observationsTruncated=true;};
  if(!Array.isArray(bookmakers)){record({status:'rejected',reason:'invalid_bookmaker_collection'});return {books,audit};}
@@ -36,8 +40,8 @@ export function collectH2HBooks(bookmakers,game,{twoWay=true,oddsFormat='america
   for(const row of rows){
    if(!Array.isArray(row.markets)){reason='invalid_market_collection';break;}
    if(row.markets.some(market=>!object(market))){reason='invalid_market';break;}
-   const markets=row.markets.filter(market=>market.key==='h2h');if(!markets.length){reason='h2h_market_missing';break;}
-   for(const market of markets){const parsed=parseMarket(market,row,game,twoWay,oddsFormat);if(parsed.reason){reason=parsed.reason;break;}candidates.push(parsed.book);}
+   const markets=row.markets.filter(market=>market.key===marketKey);if(!markets.length){reason=marketKey+'_market_missing';break;}
+   for(const market of markets){const parsed=parse(market,row);if(parsed.reason){reason=parsed.reason;break;}candidates.push(parsed.book);}
    if(reason)break;
   }
   const unique=new Map(candidates.map(book=>[signature(book),book]));

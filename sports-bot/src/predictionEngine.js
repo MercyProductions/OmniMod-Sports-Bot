@@ -466,6 +466,8 @@ function confidenceBand(value) {
 }
 
 function formatSpreadMarket(spread) {
+  if(spread?.status==='complete'&&spread.home?.point===0&&spread.away?.point===0)return 'Pick em (0)';
+  if(spread?.status==='partial_context'){const quote=spread.away||spread.home;return quote?`${quote.side==='home'?'Home':'Away'} ${quote.point>0?'+':''}${quote.point} (partial quote)`:'--';}
   if (!spread?.favorite) return '--';
   const point = finite(spread.favorite.point);
   return `${spread.favorite.side === 'home' ? 'Home' : 'Away'} ${point === null ? '--' : `${point > 0 ? '+' : ''}${point}`}`;
@@ -473,7 +475,7 @@ function formatSpreadMarket(spread) {
 
 function formatTotalMarket(total) {
   const point = finite(total?.over?.point ?? total?.under?.point);
-  return point === null ? '--' : `${point}`;
+  return point === null ? '--' : `${point}${total?.status==='partial_context'?' (partial quote)':''}`;
 }
 
 function component(label, value, detail, present = true) {

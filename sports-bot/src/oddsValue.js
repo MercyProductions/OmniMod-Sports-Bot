@@ -87,6 +87,7 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
   return {
     version: 2, issuedAt: new Date(now).toISOString(), evaluatedAt: new Date(now).toISOString(), rules: rules || 'unknown', policy: VALUE_POLICY,
     marketInformed: Boolean(model.marketInformed), independence: model.marketInformed ? 'Model includes bookmaker information; this is not an independent market edge.' : 'No market blend used in this prediction; profitability is unproven.',
+    settlementEvidence:structuredClone(market.settlementEvidence||{classificationSource:'legacy_scope_label',bookSpecificTermsVerified:false,executionVerified:false}),
     uncertaintyMethod: 'heuristic probability stress, not a validated confidence bound',
     outcomes, bestOpportunity: ranked.find((row) => row.actionable) || null, bestObserved: ranked[0] || null,
     disclaimer: 'Hypothetical net return per unit at an observed quote, before fees, taxes, voids, limits and price changes. No wager or available stake is confirmed.'
