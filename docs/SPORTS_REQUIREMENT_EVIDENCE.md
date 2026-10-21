@@ -132,3 +132,7 @@ Development v6.0.23 replaces provenance with its owned fields, invalidates stale
 ## MLB membership and dependency continuation
 
 Development v6.0.24 selects confirmed batting members instead of generic injury/probable-player lists and requires complete side coverage for the consumed xwOBA difference. [Criteria, integration/cutoff controls and identity limits](SPORTS_MLB_LINEUP_MEMBERSHIP.md); complete suite 363 passing. Partial averages remain labeled research; context receipts stay unknown where unattributed. No deployment or demonstrated predictive improvement.
+
+## Baseball role/name identity continuation
+
+Development v6.0.25 separates batter/pitcher records, preserves ambiguous names without selecting one, and replaces successful role cohorts. [Reproductions, controls and migration limits](SPORTS_BASEBALL_STAT_IDENTITY.md); complete suite 369 passing. Native identity mapping and predictive improvement remain unverified; no deployment.

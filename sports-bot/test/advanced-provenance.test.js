@@ -101,7 +101,7 @@ test('all existing source adapters stamp only newly processed rows and retain th
  const result=await syncAdvancedDatasets({clock:()=>now,fetchImpl});
  assert.equal(result.externalCalls,ids.length);assert.ok(result.snapshot.sources.every(row=>row.ok));
  const at=new Date(now).toISOString();
- assert.equal(result.snapshot.baseballPlayers.oldhitter.sourceFetchedAt,old);
+ assert.equal(result.snapshot.baseballPlayers.oldhitter,undefined); // Successful role refresh replaces its cohort.
  assert.equal(result.snapshot.footballTeams.A.sourceFetchedAt,at);
  assert.equal(result.snapshot.soccerCompetitions[0].sourceFetchedAt,at);
  const games=['nfl','mlb','nhl','nba','atp','wta'].map(leagueKey=>({...nflGame(),leagueKey,

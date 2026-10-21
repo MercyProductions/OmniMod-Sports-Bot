@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { replaceBaseballRole, lookupBaseballStat } from './baseballStatIdentity.js';
 import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
@@ -219,19 +220,20 @@ export async function syncAdvancedDatasets(options = {}) {
         const parsed = checkedDatasetRows(parseCsv(await sourceText(url)), { source: `baseball-savant-${role}`,
           keys: [['last_name, first_name','player_name'],['est_ba','est_slg','est_woba']], features: ['est_ba','est_slg','est_woba'],
           identity: row => nonemptyText(row['last_name, first_name'] || row.player_name) });
-        const rows = parsed.rows;
+        const rows = parsed.rows, records = [];
         for (const row of rows) {
           const name = row['last_name, first_name'] || row.player_name || '';
           if (!name) continue;
           const parts = name.split(',').map((value) => value.trim());
           const displayName = parts.length === 2 ? `${parts[1]} ${parts[0]}` : name;
-          snapshot.baseballPlayers[normalizeEntityName(displayName)] = stamp({
+          records.push(stamp({
             name: displayName, role, playerId: row.player_id,
             expectedAverage: finite(row.est_ba), expectedSlugging: finite(row.est_slg), expectedWoba: finite(row.est_woba),
             sampleSize: finite(row.pa ?? row.bip)
-          }, `baseball-savant-${role}`);
+          }, `baseball-savant-${role}`));
         }
-        recordStatus(`baseball-savant-${role}`, url, true, { rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'MLB Baseball Savant public CSV' });
+        const identity = replaceBaseballRole(snapshot, role, records);
+        recordStatus(`baseball-savant-${role}`, url, true, { ...identity, rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'MLB Baseball Savant public CSV' });
         diagnostics.push(`Baseball Savant ${role}: ${rows.length} expected-stat row(s).`);
       } catch (error) {
         recordStatus(`baseball-savant-${role}`, url, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -429,15 +431,17 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     const leagueKey = String(game.leagueKey || '').toLowerCase();
     if (leagueKey === 'mlb') {
       const sideMetric = side => {
-        const selection=selectMlbBatters(game,side),matched=[];
+        const selection=selectMlbBatters(game,side),matched=[],statRejections={};
         for(const batter of selection.batters){
-          const row=eligibleRow(sync.snapshot.baseballPlayers?.[normalizeEntityName(batter.name)],'baseball-savant-batter');
+          const lookup=lookupBaseballStat(sync.snapshot,batter.name,'batter');
+          if(lookup.reason)statRejections[lookup.reason]=(statRejections[lookup.reason]||0)+1;
+          const row=eligibleRow(lookup.row,'baseball-savant-batter');
           if(row?.role==='batter'&&Number.isFinite(row.expectedWoba)&&row.expectedWoba>=0)matched.push({row,identity:String(row.playerId||normalizeEntityName(row.name||batter.name))});
         }
         const identities=matched.map(item=>item.identity),unique=new Set(identities);
         return {...selection,rows:matched.map(item=>item.row),identities,
           value:matched.length?matched.reduce((sum,item)=>sum+item.row.expectedWoba,0)/matched.length:null,
-          evidence:{...selection.evidence,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
+          evidence:{...selection.evidence,statRejections,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
       };
       const away=sideMetric('away'),home=sideMetric('home'),shared=away.identities.filter(id=>home.identities.includes(id));
       if(shared.length){away.evidence.complete=false;home.evidence.complete=false;}
