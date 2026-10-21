@@ -56,6 +56,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   const missingMeasurements = Object.entries(game.advancedDataset || {}).filter(([key, value]) => !measurementMetadata.has(key)
     && (value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value)))).map(([key]) => key);
   if (missingMeasurements.length) missing.push('advanced_dataset:measurements_incomplete');
+  const batting=game.advancedDataset?.lineupXwobaEvidence;
+  for(const side of ['away','home'])if(batting?.[side]?.sampleMeasurements?.some(row=>!row.positiveSample))missing.push(`${side}:advanced_batting_sample_unknown_or_invalid`);
   const sides = {};
   for (const side of ['away', 'home']) {
     const players = selectedPlayers?.[side] || (game.autoPlayers || []).filter(row => matches(game[side], row.team));

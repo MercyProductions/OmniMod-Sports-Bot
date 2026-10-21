@@ -101,3 +101,36 @@ export function nhlGameSeasonEvidence(game={},rows=[]){
   blocked:['game_season_convention_unverified','game_season_invalid','source_season_unknown','season_mismatch'].includes(state),
   nativePeriodVerified:false,nativePublicationVerified:false};
 }
+
+
+const calendarYear=value=>{const number=finiteNumber(value);return Number.isInteger(number)&&number>=1000&&number<=9999?number:null;};
+const provided=value=>value!==undefined&&value!==null&&value!=='';
+
+/** A request URL is a scope assertion, not proof of native publication or revision lineage. */
+export function checkedBaseballSeasonRows(rows,year,role){
+ const parsed=checkedDatasetRows(rows,{source:`baseball-savant-${role}`,
+  keys:[['last_name, first_name','player_name'],['est_ba','est_slg','est_woba']],features:['est_ba','est_slg','est_woba'],
+  identity:row=>nonemptyText(row['last_name, first_name']||row.player_name)});
+ for(const row of parsed.rows)for(const field of ['year','season']){
+  if(provided(row[field])&&String(row[field]).trim()&&calendarYear(row[field])!==year)throw new Error(`Advanced source baseball-savant-${role}: conflicting native year assertion`);
+ }
+ return parsed;
+}
+
+export function mlbGameSeasonEvidence(game={},rows=[]){
+ let sourceConflict=false;
+ const sourceEvidence=rows.map(row=>{
+  let requested=null;
+  try{const key=JSON.parse(row?.sourceRequestKey||'null');if(key?.source==='baseball-savant-batter')requested=calendarYear(key.year);}catch{}
+  const native=calendarYear(row?.seasonYear);
+  if(provided(row?.seasonYear)&&(native===null||requested!==null&&native!==requested))sourceConflict=true;
+  return {season:native??requested,basis:native!==null?'native_row_assertion':requested!==null?'request_scope_only':'unknown'};
+ });
+ const gameSeason=calendarYear(game.seasonYear),sourceSeasons=sourceEvidence.map(row=>row.season);
+ const state=sourceConflict?'source_season_conflict':provided(game.seasonYear)&&gameSeason===null?'game_season_invalid':gameSeason===null?'game_season_unknown'
+  :!rows.length||sourceSeasons.some(value=>value===null)?'source_season_unknown':sourceSeasons.some(value=>value!==gameSeason)?'season_mismatch'
+  :sourceEvidence.every(row=>row.basis==='native_row_assertion')?'matched':'request_season_matched_native_unverified';
+ return {sourceId:'baseball-savant-batter',gameSeason,sourceSeasons,sourceEvidence,state,
+  blocked:['source_season_conflict','game_season_invalid','source_season_unknown','season_mismatch'].includes(state),
+  nativePeriodVerified:state==='matched',nativePublicationVerified:false};
+}

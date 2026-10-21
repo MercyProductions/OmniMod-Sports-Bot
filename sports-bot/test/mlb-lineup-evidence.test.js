@@ -18,7 +18,7 @@ function fixture(){
  const baseballPlayers={};
  for(const side of ['Away','Home'])for(let i=0;i<9;i++){
   const name=side+' Batter '+i;game.autoLineups.push({name,team:side,athleteId:side+i,role:'Batter',starter:true,confirmedStarter:true,batOrder:i+1,updatedAt:old});
-  baseballPlayers[normalizeEntityName(name)]={name,role:'batter',playerId:'mlbam-'+side+i,expectedWoba:side==='Away'?.3:.4,sourceFetchedAt:old};
+  baseballPlayers[normalizeEntityName(name)]={name,role:'batter',playerId:'mlbam-'+side+i,expectedWoba:side==='Away'?.3:.4,plateAppearances:100,battedBallEvents:50,sourceFetchedAt:old};
  }
  return {game,snapshot:{version:2,sources:[],footballSchedules:[],baseballPlayers}};
 }

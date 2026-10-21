@@ -136,3 +136,7 @@ Development v6.0.24 selects confirmed batting members instead of generic injury/
 ## Baseball role/name identity continuation
 
 Development v6.0.25 separates batter/pitcher records, preserves ambiguous names without selecting one, and replaces successful role cohorts. [Reproductions, controls and migration limits](SPORTS_BASEBALL_STAT_IDENTITY.md); complete suite 369 passing. Native identity mapping and predictive improvement remain unverified; no deployment.
+
+## MLB season and sample continuation
+
+Development v6.0.26 blocks known wrong-season batting factors and requires measured, internally consistent positive samples for a complete lineup comparison. [Reproductions, controls and native/source limitations](SPORTS_MLB_SEASON_AND_SAMPLES.md); complete suite 378 passing. Statistical sample adequacy and predictive improvement remain unverified; no deployment.

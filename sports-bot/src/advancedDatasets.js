@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { replaceBaseballRole, lookupBaseballStat } from './baseballStatIdentity.js';
+import { replaceBaseballRole, lookupBaseballStat, baseballSampleMeasurement } from './baseballStatIdentity.js';
 import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
@@ -7,7 +7,7 @@ import { readJson, writeJson } from './storage.js';
 import { selectMlbBatters, observationReceiptTimes } from './mlbLineupEvidence.js';
 import { composeAdvancedProvenance } from './advancedProvenance.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
-import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedBaseballSeasonRows, mlbGameSeasonEvidence, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
@@ -217,9 +217,7 @@ export async function syncAdvancedDatasets(options = {}) {
     for (const [role, url] of statcastSources) {
       if (!sourceDue(`baseball-savant-${role}`)) continue;
       try {
-        const parsed = checkedDatasetRows(parseCsv(await sourceText(url)), { source: `baseball-savant-${role}`,
-          keys: [['last_name, first_name','player_name'],['est_ba','est_slg','est_woba']], features: ['est_ba','est_slg','est_woba'],
-          identity: row => nonemptyText(row['last_name, first_name'] || row.player_name) });
+        const parsed = checkedBaseballSeasonRows(parseCsv(await sourceText(url)), year, role);
         const rows = parsed.rows, records = [];
         for (const row of rows) {
           const name = row['last_name, first_name'] || row.player_name || '';
@@ -227,9 +225,10 @@ export async function syncAdvancedDatasets(options = {}) {
           const parts = name.split(',').map((value) => value.trim());
           const displayName = parts.length === 2 ? `${parts[1]} ${parts[0]}` : name;
           records.push(stamp({
-            name: displayName, role, playerId: row.player_id,
+            name: displayName, role, playerId: row.player_id, seasonYear: finite(row.year) ?? finite(row.season),
             expectedAverage: finite(row.est_ba), expectedSlugging: finite(row.est_slg), expectedWoba: finite(row.est_woba),
-            sampleSize: finite(row.pa ?? row.bip)
+            plateAppearances: finite(row.pa), battedBallEvents: finite(row.bip),
+            sampleSize: finite(row.pa) ?? finite(row.bip), sampleSizeKind: finite(row.pa)!==null ? 'pa' : finite(row.bip)!==null ? 'bip' : 'unknown'
           }, `baseball-savant-${role}`));
         }
         const identity = replaceBaseballRole(snapshot, role, records);
@@ -439,20 +438,23 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
           if(row?.role==='batter'&&Number.isFinite(row.expectedWoba)&&row.expectedWoba>=0)matched.push({row,identity:String(row.playerId||normalizeEntityName(row.name||batter.name))});
         }
         const identities=matched.map(item=>item.identity),unique=new Set(identities);
+        const sampleMeasurements=matched.map(item=>baseballSampleMeasurement(item.row)),positiveSampleStats=sampleMeasurements.filter(row=>row.positiveSample).length;
         return {...selection,rows:matched.map(item=>item.row),identities,
           value:matched.length?matched.reduce((sum,item)=>sum+item.row.expectedWoba,0)/matched.length:null,
-          evidence:{...selection.evidence,statRejections,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
+          evidence:{...selection.evidence,statRejections,sampleMeasurements,positiveSampleStats,sampleAdequacyValidated:false,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&positiveSampleStats===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
       };
       const away=sideMetric('away'),home=sideMetric('home'),shared=away.identities.filter(id=>home.identities.includes(id));
-      if(shared.length){away.evidence.complete=false;home.evidence.complete=false;}
+      const sourcePeriodEvidence=mlbGameSeasonEvidence(game,[...away.rows,...home.rows]);
+      if(sourcePeriodEvidence.blocked)periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
+      if(shared.length||sourcePeriodEvidence.blocked){away.evidence.complete=false;home.evidence.complete=false;}
       const dependencies=[...away.dependencyReceiptTimes,...home.dependencyReceiptTimes];
       game.advancedDataset={...(game.advancedDataset||{}),...provenance(game.advancedDataset,[...away.rows,...home.rows],'baseball-savant-batter',dependencies),
-        provider:'MLB Baseball Savant',awayLineupXwoba:away.value,homeLineupXwoba:home.value,
-        lineupXwobaCoverage:away.evidence.complete&&home.evidence.complete?'both_sides':away.rows.length||home.rows.length?'partial':'none',
+        provider:'MLB Baseball Savant',sourcePeriodEvidence,awayLineupXwoba:sourcePeriodEvidence.blocked?null:away.value,homeLineupXwoba:sourcePeriodEvidence.blocked?null:home.value,
+        lineupXwobaCoverage:sourcePeriodEvidence.blocked?'blocked_period':away.evidence.complete&&home.evidence.complete?'both_sides':away.rows.length||home.rows.length?'partial':'none',
         lineupXwobaDifference:away.evidence.complete&&home.evidence.complete?home.value-away.value:null,
         lineupXwobaEvidence:{away:away.evidence,home:home.evidence,sharedStatIdentities:shared,identityMatchBasis:'normalized_name_only',
           nativeIdentityMappingVerified:false,partialAverages:'research_only_not_a_complete_lineup_factor'}};
-      if(away.rows.length||home.rows.length)matched+=1;
+      if(!sourcePeriodEvidence.blocked&&(away.rows.length||home.rows.length))matched+=1;
       continue;
     }
     if (leagueKey === 'nfl') {
