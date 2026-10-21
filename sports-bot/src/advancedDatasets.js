@@ -3,6 +3,7 @@ import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
+import { selectMlbBatters, observationReceiptTimes } from './mlbLineupEvidence.js';
 import { composeAdvancedProvenance } from './advancedProvenance.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
 import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
@@ -378,7 +379,7 @@ function playerRecord(snapshot, tour, name) {
 }
 
 const sourceFeatureFields = {
- 'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference'],
+ 'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference','lineupXwobaEvidence'],
  'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference'],
  'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference'],
  'nba-advanced-teams':['pace','efficiencyDifference'],
@@ -401,9 +402,9 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod ? null : row;
   let matched = 0;
   const periodRejections = [];
-  const provenance = (previous, rows, sourceId) => {
+  const provenance = (previous, rows, sourceId, dependencyReceiptTimes=[]) => {
     const status = (sync.snapshot.sources || []).find(row => row.id === sourceId);
-    return composeAdvancedProvenance(previous, {sourceId, fields:sourceFeatureFields[sourceId] || [], rows,
+    return composeAdvancedProvenance(previous, {sourceId, fields:sourceFeatureFields[sourceId] || [], rows, dependencyReceiptTimes,
       requestKey:sync.requestIdentities[sourceId], refreshStatus:{
       sourceId, state: status?.ok === true ? 'success' : status?.ok === false ? 'failed' : 'unknown',
       requestKey: status?.requestKey || null, lastSuccessRequestKey: status?.lastSuccessRequestKey || null,
@@ -427,23 +428,27 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     }
     const leagueKey = String(game.leagueKey || '').toLowerCase();
     if (leagueKey === 'mlb') {
-      const sideMetric = (side) => {
-        const team = normalizeEntityName(game[side]?.name);
-        const rows = (game.autoPlayers || []).filter((row) => normalizeEntityName(row.team) === team)
-          .map((row) => sync.snapshot.baseballPlayers?.[normalizeEntityName(row.name)])
-          .map(row => eligibleRow(row, 'baseball-savant-batter'))
-          .filter((row) => row?.role === 'batter' && Number.isFinite(row.expectedWoba));
-        return { rows, value: rows.length ? rows.reduce((sum, row) => sum + row.expectedWoba, 0) / rows.length : null };
+      const sideMetric = side => {
+        const selection=selectMlbBatters(game,side),matched=[];
+        for(const batter of selection.batters){
+          const row=eligibleRow(sync.snapshot.baseballPlayers?.[normalizeEntityName(batter.name)],'baseball-savant-batter');
+          if(row?.role==='batter'&&Number.isFinite(row.expectedWoba)&&row.expectedWoba>=0)matched.push({row,identity:String(row.playerId||normalizeEntityName(row.name||batter.name))});
+        }
+        const identities=matched.map(item=>item.identity),unique=new Set(identities);
+        return {...selection,rows:matched.map(item=>item.row),identities,
+          value:matched.length?matched.reduce((sum,item)=>sum+item.row.expectedWoba,0)/matched.length:null,
+          evidence:{...selection.evidence,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
       };
-      const away = sideMetric('away'), home = sideMetric('home');
-      const awayXwoba = away.value, homeXwoba = home.value;
-      if (awayXwoba !== null || homeXwoba !== null || ownsSource(game.advancedDataset, 'baseball-savant-batter')) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [...away.rows, ...home.rows], 'baseball-savant-batter'), provider: 'MLB Baseball Savant',
-          awayLineupXwoba: awayXwoba, homeLineupXwoba: homeXwoba,
-          lineupXwobaCoverage: awayXwoba !== null && homeXwoba !== null ? 'both_sides' : awayXwoba !== null || homeXwoba !== null ? 'partial' : 'none',
-          lineupXwobaDifference: awayXwoba !== null && homeXwoba !== null ? homeXwoba - awayXwoba : null };
-        if (awayXwoba !== null || homeXwoba !== null) matched += 1;
-      }
+      const away=sideMetric('away'),home=sideMetric('home'),shared=away.identities.filter(id=>home.identities.includes(id));
+      if(shared.length){away.evidence.complete=false;home.evidence.complete=false;}
+      const dependencies=[...away.dependencyReceiptTimes,...home.dependencyReceiptTimes];
+      game.advancedDataset={...(game.advancedDataset||{}),...provenance(game.advancedDataset,[...away.rows,...home.rows],'baseball-savant-batter',dependencies),
+        provider:'MLB Baseball Savant',awayLineupXwoba:away.value,homeLineupXwoba:home.value,
+        lineupXwobaCoverage:away.evidence.complete&&home.evidence.complete?'both_sides':away.rows.length||home.rows.length?'partial':'none',
+        lineupXwobaDifference:away.evidence.complete&&home.evidence.complete?home.value-away.value:null,
+        lineupXwobaEvidence:{away:away.evidence,home:home.evidence,sharedStatIdentities:shared,identityMatchBasis:'normalized_name_only',
+          nativeIdentityMappingVerified:false,partialAverages:'research_only_not_a_complete_lineup_factor'}};
+      if(away.rows.length||home.rows.length)matched+=1;
       continue;
     }
     if (leagueKey === 'nfl') {
@@ -498,7 +503,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     const homeSurface = finite(home?.surfaces?.[surface], finite(home?.elo));
     game.advancedDataset = { ...(game.advancedDataset || {}),
       provider: 'Jeff Sackmann tennis datasets',
-      ...provenance(game.advancedDataset, [away, home], `tennis-${tour}`),
+      ...provenance(game.advancedDataset, [away, home], `tennis-${tour}`, surface ? observationReceiptTimes(game.autoContext) : []),
       surface,
       surfaceEloDifference: difference(homeSurface, awaySurface),
       serveReturnDifference: measuredCalculation([home?.serveWon, home?.returnWon, away?.serveWon, away?.returnWon], (homeServe, homeReturn, awayServe, awayReturn) => homeServe + homeReturn - awayServe - awayReturn),

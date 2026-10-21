@@ -105,9 +105,9 @@ test('all existing source adapters stamp only newly processed rows and retain th
  assert.equal(result.snapshot.footballTeams.A.sourceFetchedAt,at);
  assert.equal(result.snapshot.soccerCompetitions[0].sourceFetchedAt,at);
  const games=['nfl','mlb','nhl','nba','atp','wta'].map(leagueKey=>({...nflGame(),leagueKey,
-  autoPlayers:leagueKey==='mlb'?[{team:'Away',name:'Hitter A'},{team:'Home',name:'Hitter H'}]:[]}));
+  autoLineups:leagueKey==='mlb'?[{team:'Away',name:'Hitter A',role:'Batter',confirmedStarter:true,updatedAt:at},{team:'Home',name:'Hitter H',role:'Batter',confirmedStarter:true,updatedAt:at}]:[]}));
  await attachAdvancedDatasetContext(games,{localOnly:true});
- for(const game of games){assert.deepEqual(game.advancedDataset.sourceReceiptTimes,[at,at]);assert.equal(game.advancedDataset.publicationTimeVerified,false);}
+ for(const game of games){assert.deepEqual(game.advancedDataset.sourceReceiptTimes,game.leagueKey==='mlb'?[at,at,at,at]:[at,at]);assert.equal(game.advancedDataset.publicationTimeVerified,false);}
  assert.ok(games.every(game=>game.advancedDataset.sourceRefreshStatuses[0].state==='success'));
  assert.equal(buildEvidenceCoverage(games[0],{now:now-1}).advancedDatasetProvenance.sourceRefreshStatuses[0].state,'unknown_at_cutoff');
  assert.equal(games[0].sourceCorroboration.matches[0].fetchedAt,at);
@@ -177,9 +177,9 @@ test('a lost NBA side invalidates cached two-sided comparisons',async()=>{
 
 test('changed MLB lineup membership cannot retain the previous lineup estimate',async()=>{
  await seed({baseballPlayers:{p:{name:'P',role:'batter',expectedWoba:.3,sourceFetchedAt:old},q:{name:'Q',role:'batter',expectedWoba:.4,sourceFetchedAt:old}}});
- const game={id:'mlb',leagueKey:'mlb',away:{name:'Away'},home:{name:'Home'},autoPlayers:[{team:'Away',name:'P'},{team:'Home',name:'Q'}]};
- await attachAdvancedDatasetContext([game],{localOnly:true});assert.ok(game.advancedDataset.lineupXwobaDifference>0);
- game.autoPlayers=[];await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.lineupXwobaDifference,null);
+ const game={id:'mlb',leagueKey:'mlb',away:{name:'Away'},home:{name:'Home'},autoLineups:[{team:'Away',name:'P',role:'Batter',confirmedStarter:true},{team:'Home',name:'Q',role:'Batter',confirmedStarter:true}]};
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.homeLineupXwoba,.4);
+ game.autoLineups=[];await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.homeLineupXwoba,null);assert.equal(game.advancedDataset.lineupXwobaDifference,null);
 });
 
 

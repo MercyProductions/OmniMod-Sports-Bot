@@ -110,6 +110,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
       sourceRequestKeys: game.advancedDataset?.sourceRequestKeys || [], requestedSourceKey: game.advancedDataset?.requestedSourceKey || null,
       sourceRefreshStatuses: advancedRefreshes, sourcePeriodEvidence,
+      lineupXwobaEvidence: game.advancedDataset?.lineupXwobaEvidence || null,
       sourceContributions: Array.isArray(game.advancedDataset?.sourceContributions) ? game.advancedDataset.sourceContributions.map(entry => ({
         sourceId: entry?.sourceId || 'unknown', fields: Array.isArray(entry?.fields) ? entry.fields.filter(key=>typeof key==='string') : [],
         sourceReceiptTimes: Array.isArray(entry?.sourceReceiptTimes) ? entry.sourceReceiptTimes.map(timestamp) : [null],

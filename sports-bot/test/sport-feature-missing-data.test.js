@@ -9,7 +9,7 @@ test('one-sided MLB lineup coverage cannot manufacture an xwOBA difference again
   await writeJson(advancedDatasetSnapshotFile, { version: 2, updatedAt: new Date().toISOString(), sources: [], footballSchedules: [],
     baseballPlayers: { [normalizeEntityName('Only Hitter')]: { role: 'batter', expectedWoba: 0.35 } } });
   const game = { id: 'mlb', leagueKey: 'mlb', away: { name: 'Away' }, home: { name: 'Home' },
-    autoPlayers: [{ team: 'Home', name: 'Only Hitter' }] };
+    autoLineups: [{ team: 'Home', name: 'Only Hitter', role: 'Batter', confirmedStarter: true }] };
   await attachAdvancedDatasetContext([game], { localOnly: true });
   assert.equal(game.advancedDataset.homeLineupXwoba, 0.35);
   assert.equal(game.advancedDataset.awayLineupXwoba, null);

@@ -469,7 +469,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         active: row.active !== false,
         batOrder: finite(row.batOrder),
         formationPlace: row.formationPlace || '',
-        source: 'ESPN current event roster'
+        source: 'ESPN current event roster', updatedAt: fetchedAt
       });
     }
   }

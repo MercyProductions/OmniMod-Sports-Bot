@@ -128,3 +128,7 @@ Development v6.0.22 decodes official consecutive-year NHL game identifiers and b
 ## Current contributor replacement continuation
 
 Development v6.0.23 replaces provenance with its owned fields, invalidates stale comparisons when contributors disappear and checks nested receipt chronology. [Reproductions, branch controls and conservative migration limits](SPORTS_ADVANCED_CONTRIBUTOR_REPLACEMENT.md); complete suite 352 passing. Permanent journals remain append-only; current context is no longer an accumulated receipt history. No deployment or demonstrated predictive improvement.
+
+## MLB membership and dependency continuation
+
+Development v6.0.24 selects confirmed batting members instead of generic injury/probable-player lists and requires complete side coverage for the consumed xwOBA difference. [Criteria, integration/cutoff controls and identity limits](SPORTS_MLB_LINEUP_MEMBERSHIP.md); complete suite 363 passing. Partial averages remain labeled research; context receipts stay unknown where unattributed. No deployment or demonstrated predictive improvement.

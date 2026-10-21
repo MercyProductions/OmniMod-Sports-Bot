@@ -7,7 +7,7 @@ const metadata = new Set(ADVANCED_PROVENANCE_METADATA_FIELDS);
 const present = value => value !== undefined && value !== null && value !== '';
 
 /** Replace provenance for overwritten fields; this is input lineage, never an append-only audit journal. */
-export function composeAdvancedProvenance(previous, {sourceId, fields=[], rows=[], requestKey=null, refreshStatus=null}) {
+export function composeAdvancedProvenance(previous, {sourceId, fields=[], rows=[], requestKey=null, refreshStatus=null, dependencyReceiptTimes=[]}) {
  const owned = new Set(fields), currentFields = Object.keys(previous || {}).filter(key => !metadata.has(key));
  const validEntries = previous?.provenancePolicy === 'field-source-contributions-v2'
   && Array.isArray(previous.sourceContributions) && previous.sourceContributions.every(entry => entry && typeof entry.sourceId === 'string'
@@ -28,7 +28,7 @@ export function composeAdvancedProvenance(previous, {sourceId, fields=[], rows=[
    sourceRequestKeys:Array.isArray(previous.sourceRequestKeys)&&previous.sourceRequestKeys.length?[...previous.sourceRequestKeys]:[null],
    sourceRefreshStatuses:Array.isArray(previous.sourceRefreshStatuses)?[...previous.sourceRefreshStatuses]:[]});
  }
- entries.push({sourceId,fields:[...fields],sourceReceiptTimes:rows.length?rows.map(row=>row?.sourceFetchedAt||null):[null],
+ entries.push({sourceId,fields:[...fields],sourceReceiptTimes:[...(rows.length?rows.map(row=>row?.sourceFetchedAt||null):[null]),...dependencyReceiptTimes],
   sourceRequestKeys:rows.length?rows.map(row=>row?.sourceRequestKey||null):[null],sourceRefreshStatuses:refreshStatus?[{...refreshStatus}]:[]});
  const statuses = new Map();
  for(const entry of entries)for(const status of entry.sourceRefreshStatuses)if(status?.sourceId)statuses.set(status.sourceId,{...status});
