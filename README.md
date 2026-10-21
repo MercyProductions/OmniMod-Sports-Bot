@@ -82,7 +82,7 @@ Add the project’s own destination/provider fields from its template. Do not sh
 Review this mode skeleton; blank credentials intentionally do not authenticate:
 
 ```dotenv
-ODDS_API_KEY=
+# Configure your own odds key privately when needed.
 ODDS_API_REGION=us
 POST_ON_START=false
 REGISTER_COMMANDS=false
