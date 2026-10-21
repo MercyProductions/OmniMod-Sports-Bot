@@ -108,3 +108,7 @@ Development v6.0.17 repairs statistic-key loss/collisions, malformed numeric inp
 ## Historical starter evidence continuation
 
 Development v6.0.18 preserves unknown/conflicting historical starter assertions and separates measured rate denominators from boxscore appearances. [Reproductions, pair-learning controls and frozen coverage](SPORTS_HISTORICAL_STARTER_EVIDENCE.md); complete suite 316 passing. Current confirmed starter handling is preserved. Native assertion verification and adequate forward predictive improvement remain incomplete.
+
+## Basketball workload-unit continuation
+
+Development v6.0.19 repairs NBA 40-versus-48-minute normalization and projection with one league-aware definition, unit-contract checks and frozen diagnostics. [Rules, regressions, integration evidence and limits](SPORTS_BASKETBALL_WORKLOAD_UNITS.md); complete suite 322 passing. Overtime/special formats and other role-workload proxies remain limitations. No deployment or improved predictive performance claim.

@@ -2,7 +2,7 @@ import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
-import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior } from './participationProjection.js';
+import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior, basketballWorkloadBasis } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
 import { finiteNumber, validScore } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
@@ -176,10 +176,10 @@ function performanceFormula(profileKey, groupName, stats, observedMetric) {
   return null;
 }
 
-function participationScore(profileKey, groupName, stats) {
+function participationScore(profileKey, groupName, stats, leagueKey = '') {
   const group = String(groupName || '').toLowerCase();
   let observed = null, denominator = null;
-  if (profileKey === 'basketball') { observed = optionalMetric(stats, 'MIN', 'minutes'); denominator = 40; }
+  if (profileKey === 'basketball') { observed = optionalMetric(stats, 'MIN', 'minutes'); denominator = basketballWorkloadBasis(leagueKey).minutes; }
   if (profileKey === 'soccer') { observed = optionalMetric(stats, 'MIN', 'minutes'); denominator = 90; }
   if (profileKey === 'hockey') { observed = optionalMetric(stats, 'TOI', 'minutes'); denominator = /goalie/.test(group) ? 60 : 22; }
   if (profileKey === 'baseball') {
@@ -275,8 +275,8 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
     league: result.league,
     leagueKey: result.leagueKey,
     sportGroup: result.sportGroup,
-    participation: participationScore(profile.key, row.groupName || row.role, row.stats),
-    participationContract: 'observed-workload-v1',
+    participation: participationScore(profile.key, row.groupName || row.role, row.stats, result.leagueKey || result.league),
+    participationContract: 'observed-workload-v2',
     performance: performanceScore(profile.key, row.groupName || row.role, row.stats),
     performanceContract: 'complete-player-performance-v1',
     source: 'ESPN historical box score'
@@ -325,8 +325,8 @@ export function buildAutomaticPlayerProfiles(samples = []) {
     const latest = rows.at(-1);
     const recent = rows.slice(-5);
     const participationRows = rows.map(row => row.stats && typeof row.stats === 'object'
-      ? participationScore(sportProfile(row).key, row.groupName || row.role, row.stats)
-      : row.participationContract === 'observed-workload-v1' ? finite(row.participation) : null)
+      ? participationScore(sportProfile(row).key, row.groupName || row.role, row.stats, row.leagueKey || row.league)
+      : row.participationContract === 'observed-workload-v2' ? finite(row.participation) : null)
       .filter(value => value !== null && value >= 0 && value <= 1);
     const participation = participationRows.length ? mean(participationRows) : null;
     const observedPerformance = row => row.stats && typeof row.stats === 'object'
@@ -359,6 +359,7 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       starterRate, starterSamples: starterValues.length,
       starterConflictSamples: rows.filter(row => row.starterEvidenceConflict).length,
       participation, participationSamples: participationRows.length,
+      participationUnitContract: profile.key === 'basketball' ? basketballWorkloadBasis(latest.leagueKey || latest.league).contract : null,
       participationEvidence: participationRows.length ? 'boxscore_workload_proxy' : 'unknown',
       impactEvidence: participationRows.length ? 'heuristic_with_workload_proxy' : 'heuristic_with_role_prior',
       performance, performanceSamples: performanceValues.length,
@@ -699,7 +700,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       if (!learned) continue;
       player.impact = learned.impact;
       player.form = learned.form;
-      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null, historicalPerformanceSamples: learned.performanceSamples ?? null, historicalStarterRate: learned.starterRate, historicalStarterSamples: learned.starterSamples ?? null, historicalStarterConflicts: learned.starterConflictSamples ?? null };
+      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationUnitContract: learned.participationUnitContract || null, historicalParticipationSamples: learned.participationSamples ?? null, historicalPerformanceSamples: learned.performanceSamples ?? null, historicalStarterRate: learned.starterRate, historicalStarterSamples: learned.starterSamples ?? null, historicalStarterConflicts: learned.starterConflictSamples ?? null };
       player.valueSource = learned.source;
       player.historicalStatConflicts = learned.statConflicts || [];
       player.historicalFormEvidence = learned.formEvidence || 'unknown';

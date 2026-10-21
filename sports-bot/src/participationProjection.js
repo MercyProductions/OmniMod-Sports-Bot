@@ -30,9 +30,20 @@ export function roleParticipationPrior(profileKey, role = '') {
   return 0.82;
 }
 
-function workloadLabel(profileKey, share, role = '') {
+export function basketballWorkloadBasis(leagueKey = '') {
+  const rawLeague = String(leagueKey || '').trim().toLowerCase();
+  const league = { 'mens-college-basketball': 'ncaab', 'womens-college-basketball': 'ncaaw' }[rawLeague] || rawLeague;
+  const known = ['nba','wnba','ncaab','ncaaw'].includes(league);
+  const minutes = league === 'nba' ? 48 : 40;
+  return { minutes, league: known ? league : null,
+    basis: known ? 'league_regulation_minutes' : 'unverified_40_minute_proxy',
+    contract: `basketball-regulation-v1:${known ? league : 'unknown'}:${minutes}`,
+    includesOvertime: false };
+}
+
+function workloadLabel(profileKey, share, role = '', leagueKey = '') {
   const text = String(role).toLowerCase();
-  if (profileKey === 'basketball') return { unit: 'minutes', value: share * 40 };
+  if (profileKey === 'basketball') return { unit: 'minutes', value: share * basketballWorkloadBasis(leagueKey).minutes };
   if (profileKey === 'football') return { unit: 'snap share', value: share * 100 };
   if (profileKey === 'baseball' && /pitch/.test(text)) return { unit: 'pitches', value: share * 95 };
   if (profileKey === 'baseball') return { unit: 'plate appearances', value: share * 4.6 };
@@ -43,7 +54,11 @@ function workloadLabel(profileKey, share, role = '') {
 }
 
 export function projectPlayerParticipation(player = {}, learned = null, profileKey = 'default', lineup = {}) {
-  const candidateShare = finite(learned?.participation, finite(player.stats?.historicalParticipation));
+  const leagueKey = lineup.leagueKey || player.leagueKey || learned?.leagueKey || '';
+  const workloadBasis = profileKey === 'basketball' ? basketballWorkloadBasis(leagueKey) : { basis: 'existing_role_workload_proxy', includesOvertime: false };
+  const suppliedUnitContract = learned?.participationUnitContract || player.stats?.historicalParticipationUnitContract || null;
+  const unitMismatch = profileKey === 'basketball' && suppliedUnitContract && suppliedUnitContract !== workloadBasis.contract;
+  const candidateShare = unitMismatch ? null : finite(learned?.participation, finite(player.stats?.historicalParticipation));
   const measuredShare = candidateShare !== null && candidateShare >= 0 && candidateShare <= 1 ? candidateShare : null;
   const historicalShare = clamp(measuredShare ?? roleParticipationPrior(profileKey, player.role), 0, 1);
   const currentStarter = player.starter === true;
@@ -64,13 +79,13 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
   const conditionalShare = clamp(conditionalStartProbability * historicalShare + (1 - conditionalStartProbability) * reserveShare, 0, 1);
   const expectedShare = clamp(availabilityProbability * conditionalShare, 0, 1);
   const verifiedSamples = finite(learned?.participationSamples, finite(player.stats?.historicalParticipationSamples));
-  const declaredSamples = verifiedSamples ?? 0;
+  const declaredSamples = profileKey === 'basketball' && suppliedUnitContract !== workloadBasis.contract ? 0 : verifiedSamples ?? 0;
   const historySamples = measuredShare !== null && measuredShare >= 0 && measuredShare <= 1 ? Math.max(0, declaredSamples) : 0;
   const evidenceReliability = clamp(historySamples / (historySamples + 6), 0, 0.92);
   const statusUncertainty = 4 * availabilityProbability * (1 - availabilityProbability);
   const roleUncertainty = 4 * conditionalStartProbability * (1 - conditionalStartProbability);
   const uncertainty = clamp((1 - evidenceReliability) * 0.5 + statusUncertainty * 0.32 + roleUncertainty * 0.18, 0.04, 1);
-  const workload = workloadLabel(profileKey, expectedShare, player.role);
+  const workload = workloadLabel(profileKey, expectedShare, player.role, leagueKey);
   return {
     availabilityProbability,
     startProbability,
@@ -78,9 +93,9 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
     historicalStarterSamples: observedStarterRate === null ? 0 : historicalStarterSamples, historicalStarterEvidence,
     expectedShare,
     historicalShare,
-    historicalParticipationEvidence: measuredShare === null ? 'role_prior' : verifiedSamples === null ? 'legacy_workload_unknown_provenance' : 'boxscore_workload_proxy',
+    historicalParticipationEvidence: measuredShare === null ? 'role_prior' : verifiedSamples === null || profileKey === 'basketball' && suppliedUnitContract !== workloadBasis.contract ? 'legacy_workload_unknown_provenance' : 'boxscore_workload_proxy',
     expectedWorkload: Number(workload.value.toFixed(1)),
-    workloadUnit: workload.unit,
+    workloadUnit: workload.unit, workloadBasis, workloadUnitMismatch: Boolean(unitMismatch),
     uncertainty: Number(uncertainty.toFixed(3)),
     historySamples,
     source: measuredShare !== null ? 'historical workload proxy + current status/lineup' : 'role prior + current status/lineup'
@@ -109,7 +124,7 @@ export function attachParticipationProjections(game, playerProfiles = {}, findLe
     const lineup = lineupByPlayer.get(key) || row;
     const projection = projectPlayerParticipation(row, learned, sportProfile(game).key, {
       confirmedStarter: isConfirmedStarter(lineup),
-      active: lineup.active
+      active: lineup.active, leagueKey: game.leagueKey || game.league
     });
     const target = (game.autoPlayers || []).find((candidate) =>
       normalizeEntityName(candidate.team) === normalizeEntityName(row.team) && playerIdentity(candidate) === playerIdentity(row));

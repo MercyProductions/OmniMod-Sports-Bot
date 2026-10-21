@@ -362,3 +362,64 @@ test('public profile caller freezes historical starter uncertainty without denyi
  assert.equal(player.historicalStarterSamples,0);assert.equal(player.historicalStarterEvidence,'role_prior');
  assert.equal(game.autoPlayers[0].participationProjection.startProbability,1);
 });
+
+
+test('NBA history normalizes minutes by 48 while WNBA and college retain 40',async()=>{
+ const {parseHistoricalEventSummary,buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ for(const leagueKey of ['nba','wnba','ncaab','ncaaw']){
+  const sample=parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:[{name:'players',labels:['MIN'],athletes:[{
+   starter:true,athlete:{id:'p',displayName:'Player'},stats:['36']
+  }]}]}]}},{id:'g',sportGroup:'Basketball',leagueKey});
+  const expected=leagueKey==='nba'?.75:.9;
+  assert.equal(sample.players[0].participation,expected);
+  assert.equal(Object.values(buildAutomaticPlayerProfiles([sample]))[0].participation,expected);
+ }
+});
+
+test('NBA workload projection uses the same 48-minute scale as historical normalization',async()=>{
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ const projection=projectPlayerParticipation({starter:true,availability:100},{participation:.75,leagueKey:'nba'},'basketball');
+ assert.equal(projection.expectedWorkload,36);assert.equal(projection.workloadBasis.minutes,48);
+});
+
+test('unknown basketball league retains a disclosed proxy rather than claiming verified regulation time',async()=>{
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ const projection=projectPlayerParticipation({starter:true,availability:100},{participation:.75},'basketball');
+ assert.equal(projection.expectedWorkload,30);
+ assert.equal(projection.workloadBasis.basis,'unverified_40_minute_proxy');
+});
+
+
+test('NBA normalized history round trips through current projections and frozen workload units',async()=>{
+ const {buildAutomaticPlayerProfiles,applyPlayerProfilesAndLineups}=await import('../src/advancedMetrics.js');
+ const sample=await historicalPlayer('Basketball',['MIN'],['36']);sample.leagueKey='nba';sample.players[0].leagueKey='nba';
+ const profiles=buildAutomaticPlayerProfiles([sample]);
+ const game={id:'current',sportGroup:'Basketball',leagueKey:'nba',away:{name:'Away'},home:{name:'Home'},
+  autoPlayers:[{name:'Player',sourceAthleteId:'p',team:'Away',starter:true,availability:100}]};
+ applyPlayerProfilesAndLineups([game],profiles);
+ assert.equal(game.autoPlayers[0].participationProjection.expectedWorkload,36);
+ assert.equal(game.autoPlayers[0].participationProjection.historySamples,1);
+ const frozen=buildEvidenceCoverage(game).sides.away.modelInputs.players[0];assert.equal(frozen.workloadBasis.minutes,48);
+});
+
+test('explicitly mismatched workload unit contracts cannot certify historical participation',async()=>{
+ const {projectPlayerParticipation,basketballWorkloadBasis}=await import('../src/participationProjection.js');
+ const profile={leagueKey:'nba',participation:.75,participationSamples:10,participationUnitContract:basketballWorkloadBasis('nba').contract};
+ const mismatch=projectPlayerParticipation({starter:true,availability:100},profile,'basketball',{leagueKey:'wnba'});
+ assert.equal(mismatch.workloadUnitMismatch,true);assert.equal(mismatch.historySamples,0);assert.equal(mismatch.historicalParticipationEvidence,'role_prior');
+ const legacy=projectPlayerParticipation({starter:true},{leagueKey:'nba',participation:.9,participationSamples:10},'basketball');
+ assert.equal(legacy.historySamples,0);assert.equal(legacy.historicalParticipationEvidence,'legacy_workload_unknown_provenance');
+ assert.equal(basketballWorkloadBasis('ncaab').contract,basketballWorkloadBasis('mens-college-basketball').contract);
+});
+
+test('NBA zero minutes remain zero and overtime stays an explicit regulation-scale limitation',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const {projectPlayerParticipation}=await import('../src/participationProjection.js');
+ for(const minutes of [0,50]){
+  const sample=await historicalPlayer('Basketball',['MIN'],[String(minutes)]);sample.players[0].leagueKey='nba';
+  const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+  const projection=projectPlayerParticipation({starter:true,availability:100},profile,'basketball');
+  assert.equal(profile.participation,minutes===0?0:1);assert.equal(sample.players[0].stats.min,minutes);
+  assert.equal(projection.workloadBasis.includesOvertime,false);assert.equal(projection.expectedWorkload,minutes===0?0:48);
+ }
+});
