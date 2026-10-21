@@ -1,3 +1,5 @@
+import {capturedEventTime} from './capturedEventTime.js';
+import {quoteTimeEpoch as epoch} from './oddsPricing.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {eventReference,scopedEventKey,resolveSlateGame,scopedSlatePredictions} from './slateEventIdentity.js';
 import {validCandidateVector} from './candidateCohorts.js';
@@ -9,15 +11,19 @@ import {predictionHorizon} from './horizonEvaluation.js';
 import {evaluateMatchedJournal} from './matchedJournalEvaluation.js';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const digest=row=>hash(JSON.stringify(row));
-const epoch=value=>Date.parse(value||'');
-const identity=game=>JSON.stringify([game.leagueKey,String(game.id),epoch(game.startTime),game.away?.name,game.home?.name]);
+const identity=game=>JSON.stringify([game.leagueKey,String(game.id),capturedEventTime(game.startTime),game.away?.name,game.home?.name]);
 const probabilityVector=prediction=>{
  const raw=prediction.outcomeProbabilities;
  if(!raw||!['away','home'].every(side=>typeof raw[side]==='number'&&Number.isFinite(raw[side]))
   ||Object.entries(raw).some(([side,value])=>!['away','home','draw'].includes(side)||typeof value!=='number'||!Number.isFinite(value)))return null;
- const normalized={away:raw.away/100,home:raw.home/100,draw:raw.draw===undefined?0:raw.draw/100};
- return validCandidateVector(normalized)?normalized:null;
+ const declared=prediction.modeledOutcomes===undefined?Object.keys(raw).sort():prediction.modeledOutcomes;
+ const fractional=Object.fromEntries(Object.entries(raw).map(([side,p])=>[side,p/100]));
+ if(!validCandidateVector(fractional,declared))return null;
+ return {away:raw.away/100,home:raw.home/100,draw:raw.draw===undefined?0:raw.draw/100};
 };
+const capturedClasses=prediction=>prediction.modeledOutcomes===undefined?Object.keys(prediction.outcomeProbabilities).sort():[...prediction.modeledOutcomes];
+const validFrozenPick=(prediction,vector=probabilityVector(prediction))=>Boolean(vector&&['away','home','draw'].includes(prediction.predictedSide)&&vector[prediction.predictedSide]===Math.max(...Object.values(vector)));
+
 function captureAssociations(slate={}){
  const index=journalGameIndex(slate.games||[]),groups=new Map(),games=[],conflicts=[];
  for(const row of slate.games||[]){const key=scopedEventKey(eventReference(row));if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row);}
@@ -113,12 +119,13 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
  const reject=reason=>{rejections[reason]=(rejections[reason]||0)+1;};
  for(const {receipt,capture} of ordered){
   const issued=epoch(receipt.recordedAt),completed=epoch(capture.completedAt),began=epoch(capture.startedAt);
+  if(capture.schema!=='sports-isolated-capture-v1'){reject('capture_schema_unverified');continue;}
   if(capture.mode!=='live'){reject('not_live_market_capture');continue;}
   if(!['baseline','challenger'].includes(capture.role)||![issued,completed,began].every(Number.isFinite)||began>completed||completed>issued){reject('capture_chronology_invalid');continue;}
   const state=captureAssociations(capture.slate);
-  for(const game of state.conflicts)if(Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime)){const key=identity(game),versions=finals.get(key)||{};versions[capture.role]={conflict:true,observedAt:receipt.recordedAt};finals.set(key,versions);}
+  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const key=identity(game),versions=finals.get(key)||{};versions[capture.role]={conflict:true,observedAt:receipt.recordedAt};finals.set(key,versions);}
   for(const game of state.games){
-   const actualSide=finalOutcomeSide(game),start=epoch(game.startTime);
+   const actualSide=finalOutcomeSide(game),start=capturedEventTime(game.startTime);
    if(actualSide&&Number.isFinite(start)&&issued>=start){
     const key=identity(game),versions=finals.get(key)||{};
     versions[capture.role]={actualSide,awayScore:game.away?.score,homeScore:game.home?.score,observedAt:receipt.recordedAt};finals.set(key,versions);
@@ -126,11 +133,12 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
   }
   if(capture.purpose==='final_reconciliation')continue;
   for(const {game,prediction} of captureForecasts(capture.slate,state,reject)){
-   const generated=epoch(prediction.predictionGeneratedAt),start=epoch(game.startTime);
+   const generated=epoch(prediction.predictionGeneratedAt),start=capturedEventTime(game.startTime);
    if(!game||prediction.predictionMode!=='pregame'||game.statusKey!=='scheduled'){reject('not_observed_pregame');continue;}
    if(![generated,start].every(Number.isFinite)||generated<began||generated>completed||issued>=start){reject('forecast_chronology_invalid');continue;}
    if(!game.leagueKey||!game.id||!game.away?.name||!game.home?.name||!prediction.modelVersion){reject('event_identity_incomplete');continue;}
    if(!probabilityVector(prediction)){reject('invalid_frozen_probability_vector');continue;}
+   if(!validFrozenPick(prediction)){reject('invalid_frozen_selection');continue;}
    const horizon=predictionHorizon({...prediction,minutesToStart:(start-generated)/60000}),eventKey=identity(game),key=JSON.stringify([eventKey,horizon]);
    if(!first.has(key))first.set(key,{});
    const pair=first.get(key);
@@ -145,10 +153,14 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
   if(Math.abs(a.issued-b.issued)>maximumPairGapMs){reject('counterpart_time_gap_exceeded');continue;}
   const id=digest([a.receipt.eventHash,b.receipt.eventHash,b.eventKey,b.horizon]);
   const payload={forecastId:id,guildId:'isolated-comparison',gameId:b.game.id,league:b.game.leagueKey,modelVersion:b.prediction.modelVersion,horizon:b.horizon,
-   lifecycleState:'ISSUED',recordEligibility:'observed_pregame',predictionGeneratedAt:b.prediction.predictionGeneratedAt,startTime:b.game.startTime,
+   lifecycleState:'ISSUED',recordEligibility:'observed_pregame',predictionGeneratedAt:b.prediction.predictionGeneratedAt,startTime:new Date(capturedEventTime(b.game.startTime)).toISOString(),
+   sourceEventStartTime:b.game.startTime,
    selectedSide:b.prediction.predictedSide,outcomePercentages:b.prediction.outcomeProbabilities,
+   modeledOutcomes:capturedClasses(b.prediction),
+   referenceModeledOutcomes:{evidence:capturedClasses(a.prediction)},
+   captureAdapter:'receipt-linked-raw-emitted-outcomes-v1',
    evidenceCoverage:b.prediction.evidenceCoverage||null,eventContext:{sport:b.prediction.sportProfile||b.game.sportGroup||'unknown'},
-   referenceBaselines:{evidence:{id:a.prediction.modelVersion,probabilities:probabilityVector(a.prediction)}}};
+   referenceBaselines:{evidence:{id:a.prediction.modelVersion,probabilities:probabilityVector(a.prediction),selectedSide:a.prediction.predictedSide}}};
   rows.push({type:'forecast',recordedAt:new Date(Math.max(a.issued,b.issued)).toISOString(),payload});
   pairs.push({gameId:b.game.id,league:b.game.leagueKey,horizon:b.horizon,baselineVersion:a.prediction.modelVersion,challengerVersion:b.prediction.modelVersion,
    baselineCommit:a.receipt.payload.sourceCommit,challengerCommit:b.receipt.payload.sourceCommit,issuanceGapMs:Math.abs(a.issued-b.issued)});
@@ -159,7 +171,7 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
   const final=observed.sort((x,y)=>epoch(y.observedAt)-epoch(x.observedAt))[0];
   rows.push({type:'result',recordedAt:final.observedAt,payload:{forecastId:id,actualSide:final.actualSide,observedAt:final.observedAt,scheduleChanged:false}});
  }
- return {schema:'sports-isolated-paired-report-v2',asOf:new Date(asOf).toISOString(),maximumPairGapMs,visibleCaptures:ordered.length,pairedForecasts:pairs.length,pairs,rejections,
+ return {schema:'sports-isolated-paired-report-v3',asOf:new Date(asOf).toISOString(),maximumPairGapMs,captureAdapter:'receipt-linked-raw-emitted-outcomes-v1',visibleCaptures:ordered.length,pairedForecasts:pairs.length,pairs,rejections,
   matched:evaluateMatchedJournal(rows,{asOf}),performanceEstablished:false,promotionAllowed:false,
   methodology:'Scoped unique source/forecast observations; first receipted pregame forecast per role/event/horizon, bounded sequential issuance gap, original frozen probabilities; latest agreeing observed finals.',
   limitations:['The evidence comparator is the archived baseline executable, not a same-issuance simple model.',
@@ -181,18 +193,19 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
  const reject=reason=>{excluded[reason]=(excluded[reason]||0)+1;};
  for(const {receipt,capture} of entries){
   const issued=epoch(receipt.recordedAt),began=epoch(capture.startedAt),completed=epoch(capture.completedAt);
+  if(capture.schema!=='sports-isolated-capture-v1'){reject('capture_schema_unverified');continue;}
   if(capture.mode!=='live'||!['baseline','challenger'].includes(capture.role)||![issued,began,completed].every(Number.isFinite)
    ||issued>asOf||began>completed||completed>issued)continue;
   const state=captureAssociations(capture.slate);
-  for(const game of state.conflicts)if(Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime)){const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,conflict:true});}
-  for(const game of state.games)if(finalOutcomeSide(game)&&Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime)){
+  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,conflict:true});}
+  for(const game of state.games)if(finalOutcomeSide(game)&&Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){
    const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);
    if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,signature:JSON.stringify([finalOutcomeSide(game),game.away?.score,game.home?.score])});
   }
   if(capture.purpose==='final_reconciliation')continue;
   for(const {game,prediction} of captureForecasts(capture.slate,state,reject)){
-   const start=epoch(game.startTime),generated=epoch(prediction.predictionGeneratedAt);
-   if(!game||game.statusKey!=='scheduled'||prediction.predictionMode!=='pregame'||!probabilityVector(prediction)
+   const start=capturedEventTime(game.startTime),generated=epoch(prediction.predictionGeneratedAt);
+   if(!game||game.statusKey!=='scheduled'||prediction.predictionMode!=='pregame'||!probabilityVector(prediction)||!validFrozenPick(prediction)
     ||![start,generated].every(Number.isFinite)||generated<began||generated>completed||issued>=start)continue;
    if(start>asOf){reject('not_started');continue;}
    const date=dateKey(start),age=(day-Date.parse(date+'T00:00:00Z'))/86400000;

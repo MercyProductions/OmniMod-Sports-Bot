@@ -171,10 +171,13 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
         const direct=row.candidateProbabilities?.[name];
         const candidate=vector(direct||row.referenceBaselines?.[name]?.probabilities, direct?row.candidateModeledOutcomes?.[name]:row.referenceModeledOutcomes?.[name]);
         if(!candidate){skip('reference_missing_or_invalid');continue;}
+        const frozenPick=direct?row.candidateSelectedSides?.[name]:row.referenceBaselines?.[name]?.selectedSide;
+        const candidatePick=frozenPick===undefined?winner(candidate):frozenPick;
+        if(!SIDES.includes(candidatePick)||candidate[candidatePick]!==Math.max(...Object.values(candidate))){skip('reference_frozen_selection_invalid');continue;}
         if(name==='market'&&!marketVerified(row)){skip('offered_price_timestamps_unverified');continue;}
         if((probabilities.draw>0)!==(candidate.draw>0)){skip('outcome_space_mismatch');continue;}
         const sides=probabilities.draw>0||result.actualSide==='draw'?SIDES:['away','home'];
-        pairs.push({game,eventDate:new Date(time(row.startTime)).toISOString().slice(0,10),primary:score(probabilities,result.actualSide,sides,row.selectedSide),reference:score(candidate,result.actualSide,sides),strata:strata(row)});
+        pairs.push({game,eventDate:new Date(time(row.startTime)).toISOString().slice(0,10),primary:score(probabilities,result.actualSide,sides,row.selectedSide),reference:score(candidate,result.actualSide,sides,candidatePick),strata:strata(row)});
       }
       const by={};
       for(const key of ['sport','league','horizon','confidence','favorite','season','seasonPhase','rosterTransition','injuryCoverage','lineupCoverage','sourceFreshness','marketData'])
@@ -188,6 +191,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
     selectedForecasts:first.size,conflictingForecastIds:identities.conflictingIds.size,conflictingGames:conflicts.size,rejections:rejects,byVersion:versions,
     selectionRule:'Earliest recorded eligible forecast per guild/canonical event/model-version/horizon after ID auditing; differing simultaneous inputs exclude the cohort. Result conflicts/disputes across all qualified issued revisions exclude the event; no later selection fallback.',
     resultAuditPolicy:'All identity-audited, lifecycle/chronology/scope-qualified issued revisions visible at cutoff, before probability and first-cohort selection; active disputes bind their event until linked reconciliation. Source truth is not authenticated.',
+    referenceSelectionPolicy:'Use an explicitly frozen candidate/reference side when present and valid; otherwise use the deterministic maximum of the reference vector. A vector-only tie is not proof of an original model pick.',
     weighting:'One weight per league/event/start time, shared across its guild/horizon observations; versions evaluated separately.',
     intervalMethod:`${repetitions} paired game-cluster bootstrap replicates; null below 8 games; descriptive, no multiple-testing correction`,
     scoreDefinition:'Mean-coordinate multiclass Brier; multinomial log loss clipped at 1e-12; selected-outcome calibration.',
