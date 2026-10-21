@@ -1,3 +1,4 @@
+import { eventObservationHash } from './journalEventMatch.js';
 import { quoteTimeEpoch as instant } from './oddsPricing.js';
 import { validCandidateVector } from './candidateCohorts.js';
 import { journalOutcomeVector } from './journalOutcomeSpace.js';
@@ -106,6 +107,15 @@ function summarize(rows = []) {
 const leagueKey = row => String(row.leagueKey || row.league || '').trim().toLowerCase();
 const eventKey = row => JSON.stringify([String(row.guildId || ''),leagueKey(row),String(row.gameId),
   Number.isFinite(instant(row.startTime)) ? new Date(instant(row.startTime)).toISOString() : null]);
+const resultEventKey = row => JSON.stringify([leagueKey(row),String(row.gameId),
+  Number.isFinite(instant(row.startTime)) ? new Date(instant(row.startTime)).toISOString() : null]);
+const frozenForecastHash = row => eventObservationHash({
+  generatedAt:new Date(instant(row.predictionGeneratedAt)).toISOString(),
+  outcomeProbabilities:row.outcomeProbabilities,modeledOutcomes:row.modeledOutcomes,predictedSide:row.predictedSide,
+  candidateProbabilities:row.candidateProbabilities,candidateModeledOutcomes:row.candidateModeledOutcomes,
+  championModel:row.championModel,inputSnapshot:row.inputSnapshot
+});
+
 function closingMarket(markets = [], prediction = {}, probabilities) {
   const start = instant(prediction.startTime);
   if (!leagueKey(prediction) || prediction.gameId == null || !String(prediction.gameId).trim() || !Number.isFinite(start))
@@ -133,25 +143,37 @@ function seasonPhase(row = {}) {
 }
 
 export function evaluatePredictionHorizons(predictions = [], markets = [], options = {}) {
-  const deduped = new Map();
+  const deduped = new Map(), groups = new Map(), resultLabels = new Map(), disputed = new Set();
   const versions = [...new Set(predictions.map(row => row.modelVersion || 'legacy-unversioned'))]
     .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
   const selectedVersion = options.modelVersion || versions.find(version => version !== 'legacy-unversioned') || 'legacy-unversioned';
   for (const row of predictions) {
-    if ((row.modelVersion || 'legacy-unversioned') !== selectedVersion) continue;
-    if (row.quoteRefreshOnly) continue;
-    if (!['away', 'home', 'draw'].includes(row.actualSide)) continue;
-    if (row.predictionMode !== 'pregame') continue;
-    const generatedAt = instant(row.predictionGeneratedAt);
-    const startTime = instant(row.startTime);
+    if (row.quoteRefreshOnly || row.predictionMode !== 'pregame') continue;
+    const generatedAt = instant(row.predictionGeneratedAt), startTime = instant(row.startTime);
     if (!Number.isFinite(generatedAt) || !Number.isFinite(startTime) || generatedAt >= startTime) continue;
-    const horizon = predictionHorizon(row);
-    const key = JSON.stringify([eventKey(row),selectedVersion,horizon]);
-    const prior = deduped.get(key);
-    if (!prior || instant(row.predictionGeneratedAt) > instant(prior.predictionGeneratedAt)) deduped.set(key, row);
+    const event = resultEventKey(row);
+    if (row.resultEvidenceStatus === 'disputed') disputed.add(event);
+    if (['away','home','draw'].includes(row.actualSide)) {
+      if (!resultLabels.has(event)) resultLabels.set(event,new Set());
+      resultLabels.get(event).add(row.actualSide);
+    }
+    if ((row.modelVersion || 'legacy-unversioned') !== selectedVersion || !['away','home','draw'].includes(row.actualSide)) continue;
+    const key = JSON.stringify([eventKey(row),selectedVersion,predictionHorizon(row)]);
+    if (!groups.has(key)) groups.set(key,[]);
+    groups.get(key).push(row);
   }
+  const conflicting = new Set([...resultLabels].filter(([,labels]) => labels.size > 1).map(([key]) => key));
   const scored = [], scoringExclusions = {}, closingSnapshotStatuses = {};
   const exclude = reason => { scoringExclusions[reason] = (scoringExclusions[reason] || 0) + 1; };
+  for (const [key,rows] of groups) {
+    rows.sort((a,b) => instant(b.predictionGeneratedAt) - instant(a.predictionGeneratedAt));
+    const row = rows[0], event = resultEventKey(row);
+    if (conflicting.has(event)) { exclude('conflicting_event_results'); continue; }
+    if (disputed.has(event)) { exclude('disputed_event_result'); continue; }
+    const latest = rows.filter(other => instant(other.predictionGeneratedAt) === instant(row.predictionGeneratedAt));
+    if (new Set(latest.map(frozenForecastHash)).size > 1) { exclude('simultaneous_forecast_conflict'); continue; }
+    deduped.set(key,row);
+  }
   for (const row of deduped.values()) {
     const prediction = normalizedPrediction(row);
     if (!prediction) { exclude('invalid_or_unverified_outcome_vector'); continue; }
@@ -185,11 +207,20 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     });
   }
   const group = (key) => Object.fromEntries([...new Set(scored.map((row) => row[key]))].sort().map((value) => [value, summarize(scored.filter((row) => row[key] === value))]));
-  const latestByGame = new Map();
-  for (const scoredRow of scored) {
-    const row = scoredRow.row, key = eventKey(row);
-    const prior = latestByGame.get(key);
-    if (!prior || instant(row.predictionGeneratedAt) > instant(prior.row.predictionGeneratedAt)) latestByGame.set(key, scoredRow);
+  const latestByGame = new Map(), overallConflicts = new Set(), overallGroups = new Map();
+  let overallLatestForecastNotScorable = 0;
+  const scoredByIssue = new Map(scored.map(item => [JSON.stringify([eventKey(item.row),instant(item.row.predictionGeneratedAt)]),item]));
+  for (const rows of groups.values()) for (const row of rows) {
+    const key = eventKey(row);
+    if (!overallGroups.has(key)) overallGroups.set(key,[]);
+    overallGroups.get(key).push(row);
+  }
+  for (const [key,rows] of overallGroups) {
+    const latestAt = rows.reduce((at,row) => Math.max(at,instant(row.predictionGeneratedAt)),-Infinity);
+    const latest = rows.filter(row => instant(row.predictionGeneratedAt) === latestAt);
+    if (new Set(latest.map(frozenForecastHash)).size > 1) { overallConflicts.add(key); continue; }
+    const match = scoredByIssue.get(JSON.stringify([key,latestAt]));
+    if (match) latestByGame.set(key,match); else overallLatestForecastNotScorable++;
   }
   return {
     generatedAt: new Date().toISOString(),
@@ -197,7 +228,9 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     modelVersion: selectedVersion,
     versionsAvailable: versions,
     logLossProtocol: LOG_LOSS_PROTOCOL,
-    scoringCandidates: deduped.size, scoringExclusions, closingSnapshotStatuses,
+    scoringCandidates: groups.size, scoringExclusions, closingSnapshotStatuses,
+    conflictingResultEvents: conflicting.size, disputedResultEvents: disputed.size,
+    overallSimultaneousForecastConflicts: overallConflicts.size, overallLatestForecastNotScorable,
     closingComparisonPolicy: 'Latest scoped league/event/start/guild snapshot with an explicit-zone receipt before start; equal-time conflicts excluded. Receipt and stage do not prove an actual closing, fresh provider, executable or independent price. Status counts are per scored forecast/horizon.',
     scoreDefinition: 'Full-outcome Brier (mean over outcome coordinates) and multinomial log loss; distinct from selected-outcome binary scores.',
     overall: summarize([...latestByGame.values()]),
