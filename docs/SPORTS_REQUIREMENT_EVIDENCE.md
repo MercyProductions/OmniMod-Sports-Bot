@@ -152,3 +152,7 @@ Development v6.0.28 selects independent game-driven source periods, preserves ex
 ## Team rate-integrity continuation
 
 Development v6.0.29 rejects invalid NFL/NHL game denominators, validates consumed NHL totals and refuses duplicate all-situation team identities. [Reproductions, preserved signed/zero metrics and 32 actual historical arithmetic checks](SPORTS_TEAM_RATE_INTEGRITY.md); complete suite 405 passing. Sample adequacy, native publication and predictive improvement remain unverified; no deployment.
+
+## Warehouse integrity continuation
+
+Development v6.0.30 preserves missing inputs, separates forecast identities and quarantines disputed finals. [Tests, NFL unit audit and limits](SPORTS_WAREHOUSE_INPUT_INTEGRITY.md); 425 tests passing. Scoring weights unchanged; controlled adjudication and predictive improvement remain unverified.
