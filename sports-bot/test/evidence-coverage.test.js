@@ -73,6 +73,23 @@ test('coverage records the actual model-selected manual rows separately from aut
   assert.equal(report.sides.away.criticalStarterStatus,'projected_or_unavailable');
 });
 
+test('unavailable confirmed starters cannot satisfy frozen lineup coverage',()=>{
+  for (const state of [{status:'Out'}, {notes:'ruled out'}, {status:'Suspended'}, {active:false}, {availability:0}]) {
+    const value=game();
+    const player={id:'p',team:'Away',role:'Starting Pitcher',starter:true,confirmedStarter:true,...state};
+    value.autoPlayers=[player];value.autoLineups=[player];
+    const report=buildEvidenceCoverage(value,{now});
+    assert.equal(report.sides.away.criticalStarterStatus,'projected_or_unavailable');
+    assert.equal(report.sides.away.confirmedStarters,0);
+    assert.ok(report.missing.includes('away:critical_starter_unconfirmed'));
+    assert.equal(projectPlayerParticipation(player,null,'baseball').startProbability,0);
+  }
+  const value=game();
+  value.autoPlayers=[{id:'p',team:'Away',role:'Starting Pitcher',confirmedStarter:true}];
+  // A confirmed role is still a record, never an independent medical clearance.
+  assert.equal(buildEvidenceCoverage(value,{now}).sides.away.criticalStarterStatus,'confirmed_record_present');
+});
+
 test('evidence audit excludes rejected observations and preserves unknown legacy inputs',()=>{
   const coverage=buildEvidenceCoverage(game(),{now});
   const report=summarizeEvidenceCoverage([

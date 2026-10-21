@@ -1,6 +1,7 @@
 import { isConfirmedStarter } from './evidenceCoverage.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
+import { explicitlyUnavailable } from './dataValidation.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -14,7 +15,7 @@ function finite(value, fallback = null) {
 
 function statusAvailability(player = {}) {
   const text = `${player.status || ''} ${player.notes || ''}`.toLowerCase();
-  if (/ruled out|\bout\b|inactive|suspend|injured reserve|\bir\b/.test(text)) return 0;
+  if (explicitlyUnavailable(player)) return 0;
   if (/doubtful/.test(text)) return 0.2;
   if (/questionable|game.?time|day.?to.?day/.test(text)) return 0.52;
   // A schedule's probable starter label describes role, not a medical 'probable' status.

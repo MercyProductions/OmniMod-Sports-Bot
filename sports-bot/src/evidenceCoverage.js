@@ -1,6 +1,6 @@
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
-import { finiteNumber } from './dataValidation.js';
+import { explicitlyUnavailable, finiteNumber } from './dataValidation.js';
 
 const timestamp = value => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
 const matches = (team, name) => [team?.name, team?.abbr, ...(team?.aliases || [])]
@@ -59,10 +59,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },
       injuryCoverage: summary.injuryCoveredSides.includes(side) ? 'team_report_received_not_a_clean_bill_of_health' : 'unknown',
-      confirmedStarters: lineup.filter(row => isConfirmedStarter(row) && row.active !== false).length,
+      confirmedStarters: lineup.filter(row => isConfirmedStarter(row) && row.active !== false && !explicitlyUnavailable(row)
+        && (finiteNumber(row.availability) === null || finiteNumber(row.availability) > 0)).length,
       projectedStarters: players.filter(row => row.starter && !isConfirmedStarter(row)).length,
       criticalRole: criticalRole ? criticalRole.source : 'not_a_single_position',
-      criticalStarterStatus: !criticalRole ? 'not_applicable' : critical.some(row => isConfirmedStarter(row) && row.active !== false && (finiteNumber(row.availability) === null || finiteNumber(row.availability) > 0))
+      criticalStarterStatus: !criticalRole ? 'not_applicable' : critical.some(row => isConfirmedStarter(row) && row.active !== false && !explicitlyUnavailable(row) && (finiteNumber(row.availability) === null || finiteNumber(row.availability) > 0))
         ? 'confirmed_record_present' : critical.length ? 'projected_or_unavailable' : 'missing',
       playerHistorySampleSizes: players.map(row => ({ playerId: String(row.sourceAthleteId || row.id || ''),
         games: finiteNumber(row.stats?.historicalBoxscoreGames) })),

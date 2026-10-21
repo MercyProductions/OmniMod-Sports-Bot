@@ -1,4 +1,8 @@
 // Missing provider values are unknown, never numeric zero.
+export function explicitlyUnavailable(player = {}) {
+  return /ruled out|\bout\b|inactive|suspend|injured reserve|\bir\b/i.test(`${player.status || ''} ${player.notes || ''}`);
+}
+
 export function finiteNumber(value, fallback = null) {
   if (value === null || value === undefined || typeof value === 'boolean' ||
       (typeof value === 'string' && !value.trim())) return fallback;
