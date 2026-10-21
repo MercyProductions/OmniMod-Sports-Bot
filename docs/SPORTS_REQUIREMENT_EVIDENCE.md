@@ -120,3 +120,7 @@ Development v6.0.20 repairs missing-as-zero team features, fabricated drive/oppo
 ## NFL game-season binding continuation
 
 Development v6.0.21 compares declared game seasons with native or validated-contract NFL source periods, freezes alignment evidence and reports rejected attachments. [Reproductions, migration/cutoff controls and limits](SPORTS_GAME_SEASON_BINDING.md); complete suite 337 passing. Existing default calendar and unknown-game compatibility remain explicit limitations. No deployment or demonstrated predictive improvement.
+
+## NHL composite/request-period continuation
+
+Development v6.0.22 decodes official consecutive-year NHL game identifiers and blocks known mismatched or unmapped MoneyPuck request periods. [Real-metadata evidence, synthetic controls and access/licensing limits](SPORTS_NHL_REQUEST_SEASON_BINDING.md); complete suite 342 passing. Native dataset period validation remains false after an HTTP 403; no production change or demonstrated predictive improvement.

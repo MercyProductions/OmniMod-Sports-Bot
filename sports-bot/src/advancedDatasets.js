@@ -4,7 +4,7 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
-import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
@@ -455,13 +455,16 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nhl') {
       const away = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
       const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
-      if (away && home) {
+      if (away || home) {
+        const sourcePeriodEvidence = nhlGameSeasonEvidence(game, [away, home]);
+        const usable = away && home && !sourcePeriodEvidence.blocked;
         const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com',
-          awayXg: perGame(away.xGoalsFor, away.games), homeXg: perGame(home.xGoalsFor, home.games),
-          xgDifference: difference(netRate(home, 'xGoalsFor', 'xGoalsAgainst'), netRate(away, 'xGoalsFor', 'xGoalsAgainst')),
-          gsaxDifference: difference(netRate(home, 'xGoalsAgainst', 'goalsAgainst'), netRate(away, 'xGoalsAgainst', 'goalsAgainst')) };
-        matched += 1;
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com', sourcePeriodEvidence,
+          awayXg: usable ? perGame(away.xGoalsFor, away.games) : null, homeXg: usable ? perGame(home.xGoalsFor, home.games) : null,
+          xgDifference: usable ? difference(netRate(home, 'xGoalsFor', 'xGoalsAgainst'), netRate(away, 'xGoalsFor', 'xGoalsAgainst')) : null,
+          gsaxDifference: usable ? difference(netRate(home, 'xGoalsAgainst', 'goalsAgainst'), netRate(away, 'xGoalsAgainst', 'goalsAgainst')) : null };
+        if (usable) matched += 1;
+        if (sourcePeriodEvidence.blocked) periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }

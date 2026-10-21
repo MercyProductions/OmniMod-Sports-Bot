@@ -202,3 +202,54 @@ test('per-game period rejection is frozen and future source receipts cannot leak
   assert.equal(buildEvidenceCoverage(before,{now:now-1}).advancedDatasetProvenance.sourcePeriodEvidence,null);
  }
 });
+
+
+async function currentHockeySnapshot(){
+ await seed();return syncAdvancedDatasets({clock:()=>now,force:true,fetchImpl:async url=>{
+  if(url.includes('moneypuck.com'))return response('team,situation,games_played,xGoalsFor,xGoalsAgainst,goalsFor,goalsAgainst\nA,all,2,4,3,4,3\nH,all,2,6,3,5,3\n');
+  throw new Error('Synthetic unavailable');
+ }});
+}
+const hockeyPeriodGame=seasonYear=>({id:'nhl-period',leagueKey:'nhl',seasonYear,source:'NHL official scoreboard',sourceMeta:{provider:'NHL API'},away:{abbr:'A'},home:{abbr:'H'}});
+
+test('NHL consecutive-year game identifiers cannot use another season requests advanced data',async()=>{
+ await currentHockeySnapshot();const game=hockeyPeriodGame(20252026);
+ const result=await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+ assert.equal(game.advancedDataset.xgDifference,null);assert.equal(result.periodRejections.length,1);
+});
+
+test('matching NHL composite seasons preserve features and disclose native dataset period uncertainty',async()=>{
+ await currentHockeySnapshot();const game=hockeyPeriodGame(20262027);
+ await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+ assert.ok(Number.isFinite(game.advancedDataset.xgDifference));
+ assert.equal(game.advancedDataset.sourcePeriodEvidence.state,'request_season_matched_native_unverified');
+ assert.equal(game.advancedDataset.sourcePeriodEvidence.gameSeason,2026);
+ assert.equal(game.advancedDataset.sourcePeriodEvidence.nativePeriodVerified,false);
+});
+
+test('unverified NHL four-digit conventions or malformed composite years cannot certify an alignment',async()=>{
+ await currentHockeySnapshot();
+ for(const seasonYear of [2027,20262028,'invalid']){
+  const game=hockeyPeriodGame(seasonYear);await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+  assert.equal(game.advancedDataset.xgDifference,null);assert.equal(game.advancedDataset.sourcePeriodEvidence.blocked,true);
+ }
+});
+
+
+test('NHL cached feature values are cleared on a game-season change and restored only on request alignment',async()=>{
+ await currentHockeySnapshot();const game=hockeyPeriodGame(20262027);
+ await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});assert.ok(Number.isFinite(game.advancedDataset.xgDifference));
+ game.seasonYear=20252026;await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});assert.equal(game.advancedDataset.xgDifference,null);
+ game.seasonYear=20262027;await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});assert.ok(Number.isFinite(game.advancedDataset.xgDifference));
+});
+
+test('NHL request-only evidence remains explicitly unverified in frozen coverage and unknown legacy sources cannot certify a known season',async()=>{
+ const {buildEvidenceCoverage}=await import('../src/evidenceCoverage.js');
+ await currentHockeySnapshot();const game=hockeyPeriodGame(20262027);
+ await attachAdvancedDatasetContext([game],{clock:()=>now,localOnly:true});
+ const frozen=buildEvidenceCoverage(game,{now});assert.equal(frozen.advancedDatasetProvenance.sourcePeriodEvidence.nativePeriodVerified,false);
+ assert.ok(frozen.missing.includes('advanced_dataset:request_season_matched_native_unverified'));
+ await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],hockeyTeams:{A:{games:2,xGoalsFor:4,xGoalsAgainst:3,goalsAgainst:3},H:{games:2,xGoalsFor:6,xGoalsAgainst:3,goalsAgainst:3}}});
+ const legacy=hockeyPeriodGame(20262027);await attachAdvancedDatasetContext([legacy],{clock:()=>now,localOnly:true});
+ assert.equal(legacy.advancedDataset.xgDifference,null);assert.equal(legacy.advancedDataset.sourcePeriodEvidence.state,'source_season_unknown');
+});

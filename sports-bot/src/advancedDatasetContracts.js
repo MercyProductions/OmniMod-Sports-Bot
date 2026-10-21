@@ -78,3 +78,26 @@ export function nflGameSeasonEvidence(game={},rows=[]){
   blocked:['source_season_conflict','game_season_invalid','source_season_unknown','season_mismatch'].includes(state),
   nativePublicationVerified:false};
 }
+
+
+/** NHL official composite IDs are observed in stored captures; other providers' four-digit conventions remain unmapped. */
+export function nhlGameSeasonEvidence(game={},rows=[]){
+ const raw=String(game.seasonYear??'').trim();
+ const provided=raw!=='';
+ const start=/^\d{8}$/.test(raw)?Number(raw.slice(0,4)):null;
+ const end=/^\d{8}$/.test(raw)?Number(raw.slice(4)):null;
+ const gameSeason=start!==null&&start>=1000&&end===start+1?start:null;
+ const sourceSeasons=rows.map(row=>{
+  try{
+   const key=JSON.parse(row?.sourceRequestKey||'null'),season=finiteNumber(key?.seasonStart);
+   return key?.source==='moneypuck-team-xg'&&Number.isInteger(season)&&season>=1000&&season<=9999?season:null;
+  }catch{return null;}
+ });
+ const state=!provided?'game_season_unknown':/^\d{4}$/.test(raw)?'game_season_convention_unverified':gameSeason===null?'game_season_invalid'
+  :sourceSeasons.length!==2||sourceSeasons.some(value=>value===null)?'source_season_unknown'
+  :sourceSeasons.some(value=>value!==gameSeason)?'season_mismatch':'request_season_matched_native_unverified';
+ return {sourceId:'moneypuck-team-xg',gameSeason,sourceSeasons,state,
+  sourceEvidence:sourceSeasons.map(season=>({season,basis:season===null?'unknown':'request_scope_only'})),
+  blocked:['game_season_convention_unverified','game_season_invalid','source_season_unknown','season_mismatch'].includes(state),
+  nativePeriodVerified:false,nativePublicationVerified:false};
+}
