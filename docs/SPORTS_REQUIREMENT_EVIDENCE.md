@@ -88,3 +88,7 @@ Post-commit verification measured 1-2 ms completion/receipt clock offsets. The c
 ## Advanced payload and period continuation
 
 Development v6.0.13 validates usable adapter payloads before replacement and binds cache/attachment/concurrent refreshes to requested periods. [Reproductions, controls and limits](SPORTS_ADVANCED_PAYLOAD_CONTRACTS.md); complete suite 290 passing, syntax checks pass. Request identity is not native publication or returned-season certification. Statistical improvement, complete point-in-time integrity and deployed verification remain unproven.
+
+## NFL season-summary continuation
+
+Development v6.0.14 verifies declared NFL season/type, forbids weekly grain and duplicate normalized teams before replacement, and versions the source contract. [Real-file observation, regression and remaining limits](SPORTS_NFL_SUMMARY_CONTRACT.md). Complete suite 291 passing; actual 2024 public payload accepted 32 rows. No invented aggregation or demonstrated predictive improvement.

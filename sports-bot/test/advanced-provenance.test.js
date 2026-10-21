@@ -38,7 +38,7 @@ test('failed refresh keeps original row receipts and retries after bounded backo
 test('failed sources retry independently without re-requesting a successfully refreshed source',async()=>{
  await seed();let nflCalls=0,failedCalls=0;
  const fetchImpl=async url=>{
-  if(url.includes('/stats_team/')){nflCalls++;return {ok:true,text:async()=> 'team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,4,2,0\nH,2,6,2,0\n'};}
+  if(url.includes('/stats_team/')){nflCalls++;return {ok:true,text:async()=> nflCsv('team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,4,2,0\nH,2,6,2,0\n',url)};}
   failedCalls++;throw new Error('synthetic unavailable');
  };
  await syncAdvancedDatasets({clock:()=>now,fetchImpl});const first=failedCalls;
@@ -90,7 +90,7 @@ test('all existing source adapters stamp only newly processed rows and retain th
   if(url.includes('tennis_'))text='winner_name,loser_name,tourney_date,surface\nHome,Away,20260101,Hard\n';
   else if(url.includes('expected_statistics'))text=url.includes('type=batter')
    ?'player_name,est_woba\nHitter A,0.3\nHitter H,0.4\n':'player_name,est_woba\nPitcher A,0.3\n';
-  else if(url.includes('/stats_team/'))text='team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,4,2,0\nH,2,6,2,0\n';
+  else if(url.includes('/stats_team/'))text=nflCsv('team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,4,2,0\nH,2,6,2,0\n',url);
   else if(url.includes('/schedules/'))text='season,gameday,away_team,home_team,roof\n2099,2099-01-01,A,H,dome\n';
   else if(url.includes('moneypuck'))text='team,situation,games_played,xGoalsFor,xGoalsAgainst,goalsAgainst\nA,all,2,6,5,5\nH,all,2,7,5,5\n';
   else if(url.includes('stats.nba'))text=JSON.stringify({resultSets:[{headers:['TEAM_NAME','TEAM_ID','GP','PACE','NET_RATING'],rowSet:[['Away',1,2,100,0],['Home',2,2,101,1]]}]});
@@ -126,3 +126,5 @@ test('independent schedule receipts use the actual row and never the container t
  assert.equal(legacy.sourceCorroboration.matches[0].fetchedAt,'');
  assert.equal(observedInputState(legacy.eventEnvironment,now),'unknown');
 });
+
+const nflCsv=(text,url)=>text.split('\n').map((line,index)=>!line?'':index===0?'season,season_type,'+line:String(url.match(/reg_(\d{4})/)[1])+',REG,'+line).join('\n');

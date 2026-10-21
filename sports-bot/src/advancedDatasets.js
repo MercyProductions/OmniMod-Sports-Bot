@@ -4,7 +4,7 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
-import { advancedDatasetRequest, calendarDay, checkedDatasetRows, nonemptyText } from './advancedDatasetContracts.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
@@ -241,11 +241,10 @@ export async function syncAdvancedDatasets(options = {}) {
     const nflUrl = `https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_reg_${footballSeason}.csv`;
     if (sourceDue('nflverse-team-stats')) {
       try {
-        const parsed = checkedDatasetRows(parseCsv(await sourceText(nflUrl)), { source: 'nflverse-team-stats',
-          keys: [['team'],['passing_epa','rushing_epa','passing_cpoe']], features: ['passing_epa','rushing_epa','passing_cpoe'], identity: row => nonemptyText(row.team) });
+        const parsed = checkedNflSeasonRows(parseCsv(await sourceText(nflUrl)), footballSeason);
         const rows = parsed.rows;
-        snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').toUpperCase(), stamp({
-          team: String(row.team || '').toUpperCase(), games: finite(row.games),
+        snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
+          team: String(row.team || '').trim().toUpperCase(), games: finite(row.games),
           epaPerGame: perGame(measuredCalculation([row.passing_epa, row.rushing_epa], (passing, rushing) => passing + rushing), row.games),
           passingEpaPerGame: perGame(row.passing_epa, row.games),
           rushingEpaPerGame: perGame(row.rushing_epa, row.games),
@@ -304,8 +303,8 @@ export async function syncAdvancedDatasets(options = {}) {
         const rows = parsed.rows;
         const allSituations = rows.filter((row) => String(row.situation).toLowerCase() === 'all');
         if (!allSituations.length) throw new Error('Advanced source moneypuck-team-xg: no all-situations observations');
-        snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').toUpperCase(), stamp({
-          team: String(row.team || '').toUpperCase(), games: finite(row.games_played),
+        snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
+          team: String(row.team || '').trim().toUpperCase(), games: finite(row.games_played),
           xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
           flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
           goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)

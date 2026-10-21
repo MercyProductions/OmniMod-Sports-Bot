@@ -61,7 +61,7 @@ test('tennis observed zero serve rates remain data and absent rates do not becom
 test('provider imports preserve unknown sample sizes and require positive games for rates',async()=>{
  await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[]});
  const fetchImpl=async url=>{
-  if(url.includes('/stats_team/'))return {ok:true,text:async()=> 'team,games,passing_epa,rushing_epa,passing_cpoe\nA,0,4,,\nH,2,0,0,0\n'};
+  if(url.includes('/stats_team/'))return {ok:true,text:async()=> nflCsv('team,games,passing_epa,rushing_epa,passing_cpoe\nA,0,4,,\nH,2,0,0,0\n',url)};
   if(url.includes('moneypuck'))return {ok:true,text:async()=> 'team,situation,games_played,xGoalsFor\nA,all,,4\n'};
   if(url.includes('type=batter'))return {ok:true,text:async()=> 'player_name,est_woba\nHitter,0\n'};
   throw new Error('Synthetic unavailable');
@@ -93,3 +93,5 @@ test('known external values preserve the existing units, difference signs and tr
  assert.equal(games[2].advancedDataset.xgDifference,1);assert.equal(games[2].advancedDataset.gsaxDifference,1);
  assert.equal(buildEvidenceCoverage(games[0]).advancedDatasetProvenance.missingMeasurements.includes('cpoeDifference'),false);
 });
+
+const nflCsv=(text,url)=>text.split('\n').map((line,index)=>!line?'':index===0?'season,season_type,'+line:String(url.match(/reg_(\d{4})/)[1])+',REG,'+line).join('\n');

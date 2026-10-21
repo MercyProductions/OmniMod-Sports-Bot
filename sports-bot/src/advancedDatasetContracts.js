@@ -12,6 +12,7 @@ export function advancedDatasetRequest(options={}){
   'nflverse-schedules','moneypuck-team-xg','nba-advanced-teams','statsbomb-open-data']){
   const scope={contract:'advanced-source-contract-v1',source};
   if(/^(tennis-|baseball-savant-)/.test(source))scope.year=year;
+  if(source==='nflverse-team-stats')scope.recordContract='regular-season-team-summary-v1';
   if(['nflverse-team-stats','moneypuck-team-xg','nba-advanced-teams'].includes(source))scope.seasonStart=seasonStart;
   if(source==='nflverse-schedules')scope.minimumSeason=seasonStart-1;
   requestIdentities[source]=JSON.stringify(scope);
@@ -37,4 +38,19 @@ export function checkedDatasetRows(rows,{source,keys=[],features=[],identity=()=
  if(!accepted.length||features.length&&!accepted.some(row=>features.some(key=>finiteNumber(row[key])!==null)))
   throw new Error(`Advanced source ${source}: no usable observations`);
  return {rows:accepted,rejectedRows:rows.length-accepted.length};
+}
+
+/** The REG endpoint is one season-summary record per team, never weekly observations. */
+export function checkedNflSeasonRows(rows,seasonStart){
+ const parsed=checkedDatasetRows(rows,{source:'nflverse-team-stats',
+  keys:[['season'],['season_type'],['team'],['games'],['passing_epa','rushing_epa','passing_cpoe']],
+  features:['passing_epa','rushing_epa','passing_cpoe'],identity:row=>nonemptyText(row.team)});
+ const teams=new Set();
+ for(const row of parsed.rows){
+  const key=row.team.trim().toUpperCase();
+  if(finiteNumber(row.season)!==seasonStart||String(row.season_type).trim().toUpperCase()!=='REG'
+   ||nonemptyText(row.week)||teams.has(key))throw new Error('Advanced source nflverse-team-stats: conflicting season-summary identity');
+  teams.add(key);
+ }
+ return parsed;
 }

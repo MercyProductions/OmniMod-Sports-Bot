@@ -38,7 +38,7 @@ test('malformed JSON shapes cannot empty the NBA or soccer catalog collections',
 
 test('invalid identity rows are counted while valid partial measurements and true zeros remain usable',async()=>{
  await seed();const result=await syncAdvancedDatasets({clock:()=>now,force:true,fetchImpl:async url=>{
-  if(url.includes('/stats_team/'))return response('team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,0,0,0\n,2,4,2,1\nH,2,,,\n');
+  if(url.includes('/stats_team/'))return response(nflCsv('team,games,passing_epa,rushing_epa,passing_cpoe\nA,2,0,0,0\n,2,4,2,1\nH,2,,,\n',url));
   throw new Error('Synthetic unavailable');
  }});
  assert.equal(result.snapshot.footballTeams[''],undefined);
@@ -49,7 +49,7 @@ test('invalid identity rows are counted while valid partial measurements and tru
 
 test('a different requested historical year cannot reuse a fresh success for another request identity',async()=>{
  await seed();let calls=0;const fetchImpl=async url=>{
-  if(url.includes('/stats_team/')){calls++;return response(csv);}throw new Error('Synthetic unavailable');
+  if(url.includes('/stats_team/')){calls++;return response(nflCsv(csv,url));}throw new Error('Synthetic unavailable');
  };
  const first=await syncAdvancedDatasets({clock:()=>now,year:2024,force:true,fetchImpl});
  const originalKey=first.snapshot.footballTeams.A.sourceRequestKey;
@@ -59,7 +59,7 @@ test('a different requested historical year cannot reuse a fresh success for ano
 
 test('failed year switches preserve old data but cannot attach it as the requested period',async()=>{
  await seed();const fetchImpl=async url=>{
-  if(url.includes('stats_team_reg_2024'))return response(csv);throw new Error('Synthetic unavailable');
+  if(url.includes('stats_team_reg_2024'))return response(nflCsv(csv,url));throw new Error('Synthetic unavailable');
  };
  const first=await syncAdvancedDatasets({clock:()=>now,year:2024,force:true,fetchImpl});
  const second=await syncAdvancedDatasets({clock:()=>now+1,year:2025,fetchImpl});
@@ -91,7 +91,7 @@ test('multi-year tennis fallback rows cannot contaminate the requested calendar-
 test('concurrent different-period requests cannot share the first callers result',{timeout:10000},async()=>{
  await seed();let enter,release;const started=new Promise(resolve=>enter=resolve),held=new Promise(resolve=>release=resolve);let calls=0;
  const fetchImpl=async url=>{
-  if(url.includes('/stats_team/')){calls++;if(url.includes('reg_2024')){enter();await held;}return response(csv);}
+  if(url.includes('/stats_team/')){calls++;if(url.includes('reg_2024')){enter();await held;}return response(nflCsv(csv,url));}
   throw new Error('Synthetic unavailable');
  };
  const first=syncAdvancedDatasets({clock:()=>now,year:2024,force:true,fetchImpl});
@@ -102,7 +102,7 @@ test('concurrent different-period requests cannot share the first callers result
 
 test('explicit season changes independently invalidate seasonal sources',async()=>{
  await seed();const urls=[];const fetchImpl=async url=>{
-  if(url.includes('/stats_team/')){urls.push(url);return response(csv);}throw new Error('Synthetic unavailable');
+  if(url.includes('/stats_team/')){urls.push(url);return response(nflCsv(csv,url));}throw new Error('Synthetic unavailable');
  };
  await syncAdvancedDatasets({clock:()=>now,year:2025,seasonStart:2023,force:true,fetchImpl});
  await syncAdvancedDatasets({clock:()=>now+1,year:2025,seasonStart:2024,fetchImpl});
@@ -112,7 +112,7 @@ test('explicit season changes independently invalidate seasonal sources',async()
 test('matching concurrent request identities still share one provider refresh',{timeout:10000},async()=>{
  await seed();let enter,release;const started=new Promise(resolve=>enter=resolve),held=new Promise(resolve=>release=resolve);let calls=0;
  const fetchImpl=async url=>{
-  if(url.includes('/stats_team/')){calls++;enter();await held;return response(csv);}throw new Error('Synthetic unavailable');
+  if(url.includes('/stats_team/')){calls++;enter();await held;return response(nflCsv(csv,url));}throw new Error('Synthetic unavailable');
  };
  const first=syncAdvancedDatasets({clock:()=>now,year:2024,force:true,fetchImpl});
  await started;const second=syncAdvancedDatasets({clock:()=>now,year:2024,fetchImpl});release();
@@ -128,3 +128,19 @@ test('changing period or forcing refresh does not bypass a provider retry restri
  await syncAdvancedDatasets({clock:()=>now,year:2024,force:true,fetchImpl});
  await syncAdvancedDatasets({clock:()=>now+2*3600000,year:2025,force:true,fetchImpl});assert.equal(calls,1);
 });
+
+
+test('NFL season summaries reject conflicting period, weekly grain and duplicate team rows before replacement',async()=>{
+ const header='season,season_type,team,games,passing_epa,rushing_epa,passing_cpoe';
+ for(const payload of [header+'\n2023,REG,A,17,4,2,0',header+'\n2024,POST,A,4,4,2,0',
+  header+',week\n2024,REG,A,1,4,2,0,1',header+'\n2024,REG,A,17,4,2,0\n2024,REG,a,17,8,4,0',
+  'team,games,passing_epa,rushing_epa,passing_cpoe\nA,17,4,2,0']){
+  await seed();const result=await syncAdvancedDatasets({clock:()=>now,seasonStart:2024,force:true,fetchImpl:async url=>{
+   if(url.includes('/stats_team/'))return response(payload);throw new Error('Synthetic unavailable');
+  }});
+  assert.equal(result.snapshot.sources.find(row=>row.id==='nflverse-team-stats').ok,false);
+  assert.deepEqual(result.snapshot.footballTeams,stored().footballTeams);
+ }
+});
+
+const nflCsv=(text,url)=>text.split('\n').map((line,index)=>!line?'':index===0?'season,season_type,'+line:String(url.match(/reg_(\d{4})/)[1])+',REG,'+line).join('\n');
