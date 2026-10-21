@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import {hybridArtifact} from './hybridArtifact.js';
 import {createHash} from 'node:crypto';
 import {mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
@@ -95,7 +96,7 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
       &&epoch(event.recordedAt)>=epoch(plan.start)&&epoch(event.recordedAt)<epoch(plan.end));
     const ids=new Set(forecasts.map(event=>event.payload.forecastId));
     const visible=records.filter(event=>epoch(event.recordedAt)<=now);
-    const outcomes=new Map(visible.filter(event=>event.type==='result'&&ids.has(event.payload.forecastId)).map(event=>[event.payload.forecastId,event]));
+    const outcomes=new Map([...journalResultState(visible).eligible].filter(([id])=>ids.has(id)));
     if(forecasts.some(event=>!outcomes.has(event.payload.forecastId)))return {status:'awaiting_outcomes',pendingForecasts:forecasts.filter(event=>!outcomes.has(event.payload.forecastId)).length,promotionAllowed:false};
     const used=new Set(state.consumedGames),overlap=forecasts.some(event=>used.has(gameKey(event.payload)));
     const subset=visible.filter(event=>ids.has(event.payload.forecastId));

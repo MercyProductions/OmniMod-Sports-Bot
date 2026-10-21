@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { finiteNumber, scoreOutcome } from './dataValidation.js';
@@ -19,9 +20,9 @@ function journalEvidence(records, forecastId, now) {
   const generated = time(forecast.predictionGeneratedAt), start = time(forecast.startTime), captured = time(entry.recordedAt);
   need(generated !== null && start !== null && captured !== null && generated <= captured && captured < start, 'Issued forecast chronology is invalid');
   need(forecast.guildId && forecast.league && forecast.gameId && forecast.modelVersion, 'Complete forecast identity required');
-  const results = records.filter(row => row.type === 'result' && row.payload.forecastId === forecastId);
-  need(results.length > 0, 'No journal result is available');
-  const resultEntry = results.at(-1), result = resultEntry.payload;
+  const resultEntry = journalResultState(records).eligible.get(forecastId);
+  need(resultEntry, 'No undisputed journal result is available');
+  const result = resultEntry.payload;
   const observed = time(result.observedAt), fetched = time(result.providerFetchedAt), recorded = time(resultEntry.recordedAt);
   need(observed !== null && fetched !== null && recorded !== null && start <= fetched && fetched <= observed && observed <= recorded && recorded <= now,
     'A timely post-start provider receipt and result observation are required');

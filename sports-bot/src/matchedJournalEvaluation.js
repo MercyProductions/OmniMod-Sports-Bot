@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import {quotePrice,quoteTimestampVerified} from './oddsPricing.js';
 import {finiteNumber} from './dataValidation.js';
 
@@ -105,8 +106,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
   if(!Number.isFinite(asOf)||!Number.isInteger(repetitions)||repetitions<100||repetitions>2000)throw new Error('Invalid bounded evaluation settings');
   const rejects={},reject=reason=>{rejects[reason]=(rejects[reason]||0)+1;};
   const visible=records.filter(event=>Number.isFinite(time(event.recordedAt))&&time(event.recordedAt)<=asOf);
-  const results=new Map();
-  for(const event of visible)if(event.type==='result')results.set(event.payload.forecastId,{...event.payload,resultRecordedAt:event.recordedAt});
+  const results=new Map([...journalResultState(visible).eligible].map(([id,event])=>[id,{...event.payload,resultRecordedAt:event.recordedAt}]));
   const first=new Map();
   for(const event of visible){
     if(event.type!=='forecast')continue;

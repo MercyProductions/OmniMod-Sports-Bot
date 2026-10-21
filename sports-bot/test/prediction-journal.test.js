@@ -169,7 +169,7 @@ test('journal issuance rejects mismatched schedule and league evidence using the
     await recordPredictionJournal(value,{file,now});
     const rows=await readFullPredictionJournal(file);
     assert.equal(rows.filter(row=>row.type==='forecast').length,0);
-    assert.ok(rows.some(row=>row.type==='unverifiable_observation'));
+    assert.ok(rows.some(row=>row.type==='event_association_rejected'));
   }
 });
 

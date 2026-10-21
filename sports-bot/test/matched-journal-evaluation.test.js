@@ -106,3 +106,12 @@ test('three-way Brier uses all three coordinates and malformed primary mass abst
   rows[0].payload.outcomePercentages={home:70,away:70,draw:0};
   assert.equal(report(rows).rejections.invalid_primary_probabilities_or_pick,1);
 });
+
+
+test('a durable journal conflict removes paired scores only after its recorded cutoff',()=>{
+ const rows=fixture('disputed');rows.push({type:'result_conflict',recordedAt:'2026-10-20T23:00:00Z',payload:{forecastId:'disputed',conflictId:'c'}});
+ assert.equal(hybrid(evaluateMatchedJournal(rows,{...options,asOf:Date.parse('2026-10-20T22:30:00Z')})).primary.forecasts,1);
+ assert.equal(Object.keys(report(rows).byVersion).length,0);
+ rows.push({type:'result',recordedAt:'2026-10-20T23:30:00Z',payload:{forecastId:'disputed',actualSide:'home',observedAt:'2026-10-20T23:30:00Z',resolvesConflictId:'c'}});
+ assert.equal(hybrid(report(rows)).primary.forecasts,1);
+});

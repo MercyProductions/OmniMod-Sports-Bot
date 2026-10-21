@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import {evaluateMatchedJournal} from './matchedJournalEvaluation.js';
 import {validCandidateVector} from './candidateCohorts.js';
 import { evaluatePredictionHorizons } from './horizonEvaluation.js';
@@ -10,7 +11,8 @@ function selectedSide(vector) {
 export function summarizePredictionJournal(records = []) {
   const forecasts = records.filter(row => row.type === 'forecast' && row.payload.lifecycleState === 'ISSUED').map(row => row.payload);
   const delivered = new Set(records.filter(row => row.type === 'forecast_lifecycle' && row.payload.state === 'DELIVERED').map(row => row.payload.forecastId));
-  const results = new Map(records.filter(row => row.type === 'result').map(row => [row.payload.forecastId, row.payload]));
+  const resultState = journalResultState(records);
+  const results = new Map([...resultState.eligible].map(([id,event])=>[id,event.payload]));
   const versions = [...new Set(forecasts.map(row => row.modelVersion))].sort();
   const byVersion = {};
   for (const version of versions) {
@@ -61,6 +63,8 @@ export function summarizePredictionJournal(records = []) {
     rejectedObservations: records.filter(row => row.type === 'forecast_lifecycle' && row.payload.state === 'REJECTED').length,
     unverifiableObservations: records.filter(row => row.type === 'unverifiable_observation').length,
     forecastsWithOdds: forecasts.filter(row => row.odds.status === 'available').length,
+    disputedResults: resultState.conflicts.size,
+    eventAssociationRejections: records.filter(row=>row.type==='event_association_rejected').length,
     gradedForecasts: forecasts.filter(row => results.has(row.forecastId)).length,
     byVersion,
     matchedForecastComparisons: evaluateMatchedJournal(records),

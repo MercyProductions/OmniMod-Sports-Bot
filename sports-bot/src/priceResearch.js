@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import {bookmakerMargin,quotePrice,quoteTimestampVerified,costedPriceScenario,validateCostAssumptions} from './oddsPricing.js';
 import {finiteNumber} from './dataValidation.js';
 
@@ -13,10 +14,11 @@ export function evaluatePriceResearch(records=[],{costs,asOf=Date.now()}={}){
   const visible=records.filter(event=>Number.isFinite(epoch(event.recordedAt))&&epoch(event.recordedAt)<=asOf);
   const forecasts=new Map(),results=new Map(),decisions=[],rejections={};
   const reject=reason=>{rejections[reason]=(rejections[reason]||0)+1;};
+  for(const [id,event] of journalResultState(visible).eligible)results.set(id,{...event.payload,resultRecordedAt:event.recordedAt});
   for(const event of visible){
     const row=event.payload;
     if(event.type==='forecast'&&row.lifecycleState==='ISSUED'&&row.recordEligibility==='observed_pregame')forecasts.set(row.forecastId,{...row,issuedAt:event.recordedAt});
-    if(event.type==='result')results.set(row.forecastId,{...row,resultRecordedAt:event.recordedAt});
+
   }
   for(const event of visible){
     const payload=event.payload;

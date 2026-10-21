@@ -88,3 +88,10 @@ test('complete three-way markets grade draws and reject asynchronous same-book o
   assert.equal(asynchronous.scenarios.length,0);
   assert.equal(asynchronous.rejections.complete_same_book_original_prices_unavailable,1);
 });
+
+
+test('conflict quarantine removes outcome returns without removing original offered prices',()=>{
+ const data=rows();data.push({type:'result_conflict',recordedAt:'2026-10-20T23:00:00Z',payload:{forecastId:'f',conflictId:'c'}});
+ assert.equal(evaluatePriceResearch(data,{...options,asOf:Date.parse('2026-10-20T22:30:00Z')}).scenarios[0].outcome,'hypothetical_win');
+ const scenario=evaluatePriceResearch(data,options).scenarios[0];assert.equal(scenario.outcome,'unresolved');assert.equal(scenario.counterfactualReturn,null);
+});

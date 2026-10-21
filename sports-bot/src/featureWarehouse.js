@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import path from 'node:path';
 import { withAuditFileLock } from './auditFileLock.js';
 import { readPredictionJournal, predictionJournalFile } from './predictionJournal.js';
@@ -519,8 +520,8 @@ async function currentAdjudicationProofs(rows){
     if(!receipt?.journalFile||!receipt.forecastId){proofs.set(row,false);continue;}
     try{requireLocalReviewJournal(receipt.journalFile);}catch{proofs.set(row,false);continue;}
     if(!cache.has(receipt.journalFile)){
-      const records=await readPredictionJournal(receipt.journalFile),latest=new Map(),forecasts=new Map();
-      for(const record of records){if(record.type==='forecast')forecasts.set(record.eventHash,record);if(record.type==='result')latest.set(record.payload.forecastId,record);}
+      const records=await readPredictionJournal(receipt.journalFile),latest=journalResultState(records).eligible,forecasts=new Map();
+      for(const record of records){if(record.type==='forecast')forecasts.set(record.eventHash,record);}
       cache.set(receipt.journalFile,{latest,forecasts});
     }
     const {latest,forecasts}=cache.get(receipt.journalFile);

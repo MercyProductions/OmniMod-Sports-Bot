@@ -1,3 +1,5 @@
+import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
+import {journalResultState} from './journalResults.js';
 import {quotePrice} from './oddsPricing.js';
 import { createHash } from 'node:crypto';
 import { open, readFile, mkdir, unlink } from 'node:fs/promises';
@@ -138,6 +140,8 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         if (['price_observation', 'unlinked_price_observation'].includes(row.type)) priceRecords.add(row.payload.priceObservationId);
         if (row.type === 'result') results.set(row.payload.forecastId, row.payload);
       }
+      const activeConflicts=journalResultState(records).conflicts;
+      const rejectedAssociations=new Set(records.filter(row=>row.type==='event_association_rejected').map(row=>row.payload.associationId));
       const pending = [];
       if (lifecycle === 'refresh_attempt') {
         const started = iso(refreshAttempt?.attemptedAt), ended = iso(refreshAttempt?.completedAt);
@@ -177,16 +181,26 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           add('forecast_lifecycle', payload); states.set(key, payload);
         }
       };
-      const gameMap = new Map((slate.games || []).map(game => [String(game.id), game]));
+      const gameIndex=journalGameIndex(slate.games||[]);
+      const rejectAssociation=(subject,match,phase)=>{
+        const body={guildId:String(slate.guildId||''),gameId:String(subject.gameId),league:String(subject.leagueKey||subject.league||''),
+          forecastId:subject.forecastId||null,modelVersion:subject.modelVersion||null,predictionGeneratedAt:iso(subject.predictionGeneratedAt),expectedStartTime:iso(subject.startTime),
+          phase,reason:match.reason,candidateCount:match.candidateCount||0,observations:match.observations||[],observationsTruncated:match.observationsTruncated||false};
+        const associationId=digest(body);
+        if(!rejectedAssociations.has(associationId)){add('event_association_rejected',{associationId,...body,observedAt:new Date(now).toISOString()});rejectedAssociations.add(associationId);}
+        return associationId;
+      };
       for (const prediction of slate.predictions || []) {
-        const game = gameMap.get(String(prediction.gameId)) || {};
+        const association=matchJournalGame(gameIndex,prediction),game=association.game;
+        if(!game){rejectAssociation(prediction,association,lifecycle);continue;}
         if (lifecycle === 'prices_only') {
           const snapshot = forecastSnapshot(prediction, game, slate, now);
           const generatedAt = iso(prediction.originalForecastGeneratedAt || prediction.modelAsOf);
           const matched = [...forecasts.values()].filter(row => row.lifecycleState === 'ISSUED'
             && row.gameId === String(prediction.gameId) && row.guildId === String(slate.guildId || '')
             && row.league === String(game.leagueKey || '') && row.modelVersion === prediction.modelVersion
-            && generatedAt && row.predictionGeneratedAt === generatedAt);
+            && generatedAt && row.predictionGeneratedAt === generatedAt && row.startTime===iso(game.startTime)
+            && row.horizon===(prediction.originalForecastHorizon||predictionHorizon({...prediction,minutesToStart:(Date.parse(game.startTime)-Date.parse(generatedAt))/60000})));
           const price = { sourceForecastId: matched.length === 1 ? matched[0].forecastId : null,
             gameId: String(prediction.gameId), guildId: String(slate.guildId || ''), league: String(game.leagueKey || ''),
             originalForecastGeneratedAt: generatedAt, modelVersion: prediction.modelVersion || 'unknown', observedAt: new Date(now).toISOString(),
@@ -201,7 +215,11 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         }
         if (prediction.quoteRefreshOnly || lifecycle === 'results_only') continue;
         const snapshot = forecastSnapshot(prediction, game, slate, now);
-        const id = snapshot.forecastId, original = forecasts.get(id);
+        const id = snapshot.forecastId, original = forecasts.get(id),anchored=original||provisional.get(id);
+        if(anchored&&anchored.startTime!==snapshot.startTime){
+          const mismatch=matchJournalGame(journalGameIndex([game]),{...prediction,startTime:anchored.startTime});
+          rejectAssociation({...prediction,forecastId:id,startTime:anchored.startTime},{...mismatch,reason:'forecast_identity_start_conflict'},lifecycle);continue;
+        }
         if (lifecycle === 'delivered') {
           if (matchesIssuedSnapshot(original, snapshot) && slate.messageId && slate.channelId) transition(id, 'DELIVERED', {
             messageId: String(slate.messageId), channelId: String(slate.channelId) });
@@ -234,9 +252,18 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
       // Resolve every frozen horizon/version for this event, not only the
       // latest prediction still displayed in the mutable daily slate.
       for (const issued of lifecycle === 'prices_only' ? [] : forecasts.values()) {
-        const game = gameMap.get(issued.gameId);
-        if (!game || issued.guildId !== String(slate.guildId || '')
-          || issued.league !== String(game.leagueKey || '')) continue;
+        if(issued.guildId!==String(slate.guildId||''))continue;
+        const association=matchJournalGame(gameIndex,issued),game=association.game;
+        if(!game){
+          if(association.candidateCount){
+            const associationId=rejectAssociation(issued,association,'results');
+            if(['ambiguous_game_observations','scheduled_start_mismatch'].includes(association.reason)&&activeConflicts.get(issued.forecastId)?.payload.conflictId!==associationId){
+              add('result_conflict',{forecastId:issued.forecastId,conflictId:associationId,observedAt:new Date(now).toISOString(),reason:association.reason});
+              activeConflicts.set(issued.forecastId,pending.at(-1));
+            }
+          }
+          continue;
+        }
         const actualSide = finalOutcomeSide(game);
         if (!issued || !actualSide) continue;
         const payload = { forecastId: issued.forecastId, actualSide, selectedSide: issued.selectedSide,
@@ -244,10 +271,16 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           observedAt: new Date(now).toISOString(), providerFetchedAt: iso(game.sourceMeta?.fetchedAt),
           scheduleChanged: issued.startTime !== iso(game.startTime),
           provenance: 'first/later observed final; no historical completion time is inferred' };
+        const conflict=activeConflicts.get(issued.forecastId);
+        if(conflict){
+          const fetched=Date.parse(payload.providerFetchedAt||'');
+          if(!Number.isFinite(fetched)||fetched<=Date.parse(conflict.recordedAt)||fetched>now||fetched<Date.parse(issued.startTime))continue;
+          payload.resolvesConflictId=conflict.payload.conflictId;
+        }
         const prior = results.get(issued.forecastId);
-        if (!prior || prior.actualSide !== actualSide || prior.awayScore !== payload.awayScore || prior.homeScore !== payload.homeScore) {
+        if (conflict || !prior || prior.actualSide !== actualSide || prior.awayScore !== payload.awayScore || prior.homeScore !== payload.homeScore) {
           add('result', { ...payload, revision: (prior?.revision || 0) + 1 }); results.set(issued.forecastId, pending.at(-1).payload);
-          transition(issued.forecastId, 'GRADED');
+          transition(issued.forecastId, 'GRADED');activeConflicts.delete(issued.forecastId);
         }
       }
       if (pending.length) {
@@ -255,11 +288,17 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         try { await handle.writeFile(pending.map(row => JSON.stringify(row)).join('\n') + '\n'); await handle.sync(); }
         finally { await handle.close(); }
       }
+      const acknowledgements=lifecycle==='issued'?(slate.predictions||[]).map(prediction=>{
+        const game=matchJournalGame(gameIndex,prediction).game;if(!game)return {gameId:String(prediction.gameId),verified:false};
+        const snapshot=forecastSnapshot(prediction,game,slate,now);
+        return {gameId:String(prediction.gameId),verified:snapshot.recordEligibility==='observed_pregame'&&matchesIssuedSnapshot(forecasts.get(snapshot.forecastId),snapshot),snapshot};
+      }):[];
+      const verifiedIds=[...new Set(acknowledgements.filter(row=>row.verified&&!acknowledgements.some(other=>other.gameId===row.gameId&&!other.verified)).map(row=>row.gameId))];
       return { appended: pending.length, forecastRecords: pending.filter(row => row.type === 'forecast').length,
-        verifiedIssuedGameIds: lifecycle === 'issued' ? (slate.predictions || []).filter(prediction => {
-          const snapshot = forecastSnapshot(prediction, gameMap.get(String(prediction.gameId)) || {}, slate, now);
-          return snapshot.recordEligibility === 'observed_pregame' && matchesIssuedSnapshot(forecasts.get(snapshot.forecastId), snapshot);
-        }).map(prediction => String(prediction.gameId)) : [],
+        verifiedIssuedGameIds:verifiedIds,
+        verifiedIssuedForecasts:acknowledgements.filter(row=>row.verified).map(({snapshot})=>({forecastId:snapshot.forecastId,gameId:snapshot.gameId,league:snapshot.league,modelVersion:snapshot.modelVersion,horizon:snapshot.horizon,startTime:snapshot.startTime,predictionGeneratedAt:snapshot.predictionGeneratedAt})),
+        eventAssociationRejections:pending.filter(row=>row.type==='event_association_rejected').length,
+        resultConflicts:pending.filter(row=>row.type==='result_conflict').length,
         resultRecords: pending.filter(row => row.type === 'result').length,
         priceObservations: pending.filter(row => row.type === 'price_observation').length,
         unverifiableObservations: pending.filter(row => row.type === 'unverifiable_observation').length,

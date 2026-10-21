@@ -1,3 +1,4 @@
+import {predictionHorizon} from './horizonEvaluation.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, dataDir } from './config.js';
@@ -130,7 +131,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     refreshed.valueAnalysis.modelAsOf = modelAsOf;
     refreshed.valueAnalysis.issuedAt = issuedAt;
     refreshed.valueAnalysis.provenance = 'explicit_admin_h2h_refresh_with_frozen_model';
-    snapshots.push({ ...refreshed, originalForecastGeneratedAt: prediction.predictionGeneratedAt, predictionGeneratedAt: issuedAt, quoteRefreshOnly: true, eligibleForCalibration: false, snapshotStage: 'quote-refresh' });
+    snapshots.push({ ...refreshed, originalForecastHorizon: predictionHorizon({...prediction,minutesToStart:(Date.parse(prediction.startTime||game.startTime)-Date.parse(prediction.predictionGeneratedAt))/60000}), originalForecastGeneratedAt: prediction.predictionGeneratedAt, predictionGeneratedAt: issuedAt, quoteRefreshOnly: true, eligibleForCalibration: false, snapshotStage: 'quote-refresh' });
     return refreshed;
   });
   const fresh = predictions.filter((row) => updated.has(String(row.gameId))).some((row) => row.valueAnalysis.outcomes.some((outcome) => outcome.quote?.fresh));

@@ -240,3 +240,11 @@ test('CLI registers hybrid recipes without requiring a fitted ML model file',asy
  assert.equal(state.plans['cli-hybrid'].candidate,'hybrid');assert.equal(state.plans['cli-hybrid'].trainedAt,undefined);
  assert.equal(JSON.parse(await readFile(join(dir,'cli-hybrid-model.json'),'utf8')).schema,'sports-hybrid-recipe-v1');
 });
+
+
+test('a disputed outcome prevents finalization even when the remaining cohort meets sample requirements',async t=>{
+ const dir=await directory(t);await registerSelectionPlan(spec(),{directory:dir,model:pinnedModel,now:registeredAt});
+ const records=prospectiveRows();records.push({type:'result_conflict',recordedAt:'2101-01-15T23:00:00Z',payload:{forecastId:'f0',conflictId:'c'}});
+ const result=await finalizeSelectionPlan(spec().id,{directory:dir,records,now:Date.parse('2101-01-16T00:00:00Z')});
+ assert.equal(result.status,'awaiting_outcomes');assert.equal(result.pendingForecasts,1);assert.equal(result.promotionAllowed,false);
+});

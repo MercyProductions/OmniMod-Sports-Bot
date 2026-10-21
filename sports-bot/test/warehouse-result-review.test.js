@@ -209,3 +209,12 @@ test('review journal references cannot escape the configured data directory',asy
  await assert.rejects(prepareWarehouseResultReview(f.forecastId,{...options,journalFile:outside}),/configured data directory/);
  await assert.rejects(applyWarehouseResultReview(f.proposal,f.review,{...applyOptions,journalFile:outside}),/configured data directory/);
 });
+
+
+test('journal ambiguity invalidates reviewed learning proof without rewriting the warehouse receipt',async()=>{
+ const f=await fixture();await applyWarehouseResultReview(f.proposal,f.review,applyOptions);
+ assert.equal((await warehouseCandidateRowsBefore()).length,1);const before=await readFile(warehouseFile,'utf8');
+ await recordPredictionJournal({...f.slate,games:[f.a,f.b]},{file:journalFile,now:reviewNow,lifecycle:'results_only'});
+ assert.equal((await warehouseCandidateRowsBefore()).length,0);assert.equal(await readFile(warehouseFile,'utf8'),before);
+ await assert.rejects(prepareWarehouseResultReview(f.forecastId,options),/undisputed/);
+});

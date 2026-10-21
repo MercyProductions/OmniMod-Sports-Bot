@@ -1,3 +1,4 @@
+import {journalResultState} from './journalResults.js';
 import {validCandidateVector} from './candidateCohorts.js';
 const epoch=value=>Date.parse(value||'');
 const increment=(counts,key)=>{counts[key]=(counts[key]||0)+1;};
@@ -8,7 +9,7 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
     ||!Number.isInteger(windowDays)||windowDays<1||!Number.isInteger(minDriftGames)||minDriftGames<2)throw new Error('Invalid operational audit bounds');
   const visible=records.filter(row=>Number.isFinite(epoch(row.recordedAt))&&epoch(row.recordedAt)<=asOf);
   const issued=visible.filter(row=>row.type==='forecast'&&row.payload.lifecycleState==='ISSUED'&&row.payload.recordEligibility==='observed_pregame');
-  const results=new Map(visible.filter(row=>row.type==='result').map(row=>[row.payload.forecastId,{...row.payload,resultRecordedAt:row.recordedAt}]));
+  const results=new Map([...journalResultState(visible).eligible].map(([id,event])=>[id,{...event.payload,resultRecordedAt:event.recordedAt}]));
   const delivered=new Set(visible.filter(row=>row.type==='forecast_lifecycle'&&row.payload.state==='DELIVERED').map(row=>row.payload.forecastId));
   const attempts=visible.filter(row=>row.type==='refresh_attempt'),statuses={},reasons={},coverage={},byLeague={};
   for(const {payload} of attempts)for(const game of payload.games||[]){increment(statuses,game.status);for(const reason of new Set(game.reasons||[]))increment(reasons,reason);}
@@ -65,6 +66,7 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
     forecasts:{issued:issued.length,delivered:issued.filter(row=>delivered.has(row.payload.forecastId)).length,
       withoutDeliveryAcknowledgement:issued.filter(row=>!delivered.has(row.payload.forecastId)).length,
       missingResults:unresolved,overdueResults:overdue,unknownStart,overdueAfterHours},
+    journalIntegrity:{eventAssociationRejections:visible.filter(row=>row.type==='event_association_rejected').length,disputedResults:journalResultState(visible).conflicts.size},
     evidence:{missingFrozenCoverage:missingCoverage,missingReasons:coverage,unknownUnderlyingFreshness:unknownUnderlying},
     byLeague,calibrationMonitoring:{windowDays,minDriftGames,cohorts:drift,automaticAction:false},
     limitations:['Attempt counts cover only instrumented terminal attempts; process crashes and historical attempts may be absent.',
