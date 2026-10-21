@@ -1,3 +1,4 @@
+import {mergeValueQuoteRefresh,refreshScopedPredictionValues} from './quoteRefreshIdentity.js';
 import {mergeFinalReplies} from './finalResultRevision.js';
 import {deliverFinalBatch} from './finalDelivery.js';
 import {scopedEventKey} from './slateEventIdentity.js';
@@ -10,7 +11,7 @@ import {
 } from 'discord.js';
 import { config, requireRuntimeConfig } from './config.js';
 import { buildCommands } from './commands.js';
-import { formatValueDetails, refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
+import { formatValueDetails, valueOpportunityLine } from './oddsValue.js';
 import { refreshValueQuotes } from './valueQuoteRefresh.js';
 import { buildDailySlate, refreshFinalGrades, supportedLeagues } from './sportsData.js';
 import { duePregameRefreshes, completeAndJournalPregameRefresh, buildJournaledPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
@@ -488,8 +489,7 @@ async function readOrBuildTodaySlate(reason, guildId = '') {
   const dateKey = localDateKey();
   const cached = await readDailyCache(dateKey, guildId);
   const slate = cached && Number(cached.schemaVersion || 0) >= 6 ? cached : await buildDailySlateOnce(reason, guildId, { recalculate: Boolean(cached) });
-  const games = new Map((slate.games || []).map((game) => [String(game.id), game]));
-  return { ...slate, predictions: (slate.predictions || []).map((prediction) => refreshPredictionValue(prediction, games.get(String(prediction.gameId)))) };
+  return refreshScopedPredictionValues(slate);
 }
 
 function predictionScore(prediction) {
@@ -1035,20 +1035,11 @@ async function handleSportsCommand(interaction) {
         await recordPredictionJournal(refreshed.issuedSlate, { lifecycle: 'prices_only' });
         await recordSlateSnapshot(refreshed.issuedSlate);
         const latest = await readDailyCache(cached.dateKey, guildId) || cached;
-        const newOdds = new Map(refreshed.issuedSlate.games.map((game) => [String(game.id), game.odds]));
-        const changedIds = new Set(refreshed.issuedSlate.predictions.map((prediction) => String(prediction.gameId)));
-        const games = latest.games.map((game) => changedIds.has(String(game.id)) ? { ...game, odds: newOdds.get(String(game.id)) } : game);
-        const byId = new Map(games.map((game) => [String(game.id), game]));
-        cached = { ...latest, games, lastValueQuoteRefreshAt: refreshed.slate.lastValueQuoteRefreshAt,
-          predictions: latest.predictions.map((prediction) => {
-            const value = refreshPredictionValue(prediction, byId.get(String(prediction.gameId)));
-            return { ...value, modelAsOf: prediction.modelAsOf || prediction.predictionGeneratedAt };
-          }) };
+        cached = mergeValueQuoteRefresh(latest,refreshed);
         await writeDailyCache(cached.dateKey, cached, guildId);
       }
     }
-    const gamesById = new Map((cached.games || []).map((game) => [String(game.id), game]));
-    cached = { ...cached, predictions: (cached.predictions || []).map((prediction) => refreshPredictionValue(prediction, gamesById.get(String(prediction.gameId)))) };
+    cached = refreshScopedPredictionValues(cached);
     const picks = [...(cached.predictions ?? [])]
       .filter(isPregamePrediction)
       .filter((prediction) => prediction.valueAnalysis?.bestOpportunity)

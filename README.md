@@ -161,7 +161,7 @@ Sports research updates add immutable forecast lifecycle records, per-game evide
 
 References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
 
-Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 546 passing tests; no improved forecasting or wagering performance has been established.
+Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 557 passing tests; no improved forecasting or wagering performance has been established.
 
 Journal event-association repair: [scoped identities, conflict quarantine and eligibility](docs/SPORTS_JOURNAL_EVENT_INTEGRITY.md). Development v6.0.32; original forecasts remain immutable. These are source and synthetic-regression improvements, not proof of forecasting or wagering improvement.
 
@@ -178,3 +178,5 @@ Final correction continuation: [edit existing result messages while preserving o
 Manual result integrity: [scoped doubleheaders, local receipts and conflict quarantine](docs/SPORTS_MANUAL_RESULT_INTEGRITY.md), development v6.0.38. Administrator event scope and source-check inputs are documented there; immutable raw edit history and actual host/prospective validation remain unfinished.
 
 Accepted manual edits: [append-only result revisions, replay and backup requirements](docs/SPORTS_MANUAL_RESULT_HISTORY.md), development v6.0.39. Current snapshots are projections; keep the private result ledgers with backups. No deployment or improved prediction performance is claimed.
+
+Quote refresh identity: [event-bound selection, frozen models and delayed response merging](docs/SPORTS_QUOTE_REFRESH_IDENTITY.md), development v6.0.40. Seven baseline regressions reproduced; no provider credits were used by the tests. Actual host and predictive improvement remain unverified.

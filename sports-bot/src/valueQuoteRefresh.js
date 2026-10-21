@@ -1,3 +1,6 @@
+import {hasQuoteScope,quotePredictions,uniqueQuoteRows} from './quoteRefreshIdentity.js';
+import {scopedEventKey,eventReference,resolveSlateGame} from './slateEventIdentity.js';
+import {journalGameIndex} from './journalEventMatch.js';
 import {predictionHorizon} from './horizonEvaluation.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -64,6 +67,7 @@ function response(slate, status, message, extra = {}) {
 
 /** This function never calls the provider unless explicitly requested by admin. */
 export async function refreshValueQuotes(slate, options = {}) {
+  slate=structuredClone(slate||{});options={...options};
   if (options.refresh !== true) return response(slate, 'cached', 'Cached quotes; no paid refresh requested.');
   if (options.admin !== true) return response(slate, 'forbidden', 'Quote refresh is admin-only; cached quotes retained.');
   const cap = options.dailyCap ?? config.valueRefreshDailyCap;
@@ -72,11 +76,11 @@ export async function refreshValueQuotes(slate, options = {}) {
   const apiKey = String(options.oddsApiKey ?? config.oddsApiKey ?? '');
   if (!apiKey) return response(slate, 'unconfigured', 'No configured Odds API credential; cached quotes retained.');
   const now = options.now ?? Date.now();
-  const models = new Map((slate?.predictions || []).map((prediction) => [String(prediction.gameId), prediction]));
+  const models = quotePredictions(slate),gameIndex=journalGameIndex(slate?.games||[]);
   const supported = new Map(supportedLeagues().filter((league) => league.oddsKey).map((league) => [league.key, league.oddsKey]));
   const selectedLeague = options.league ? String(options.league).trim().toLowerCase() : null;
   const eligible = (slate?.games || []).filter((game) => {
-    const model = models.get(String(game.id));
+    const model = hasQuoteScope(game)&&resolveSlateGame(gameIndex,eventReference(game)).game?models.get(scopedEventKey(eventReference(game))):null;
     const modelAsOf = Date.parse(model?.modelAsOf || model?.predictionGeneratedAt || '');
     return game.statusKey === 'scheduled' && Date.parse(game.startTime) > now && supported.has(game.leagueKey) &&
       model?.predictionMode === 'pregame' && Number.isFinite(modelAsOf) && modelAsOf <= now && now - modelAsOf <= MAX_MODEL_AGE_MS &&
@@ -84,7 +88,7 @@ export async function refreshValueQuotes(slate, options = {}) {
   }).sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
   if (!eligible.length) return response(slate, 'no_eligible_games', 'No selected future games have a verified model snapshot from the past six hours. Refresh the model slate first; no paid call made.');
   const league = eligible[0].leagueKey;
-  const games = eligible.filter((game) => game.leagueKey === league).slice(0, 25);
+  const games = [...new Map(eligible.filter((game) => game.leagueKey === league).map(game=>[scopedEventKey(eventReference(game)),game])).values()].slice(0, 25);
   let budget;
   try {
     budget = await claimValueRefresh({ now, dailyCap: cap, cooldownMinutes: options.cooldownMinutes ?? config.valueRefreshCooldownMinutes, directory: options.directory ?? dataDir });
@@ -113,17 +117,18 @@ export async function refreshValueQuotes(slate, options = {}) {
   const issuedAt = new Date(options.now ?? Date.now()).toISOString();
   const updated = new Map();
   for (const game of games) {
+    if(Date.parse(game.startTime)<=Date.parse(issuedAt))continue;
     const event = matchingOddsEvent(game, result.json);
     if (!event) continue;
     const h2h = bestH2HMarket(event.bookmakers, game);
     if (!h2h.away || !h2h.home || !h2h.bookmakerCount) continue;
-    updated.set(String(game.id), { ...game, odds: { eventId: event.id, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });
+    updated.set(scopedEventKey(eventReference(game)), { ...game, odds: { eventId: event.id, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });
   }
-  if (!updated.size) return response(slate, 'unmatched', `New ${league} h2h response matched no complete markets; cached quotes retained. Slot ${budget.used}/${budget.cap} used.`, { budget, externalCalls: 1 });
-  const nextGames = (slate.games || []).map((game) => updated.get(String(game.id)) || game);
+  if (!updated.size) return response(slate, 'unmatched', `New ${league} h2h response matched no complete future markets; cached quotes retained. Slot ${budget.used}/${budget.cap} used.`, { budget, externalCalls: 1 });
+  const nextGames = (slate.games || []).map((game) => updated.get(scopedEventKey(eventReference(game))) || game);
   const snapshots = [];
-  const predictions = (slate.predictions || []).map((prediction) => {
-    const game = updated.get(String(prediction.gameId));
+  const predictions = uniqueQuoteRows(slate.predictions || []).map((prediction) => {
+    const game = hasQuoteScope(prediction)&&models.has(scopedEventKey(prediction))?updated.get(scopedEventKey(prediction)):null;
     if (!game) return prediction;
     const modelAsOf = prediction.modelAsOf || prediction.predictionGeneratedAt;
     const refreshed = refreshPredictionValue({ ...prediction, modelAsOf }, game, Date.parse(issuedAt));
@@ -134,7 +139,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     snapshots.push({ ...refreshed, originalForecastHorizon: predictionHorizon({...prediction,minutesToStart:(Date.parse(prediction.startTime||game.startTime)-Date.parse(prediction.predictionGeneratedAt))/60000}), originalForecastGeneratedAt: prediction.predictionGeneratedAt, predictionGeneratedAt: issuedAt, quoteRefreshOnly: true, eligibleForCalibration: false, snapshotStage: 'quote-refresh' });
     return refreshed;
   });
-  const fresh = predictions.filter((row) => updated.has(String(row.gameId))).some((row) => row.valueAnalysis.outcomes.some((outcome) => outcome.quote?.fresh));
+  const fresh = predictions.filter((row) => hasQuoteScope(row)&&updated.has(scopedEventKey(row))).some((row) => row.valueAnalysis.outcomes.some((outcome) => outcome.quote?.fresh));
   const issuedSlate = { ...slate, generatedAt: issuedAt, games: nextGames, predictions: snapshots };
   const nextSlate = { ...slate, games: nextGames, predictions, lastValueQuoteRefreshAt: issuedAt };
   return response(nextSlate, fresh ? 'fresh' : 'provider_quotes_stale', `${fresh ? 'Fresh' : 'Provider returned stale/unknown-time'} ${league} h2h quotes for ${updated.size} game(s); slot ${budget.used}/${budget.cap} used. Model probabilities remain frozen (modelAsOf retained).`, { budget, externalCalls: 1, issuedSlate });
