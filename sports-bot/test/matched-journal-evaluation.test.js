@@ -88,7 +88,7 @@ test('as-of reports exclude future corrections and preserve originally available
 
 test('fresh frozen market quotes support matching without using closing prices',()=>{
   const odds={status:'available',outcomes:Object.fromEntries(['away','home'].map(side=>[side,{offeredQuotes:[{
-    bookmaker:'Fixture',priceAmerican:side==='home'?-120:120,quotedAt:'2026-10-20T17:59:00Z'
+    bookmaker:'Fixture',priceAmerican:side==='home'?-120:120,quotedAt:'2026-10-20T17:59:00Z',timestampSource:'provider_update'
   }]}]))};
   const rows=fixture('quoted',{odds,referenceBaselines:{market:{probabilities:{home:.55,away:.45,draw:0}}}});
   const matched=report(rows).byVersion['fixture-model'].market;

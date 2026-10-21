@@ -153,3 +153,28 @@ test('existing value command exposes optional explicit refresh and league select
 });
 
 test.after(async () => { await fs.rm(directory, { recursive: true, force: true }); });
+
+
+test('actual quote refresh journal events remain linked prices rather than new winner forecasts',async()=>{
+  const {recordPredictionJournal,readPredictionJournal}=await import('../src/predictionJournal.js');
+  const value=slate();value.predictions[0].modelVersion='OmniMod Evidence Ensemble v6.0.2';
+  const file=path.join(directory,'immutable-quote-events.jsonl');
+  await recordPredictionJournal(value,{file,now});
+  const changed=await refreshValueQuotes(value,options('journal-refresh',{fetchJson:async()=>providerResult()}));
+  assert.ok(changed.issuedSlate);
+  assert.equal(changed.issuedSlate.predictions[0].originalForecastGeneratedAt,modelAsOf);
+  await recordPredictionJournal(changed.issuedSlate,{file,now:now+1000,lifecycle:'prices_only'});
+  await recordPredictionJournal(changed.issuedSlate,{file,now:now+2000,lifecycle:'prices_only'});
+  let records=await readPredictionJournal(file);
+  assert.equal(records.filter(row=>row.type==='forecast').length,1);
+  assert.equal(records.filter(row=>row.type==='price_observation').length,1);
+  const issued=records.find(row=>row.type==='forecast');
+  const price=records.find(row=>row.type==='price_observation');
+  assert.equal(price.payload.sourceForecastId,issued.payload.forecastId);
+  assert.equal(issued.payload.predictionGeneratedAt,modelAsOf);
+  const foreign=structuredClone(changed.issuedSlate);foreign.predictions[0].modelVersion='unknown-model';
+  await recordPredictionJournal(foreign,{file,now:now+3000,lifecycle:'prices_only'});
+  records=await readPredictionJournal(file);
+  assert.equal(records.filter(row=>row.type==='unlinked_price_observation').length,1);
+  assert.equal(records.filter(row=>row.type==='forecast').length,1);
+});

@@ -52,6 +52,8 @@ export function summarizePredictionJournal(records = []) {
   }
   return { status: forecasts.length ? 'prospective_records_available' : 'no_prospective_forecasts',
     records: records.length, forecasts: forecasts.length,
+    priceObservations: records.filter(row => row.type === 'price_observation').length,
+    unlinkedPriceObservations: records.filter(row => row.type === 'unlinked_price_observation').length,
     deliveredForecasts: forecasts.filter(row => delivered.has(row.forecastId)).length,
     undeliveredForecasts: forecasts.filter(row => !delivered.has(row.forecastId)).length,
     legacyUnverifiedForecasts: records.filter(row => row.type === 'forecast' && row.payload.lifecycleState !== 'ISSUED').length,

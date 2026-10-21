@@ -116,7 +116,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     if (!event) continue;
     const h2h = bestH2HMarket(event.bookmakers, game);
     if (!h2h.away || !h2h.home || !h2h.bookmakerCount) continue;
-    updated.set(String(game.id), { ...game, odds: { eventId: event.id, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, provider: 'The Odds API', quoteRefreshOnly: true } });
+    updated.set(String(game.id), { ...game, odds: { eventId: event.id, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });
   }
   if (!updated.size) return response(slate, 'unmatched', `New ${league} h2h response matched no complete markets; cached quotes retained. Slot ${budget.used}/${budget.cap} used.`, { budget, externalCalls: 1 });
   const nextGames = (slate.games || []).map((game) => updated.get(String(game.id)) || game);
@@ -130,7 +130,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     refreshed.valueAnalysis.modelAsOf = modelAsOf;
     refreshed.valueAnalysis.issuedAt = issuedAt;
     refreshed.valueAnalysis.provenance = 'explicit_admin_h2h_refresh_with_frozen_model';
-    snapshots.push({ ...refreshed, predictionGeneratedAt: issuedAt, quoteRefreshOnly: true, eligibleForCalibration: false, snapshotStage: 'quote-refresh' });
+    snapshots.push({ ...refreshed, originalForecastGeneratedAt: prediction.predictionGeneratedAt, predictionGeneratedAt: issuedAt, quoteRefreshOnly: true, eligibleForCalibration: false, snapshotStage: 'quote-refresh' });
     return refreshed;
   });
   const fresh = predictions.filter((row) => updated.has(String(row.gameId))).some((row) => row.valueAnalysis.outcomes.some((outcome) => outcome.quote?.fresh));

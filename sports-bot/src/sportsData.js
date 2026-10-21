@@ -1,3 +1,4 @@
+import {normalizeOddsPrice} from './oddsPricing.js';
 import { config } from './config.js';
 import { enrichGamesAutomatically } from './autoEnrichment.js';
 import { attachAdvancedDatasetContext } from './advancedDatasets.js';
@@ -395,7 +396,7 @@ function bestQuote(quotes) {
   return [...quotes].sort((a, b) => a.rawImplied - b.rawImplied)[0] || null;
 }
 
-export function bestH2HMarket(bookmakers, game) {
+export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}) {
   const awayAliases = [normalizeName(game.away.name), normalizeName(game.away.abbr)];
   const homeAliases = [normalizeName(game.home.name), normalizeName(game.home.abbr)];
   const fairRows = [];
@@ -411,10 +412,11 @@ export function bestH2HMarket(bookmakers, game) {
     for (const outcome of market.outcomes ?? []) {
       const normalized = normalizeName(outcome.name);
       const side = awayAliases.includes(normalized) ? 'away' : homeAliases.includes(normalized) ? 'home' : /draw|tie/i.test(String(outcome.name)) ? 'draw' : '';
-      const price = finiteNumber(outcome.price);
-      const rawImplied = americanToProbability(price);
+      const normalizedPrice = normalizeOddsPrice(outcome.price, oddsFormat);
+      const price = normalizedPrice?.americanOdds ?? null;
+      const rawImplied = normalizedPrice?.impliedProbability ?? null;
       if (!side || rawImplied === null) continue;
-      book[side] = { side, bookmaker: bookmaker.title || bookmaker.key || 'Book', bookmakerKey: bookmaker.key || bookmaker.title, name: outcome.name, price, rawImplied, lastUpdate: market.last_update || bookmaker.last_update || '', timestampSource: market.last_update ? 'provider_update' : 'bookmaker_update_unverified' };
+      book[side] = { side, bookmaker: bookmaker.title || bookmaker.key || 'Book', bookmakerKey: bookmaker.key || bookmaker.title, name: outcome.name, price, originalPrice: normalizedPrice.originalPrice, originalFormat: normalizedPrice.originalFormat, rawImplied, lastUpdate: market.last_update || bookmaker.last_update || '', timestampSource: market.last_update ? 'provider_update' : 'bookmaker_update_unverified' };
     }
     if (!book.away || !book.home) continue;
     if (twoWay ? Boolean(book.draw) : !book.draw) continue;

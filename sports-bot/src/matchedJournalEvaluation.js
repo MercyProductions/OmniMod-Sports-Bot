@@ -1,3 +1,4 @@
+import {quotePrice,quoteTimestampVerified} from './oddsPricing.js';
 import {finiteNumber} from './dataValidation.js';
 
 const SIDES=['away','home','draw'];
@@ -23,7 +24,7 @@ function vector(raw,scale=1){
 function marketVerified(row){
   const market=vector(row.referenceBaselines?.market?.probabilities),generated=time(row.predictionGeneratedAt);
   return market&&SIDES.filter(side=>market[side]>0).every(side=>(row.odds?.outcomes?.[side]?.offeredQuotes||[])
-    .some(quote=>quote.bookmaker&&finiteNumber(quote.priceAmerican)!==null&&Math.abs(quote.priceAmerican)>=100
+    .some(quote=>quote.bookmaker&&quotePrice(quote)&&quoteTimestampVerified(quote)
       &&Number.isFinite(time(quote.quotedAt))&&time(quote.quotedAt)<=generated&&generated-time(quote.quotedAt)<=30*60000));
 }
 

@@ -21,3 +21,5 @@ Per-game evidence continuation: [frozen coverage and v6.0.2 corrections](SPORTS_
 Matched evaluation continuation: [paired game-weighted comparisons](SPORTS_MATCHED_EVALUATION.md), 157 passing Sports tests and syntax checks. Reference-population and repeated-horizon counting defects corrected; real matched accuracy improvement remains unverified.
 
 Model-selection continuation: [exact ML artifacts and preregistered holdout review](SPORTS_SELECTION_PROTOCOL.md), 167 passing tests and syntax checks. Stored-fit mismatch and retrospective-production provenance defects repaired; runtime automatic promotion disabled. No real trial or improved accuracy claim; hybrid governance and feature-learning chronology remain open.
+
+Original-price research continuation: [frozen offers and cost sensitivity](SPORTS_PRICE_RESEARCH.md), 178 passing Sports tests and syntax checks. Missing timestamp provenance and malformed probability vectors now fail closed; price refreshes have separate journal records. Zero eligible local price scenarios; actual settlement, execution and prospective costed performance remain unverified.

@@ -1,3 +1,4 @@
+import {recordPredictionJournal} from './predictionJournal.js';
 import {
   Client,
   EmbedBuilder,
@@ -1048,6 +1049,7 @@ async function handleSportsCommand(interaction) {
       quoteStatus = refreshed.message;
       if (refreshed.issuedSlate) {
         // Issued price decisions get new timestamps; frozen model forecasts do not.
+        await recordPredictionJournal(refreshed.issuedSlate, { lifecycle: 'prices_only' });
         await recordSlateSnapshot(refreshed.issuedSlate);
         const latest = await readDailyCache(cached.dateKey, guildId) || cached;
         const newOdds = new Map(refreshed.issuedSlate.games.map((game) => [String(game.id), game.odds]));
