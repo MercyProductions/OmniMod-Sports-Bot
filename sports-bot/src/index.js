@@ -9,7 +9,7 @@ import { buildCommands } from './commands.js';
 import { formatValueDetails, refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
 import { refreshValueQuotes } from './valueQuoteRefresh.js';
 import { buildDailySlate, refreshFinalGrades, supportedLeagues } from './sportsData.js';
-import { duePregameRefreshes, completePregameRefreshAttempt, nextPregameRefresh } from './pregameRefresh.js';
+import { duePregameRefreshes, completeAndJournalPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
 import { recordSlateSnapshot } from './featureWarehouse.js';
 import { pendingFinalDateKeys } from './finalReconciliation.js';
 import { localDateKey, isDailyPostTime } from './time.js';
@@ -413,7 +413,7 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
     });
     const refreshedAt = nowLabel();
     const latest = await readDailyCache(dateKey, guildId) || cached;
-    const attempt = completePregameRefreshAttempt(latest, {
+    const attempt = await completeAndJournalPregameRefresh(latest, {
       ...slate,
       guildId,
       messageId: cached.messageId || '',
@@ -423,6 +423,10 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
       providerDailyUsage: cached.providerDailyUsage || null
     }, due, attemptedAt, refreshedAt);
     const durable = attempt.slate;
+    if (config.featureWarehouseEnabled && attempt.completed.length) {
+      const accepted = new Set(attempt.completed.map(row => String(row.gameId)));
+      await recordSlateSnapshot({ ...durable, predictions: durable.predictions.filter(row => accepted.has(String(row.gameId))) });
+    }
     await writeDailyCache(dateKey, durable, guildId);
     if (!attempt.completed.length) {
       runtimeState.nextPregameRefreshAt = nextPregameRefresh(durable, new Date(), { windows: config.pregameRefreshWindows })?.dueAt || '';

@@ -13,3 +13,5 @@
 | Production provider/Discord migration | Pending | Development review and operational validation required; no deployment performed. |
 
 See [the audit](SPORTS_ACCURACY_AUDIT.md) for changed modules, known limitations and validation priorities, and [prediction records](PREDICTION_RECORDS.md) for evidence/recovery procedures. Verified implementation does not mean verified profitability.
+
+Continuation: [prediction lifecycle reliability](SPORTS_RELIABILITY_CONTINUATION.md) records the confirmed targeted-refresh ordering defect, its issuance barrier, append-only lifecycle, and 139-test verification. The broader coverage, matched-accuracy, selection/value and prospective operational phases remain unfinished; no deployment or model promotion occurred.

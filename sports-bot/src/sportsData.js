@@ -843,7 +843,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     source: localOnly
       ? 'Local schedule, team/player/context database, and imported history'
       : includeOdds ? 'Cached schedules/history/box scores/lineups + official corroboration + local overrides + optional de-vigged market consensus' : 'Cached schedules/history/box scores/lineups + official corroboration + local overrides + durable market snapshot',
-    disclaimer: 'Probabilistic research only—not a guarantee or wagering advice. Confidence must be validated against the bot’s calibration report.',
+    disclaimer: 'Probabilistic research onlyâ€”not a guarantee or wagering advice. Confidence must be validated against the botâ€™s calibration report.',
     games,
     predictions,
     modelSummary: {
@@ -937,8 +937,9 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     channelId: options.cachedSlate?.channelId || '',
     finalReplies
   };
-  await recordPredictionJournal(slate);
-  if (config.featureWarehouseEnabled) await recordSlateSnapshot(slate);
+  await recordPredictionJournal(slate, { lifecycle: options.targetedPregame ? 'provisional' : 'issued' });
+  // Targeted refreshes are not learner evidence until the caller validates completion.
+  if (config.featureWarehouseEnabled && !options.targetedPregame) await recordSlateSnapshot(slate);
   return slate;
 }
 
@@ -970,7 +971,7 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
     diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.'],
     alerts: [], newFinals: finals };
   // Save outcomes before Discord delivery: a transport failure cannot erase the result observation.
-  await recordPredictionJournal(refreshed);
+  await recordPredictionJournal(refreshed, { lifecycle: 'results_only' });
   if (config.featureWarehouseEnabled) await recordSlateSnapshot(refreshed);
   return refreshed;
 }

@@ -85,18 +85,21 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
 }
 
 /** Mandatory prospective audit trail, independent of optional warehouse retention. */
-export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now() } = {}) {
+export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now(), lifecycle = 'issued', reason = '' } = {}) {
   const operation = writeChain.then(async () => {
     if (!Number.isFinite(now)) throw new Error('A valid journal observation time is required.');
+    if (!['provisional', 'issued', 'rejected', 'delivered', 'results_only'].includes(lifecycle)) throw new Error('Invalid forecast lifecycle operation.');
     await mkdir(dirname(file), { recursive: true });
     let lock;
     try { lock = await open(`${file}.lock`, 'wx', 0o600); }
     catch (error) { if (error.code === 'EEXIST') throw new Error('Prediction journal is locked; do not remove an active owner lock.'); throw error; }
     try {
       await lock.writeFile(JSON.stringify({ pid: process.pid, host: hostname(), acquiredAt: new Date(now).toISOString() }) + '\n');
-      const records = await readPredictionJournal(file), forecasts = new Map(), results = new Map(), observations = new Set();
+      const records = await readPredictionJournal(file), forecasts = new Map(), results = new Map(), observations = new Set(), provisional = new Map(), states = new Map();
       for (const row of records) {
         if (row.type === 'forecast') forecasts.set(row.payload.forecastId, row.payload);
+        if (row.type === 'provisional_forecast') provisional.set(row.payload.forecastId, row.payload);
+        if (row.type === 'forecast_lifecycle') states.set(`${row.payload.forecastId}:${row.payload.state}`, row.payload);
         if (row.type === 'unverifiable_observation') observations.add(row.payload.forecastId);
         if (row.type === 'result') results.set(row.payload.forecastId, row.payload);
       }
@@ -106,17 +109,47 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         const body = { schemaVersion: 1, sequence: ++sequence, previousHash, recordedAt: new Date(now).toISOString(), type, payload };
         const row = { ...body, eventHash: digest(body) }; pending.push(row); previousHash = row.eventHash;
       };
+      const transition = (forecastId, state, details = {}) => {
+        const key = `${forecastId}:${state}`;
+        if (!states.has(key)) {
+          const payload = { forecastId, state, ...details };
+          add('forecast_lifecycle', payload); states.set(key, payload);
+        }
+      };
       const gameMap = new Map((slate.games || []).map(game => [String(game.id), game]));
       for (const prediction of slate.predictions || []) {
-        if (prediction.quoteRefreshOnly) continue;
+        if (prediction.quoteRefreshOnly || lifecycle === 'results_only') continue;
         const game = gameMap.get(String(prediction.gameId)) || {};
         const snapshot = forecastSnapshot(prediction, game, slate, now);
-        const original = forecasts.get(snapshot.forecastId);
-        if (!original && !observations.has(snapshot.forecastId)) {
-          if (snapshot.recordEligibility === 'observed_pregame') {
-            add('forecast', snapshot); forecasts.set(snapshot.forecastId, snapshot);
-          } else { add('unverifiable_observation', snapshot); observations.add(snapshot.forecastId); }
+        const id = snapshot.forecastId, original = forecasts.get(id);
+        if (lifecycle === 'delivered') {
+          if (original && slate.messageId && slate.channelId) transition(id, 'DELIVERED', {
+            messageId: String(slate.messageId), channelId: String(slate.channelId) });
+          continue;
         }
+        if (original || observations.has(id)) continue;
+        if (!provisional.has(id)) {
+          add('provisional_forecast', { ...snapshot, lifecycleState: 'PROVISIONAL' });
+          provisional.set(id, pending.at(-1).payload);
+        }
+        if (lifecycle === 'provisional') continue;
+        if (lifecycle === 'rejected') {
+          transition(id, 'REJECTED', { reason: String(reason || 'refresh_validation_failed').slice(0, 240) });
+          continue;
+        }
+        if (states.has(`${id}:REJECTED`)) continue;
+        const frozen = provisional.get(id);
+        if (digest(frozen.outcomePercentages) !== digest(snapshot.outcomePercentages)) {
+          transition(id, 'REJECTED', { reason: 'probabilities_changed_without_new_forecast_identity' });
+          continue;
+        }
+        if (frozen.recordEligibility === 'observed_pregame' && snapshot.recordEligibility === 'observed_pregame') {
+          transition(id, 'VALIDATED');
+          const issued = { ...frozen, lifecycleState: 'ISSUED',
+            issuanceScope: 'Validated issued forecast; Discord delivery requires a separate lifecycle acknowledgement.' };
+          add('forecast', issued); forecasts.set(id, issued);
+        } else { add('unverifiable_observation', snapshot); observations.add(id); }
+
       }
       // Resolve every frozen horizon/version for this event, not only the
       // latest prediction still displayed in the mutable daily slate.
@@ -134,6 +167,7 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         const prior = results.get(issued.forecastId);
         if (!prior || prior.actualSide !== actualSide || prior.awayScore !== payload.awayScore || prior.homeScore !== payload.homeScore) {
           add('result', { ...payload, revision: (prior?.revision || 0) + 1 }); results.set(issued.forecastId, pending.at(-1).payload);
+          transition(issued.forecastId, 'GRADED');
         }
       }
       if (pending.length) {

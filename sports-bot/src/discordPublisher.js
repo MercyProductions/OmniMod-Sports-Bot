@@ -1,3 +1,4 @@
+import { recordPredictionJournal } from './predictionJournal.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -175,7 +176,7 @@ function predictionField(prediction, game = null) {
     ? `\nFinal: ${compactText(prediction.finalScore, 60, 'score unavailable')} | ${prediction.predictionCorrect === true ? 'Correct' : prediction.predictionCorrect === false ? 'Missed' : 'Not eligible for grading'}`
     : '';
   const uncertainty = Number.isFinite(Number(prediction.predictionUncertaintyPoints))
-    ? ` | Unc: ±${Number(prediction.predictionUncertaintyPoints).toFixed(1)}pt`
+    ? ` | Unc: Ã‚Â±${Number(prediction.predictionUncertaintyPoints).toFixed(1)}pt`
     : '';
   const qualityNote = prediction.recommendationStatus === 'withheld'
     ? `\nHigh uncertainty: ${compactText(prediction.abstentionReason, 170, 'The leading outcome did not clear the uncertainty and evidence checks.')}`
@@ -338,11 +339,13 @@ export async function postDailySlate(client, slate, options = {}) {
 
   let message = null;
   let created = false;
+  let payloadWritten = false;
   if (!options.forceNew && slate.messageId && slate.channelId) {
     try {
       const channel = await client.channels.fetch(slate.channelId);
       const existing = await channel.messages.fetch(slate.messageId);
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
+      payloadWritten = options.reuseExisting === false;
     } catch {
       message = null;
     }
@@ -354,12 +357,14 @@ export async function postDailySlate(client, slate, options = {}) {
     const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id);
     if (existing) {
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
+      payloadWritten = options.reuseExisting === false;
     }
   }
 
   if (!message) {
     message = await resources.sportsChannel.send(payload);
     created = true;
+    payloadWritten = true;
   }
 
   const updated = {
@@ -374,6 +379,7 @@ export async function postDailySlate(client, slate, options = {}) {
   if (created) {
     await logBotEvent(client, `Posted OmniMod Sports slate ${updated.dateKey} with ${updated.predictions.length} prediction(s).`, updated.guildId);
   }
+  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: (updated.predictions || []).slice(0, 25) }, { lifecycle: 'delivered' });
   return updated;
 }
 

@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordPredictionJournal, readPredictionJournal } from '../src/predictionJournal.js';
-import { completePregameRefreshAttempt, duePregameRefreshes } from '../src/pregameRefresh.js';
+import { recordPredictionJournal, readPredictionJournal as readFullPredictionJournal } from '../src/predictionJournal.js';
+import { completePregameRefreshAttempt, completeAndJournalPregameRefresh, duePregameRefreshes } from '../src/pregameRefresh.js';
 import { selectCandidateCohort } from '../src/candidateCohorts.js';
 import { evaluateCandidateModels, applyCandidateDecision } from '../src/modelRegistry.js';
 import { summarizePredictionJournal } from '../src/journalEvaluation.js';
+
+// Existing scoring assertions inspect eligible forecasts/results; the full reader still checks every hash-chain event.
+const readPredictionJournal = async file => (await readFullPredictionJournal(file)).filter(row => !['provisional_forecast', 'forecast_lifecycle'].includes(row.type));
 
 const now = Date.parse('2026-10-20T18:00:00Z');
 const time = offset => new Date(now + offset).toISOString();
@@ -163,4 +166,69 @@ test('audit summary separates unresolved rows and scores each version on matched
   assert.equal(version.referenceComparisons.elo.primaryOnMatchedGames.overall.sampleSize, 1);
   assert.equal(version.referenceComparisons.elo.referenceOnMatchedGames.overall.sampleSize, 1);
   assert.equal(version.referenceComparisons.market.referenceOnMatchedGames.overall.sampleSize, 0);
+});
+
+
+test('stale targeted refresh stays provisional/rejected and cannot enter eligible cohorts on retry', async t => {
+  const file = await fixture(t), previous = slate(), rebuilt = slate();
+  rebuilt.predictions[0].predictionGeneratedAt = time(700);
+  rebuilt.games[0].autoEnrichment.cacheState = 'stale';
+  await recordPredictionJournal(rebuilt, { file, now: now + 1000, lifecycle: 'provisional' });
+  assert.equal(summarizePredictionJournal(await readFullPredictionJournal(file)).forecasts, 0);
+  const attempt = await completeAndJournalPregameRefresh(previous, rebuilt,
+    [{ gameId: 'game', dueWindows: [30] }], time(0), time(1000), { file });
+  assert.equal(attempt.completed.length, 0);
+  await recordPredictionJournal(rebuilt, { file, now: now + 1200 });
+  const rows = await readFullPredictionJournal(file);
+  assert.deepEqual(rows.map(r => r.type), ['provisional_forecast', 'forecast_lifecycle']);
+  assert.equal(rows[1].payload.state, 'REJECTED');
+  assert.equal(summarizePredictionJournal(rows).forecasts, 0);
+});
+
+test('valid refresh issues before transport, then delivery and grading append immutable lifecycle evidence', async t => {
+  const file = await fixture(t), previous = slate(), rebuilt = slate();
+  rebuilt.games[0].autoEnrichment.fetchedAt = time(500);
+  rebuilt.predictions[0].predictionGeneratedAt = time(700);
+  await recordPredictionJournal(rebuilt, { file, now: now + 800, lifecycle: 'provisional' });
+  await completeAndJournalPregameRefresh(previous, rebuilt, [{gameId:'game',dueWindows:[30]}], time(0), time(1000), {file});
+  let rows = await readFullPredictionJournal(file);
+  assert.deepEqual(rows.map(r=>r.type), ['provisional_forecast','forecast_lifecycle','forecast']);
+  assert.equal(rows[1].payload.state, 'VALIDATED');
+  assert.equal(rows[2].payload.lifecycleState, 'ISSUED');
+  // Transport failure sends no acknowledgement; issued forecasts survive a fresh module instance.
+  const restarted = await import('../src/predictionJournal.js?restart-lifecycle');
+  await restarted.recordPredictionJournal(rebuilt, {file,now:now+1100});
+  assert.equal(summarizePredictionJournal(await readFullPredictionJournal(file)).undeliveredForecasts,1);
+  rebuilt.messageId='message';rebuilt.channelId='channel';
+  await restarted.recordPredictionJournal(rebuilt,{file,now:now+1200,lifecycle:'delivered'});
+  await restarted.recordPredictionJournal(rebuilt,{file,now:now+1300,lifecycle:'delivered'});
+  rebuilt.games[0].statusKey='final';rebuilt.games[0].home.score=100;rebuilt.games[0].away.score=90;
+  await restarted.recordPredictionJournal(rebuilt,{file,now:now+7200000,lifecycle:'results_only'});
+  rows=await readFullPredictionJournal(file);
+  assert.equal(rows.filter(r=>r.type==='forecast').length,1);
+  assert.equal(rows.filter(r=>r.payload.state==='DELIVERED').length,1);
+  assert.equal(rows.filter(r=>r.payload.state==='GRADED').length,1);
+  assert.equal(rows.find(r=>r.type==='forecast').payload.outcomePercentages.home,65);
+  assert.equal(summarizePredictionJournal(rows).gradedForecasts,1);
+});
+
+test('canceled, postponed and expired refreshes remain outside forecast performance cohorts',async t=>{
+  for(const status of ['canceled','postponed','expired']) {
+    const file=(await fixture(t))+status, value=slate();
+    value.games[0].autoEnrichment.fetchedAt=time(500);value.predictions[0].predictionGeneratedAt=time(700);
+    if(status==='expired')value.games[0].startTime=time(900);else value.games[0].statusKey=status;
+    await recordPredictionJournal(value,{file,now:now+800,lifecycle:'provisional'});
+    const result=await completeAndJournalPregameRefresh(slate(),value,[{gameId:'game',dueWindows:[10]}],time(0),time(1000),{file});
+    assert.equal(result.completed.length,0);assert.equal(summarizePredictionJournal(await readFullPredictionJournal(file)).forecasts,0);
+  }
+});
+
+test('provisional probability mutation requires a new forecast identity and legacy records are unverified',async t=>{
+  const file=await fixture(t),value=slate();
+  await recordPredictionJournal(value,{file,now,lifecycle:'provisional'});
+  value.predictions[0].outcomeProbabilities={home:90,away:10,draw:0};
+  await recordPredictionJournal(value,{file,now:now+1000});
+  assert.equal(summarizePredictionJournal(await readFullPredictionJournal(file)).forecasts,0);
+  const legacy=summarizePredictionJournal([{type:'forecast',payload:{forecastId:'legacy'}}]);
+  assert.equal(legacy.legacyUnverifiedForecasts,1);assert.equal(legacy.forecasts,0);
 });

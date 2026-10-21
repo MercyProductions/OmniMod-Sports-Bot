@@ -6,7 +6,8 @@ function selectedSide(vector) {
 }
 
 export function summarizePredictionJournal(records = []) {
-  const forecasts = records.filter(row => row.type === 'forecast').map(row => row.payload);
+  const forecasts = records.filter(row => row.type === 'forecast' && row.payload.lifecycleState === 'ISSUED').map(row => row.payload);
+  const delivered = new Set(records.filter(row => row.type === 'forecast_lifecycle' && row.payload.state === 'DELIVERED').map(row => row.payload.forecastId));
   const results = new Map(records.filter(row => row.type === 'result').map(row => [row.payload.forecastId, row.payload]));
   const versions = [...new Set(forecasts.map(row => row.modelVersion))].sort();
   const byVersion = {};
@@ -44,6 +45,11 @@ export function summarizePredictionJournal(records = []) {
   }
   return { status: forecasts.length ? 'prospective_records_available' : 'no_prospective_forecasts',
     records: records.length, forecasts: forecasts.length,
+    deliveredForecasts: forecasts.filter(row => delivered.has(row.forecastId)).length,
+    undeliveredForecasts: forecasts.filter(row => !delivered.has(row.forecastId)).length,
+    legacyUnverifiedForecasts: records.filter(row => row.type === 'forecast' && row.payload.lifecycleState !== 'ISSUED').length,
+    provisionalObservations: records.filter(row => row.type === 'provisional_forecast').length,
+    rejectedObservations: records.filter(row => row.type === 'forecast_lifecycle' && row.payload.state === 'REJECTED').length,
     unverifiableObservations: records.filter(row => row.type === 'unverifiable_observation').length,
     forecastsWithOdds: forecasts.filter(row => row.odds.status === 'available').length,
     gradedForecasts: forecasts.filter(row => results.has(row.forecastId)).length,
@@ -51,7 +57,7 @@ export function summarizePredictionJournal(records = []) {
     limitations: [
       'Descriptive frozen-forecast scores; no improvement or profitability conclusion is inferred.',
       'Models/versions/horizons and matched reference populations are explicit. Different horizon groups remain correlated.',
-      'Discord delivery is not attested. Observed prices do not establish a wager, fee model, fill or settlement payout.',
+      'Delivery requires a successful payload-write acknowledgement; existing-message recovery alone does not attest new forecast delivery. Observed prices do not establish a wager, fill or settlement payout.',
       'Historical v6.0.0 comparison needs matching point-in-time datasets; missing archives are not reconstructed.'
     ] };
 }

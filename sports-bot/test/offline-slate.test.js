@@ -188,3 +188,25 @@ test('corrupt intelligence JSON fails closed instead of being silently overwritt
 test.after(async () => {
   await fs.rm(testDataDir, { recursive: true, force: true });
 });
+
+
+test('actual targeted slate builder journals provisionally until the scheduler accepts fresh evidence', async () => {
+  const { readPredictionJournal, predictionJournalFile } = await import('../src/predictionJournal.js');
+  const { completeAndJournalPregameRefresh } = await import('../src/pregameRefresh.js');
+  const id='targeted-journal-integration';
+  await importIntelligence(id, { games: [{ id, dateKey:'2099-02-01',startTime:'2099-02-01T19:00:00-06:00',
+    league:'NBA',leagueKey:'nba',sportGroup:'Basketball',awayTeam:'Integration Away',homeTeam:'Integration Home' }] }, {actor:'test'});
+  const before=new Date().toISOString();
+  const rebuilt=await buildDailySlate(new Date('2099-02-01T18:00:00Z'),{guildId:id,localOnly:true,targetedPregame:true,refreshGameIds:[id]});
+  assert.equal(rebuilt.predictions.length,1);
+  let records=(await readPredictionJournal()).filter(row=>row.payload.guildId===id);
+  assert.equal(records.filter(row=>row.type==='forecast').length,0);
+  assert.equal(records.filter(row=>row.type==='provisional_forecast').length,1);
+  const attempt=await completeAndJournalPregameRefresh({},rebuilt,[{gameId:id,dueWindows:[30]}],before,new Date().toISOString());
+  assert.equal(attempt.completed.length,0);
+  const all=await readPredictionJournal(predictionJournalFile);
+  const forecastIds=new Set(records.map(row=>row.payload.forecastId));
+  records=all.filter(row=>forecastIds.has(row.payload.forecastId));
+  assert.equal(records.filter(row=>row.type==='forecast').length,0);
+  assert.ok(records.some(row=>row.type==='forecast_lifecycle'&&row.payload.state==='REJECTED'));
+});

@@ -1,3 +1,4 @@
+import { recordPredictionJournal } from './predictionJournal.js';
 function finiteTime(value) {
   const time = new Date(value || '').getTime();
   return Number.isFinite(time) ? time : null;
@@ -102,4 +103,17 @@ export function nextPregameRefresh(slate = {}, now = new Date(), options = {}) {
     }
   }
   return best;
+}
+
+/** Commit eligible refreshed forecasts only after the same completion gate used by the scheduler. */
+export async function completeAndJournalPregameRefresh(previous, rebuilt, due, attemptedAt, completedAt, journalOptions = {}) {
+  const attempt = completePregameRefreshAttempt(previous, rebuilt, due, attemptedAt, completedAt);
+  const completed = new Set(attempt.completed.map(row => String(row.gameId)));
+  const rejected = new Set(attempt.rejected.map(row => String(row.gameId)));
+  const subset = ids => ({ ...rebuilt, predictions: (rebuilt.predictions || []).filter(row => ids.has(String(row.gameId))) });
+  const now = Date.parse(completedAt);
+  await recordPredictionJournal(subset(rejected), { ...journalOptions, now, lifecycle: 'rejected',
+    reason: 'fresh_summary_and_new_pregame_forecast_not_verified' });
+  await recordPredictionJournal(subset(completed), { ...journalOptions, now, lifecycle: 'issued' });
+  return attempt;
 }
