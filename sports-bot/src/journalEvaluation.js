@@ -1,3 +1,4 @@
+import {auditJournalForecastIdentities} from './journalForecastIdentity.js';
 import {quoteTimeEpoch as instant} from './oddsPricing.js';
 import {eventObservationHash} from './journalEventMatch.js';
 import {journalOutcomeVector} from './journalOutcomeSpace.js';
@@ -16,13 +17,19 @@ const gameKey = row => JSON.stringify([String(row.league || row.leagueKey || '')
 export function summarizePredictionJournal(input = [], {asOf=Date.now()} = {}) {
   if (!Number.isFinite(asOf) || !Number.isFinite(new Date(asOf).getTime())) throw new Error('A valid summary cutoff is required');
   const records = input.filter(row => Number.isFinite(instant(row.recordedAt)) && instant(row.recordedAt) <= asOf);
-  const issueTimes = new Map(records.filter(row => row.type === 'forecast').map(event => [event.payload,instant(event.recordedAt)]));
-  const eligibleIssue = row => row.recordEligibility === 'observed_pregame' && Number.isFinite(instant(row.predictionGeneratedAt))
+  const identities = auditJournalForecastIdentities(records);
+  const issueTimes = new Map(), identityRows = new Set(), consumed = new Set();
+  const forecastRows = records.filter(event => event.type === 'forecast').map(event => {
+    const row = {...event.payload}; issueTimes.set(row,instant(event.recordedAt));
+    if (identities.canonicalEvents.has(event) && !consumed.has(event)) { identityRows.add(row); consumed.add(event); }
+    return row;
+  });
+  const eligibleIssue = row => identityRows.has(row) && row.recordEligibility === 'observed_pregame' && Number.isFinite(instant(row.predictionGeneratedAt))
     && Number.isFinite(instant(row.startTime)) && instant(row.predictionGeneratedAt) <= issueTimes.get(row)
     && issueTimes.get(row) < instant(row.startTime) && row.gameId != null && String(row.gameId).trim()
     && row.league && row.modelVersion && row.horizon;
   const undatedLegacy = input.filter(row => row.type === 'forecast' && row.payload.lifecycleState !== 'ISSUED' && !Number.isFinite(instant(row.recordedAt))).length;
-  const forecasts = records.filter(row => row.type === 'forecast' && row.payload.lifecycleState === 'ISSUED').map(row => row.payload);
+  const forecasts = forecastRows.filter(row => row.lifecycleState === 'ISSUED');
   const delivered = new Set(records.filter(row => row.type === 'forecast_lifecycle' && row.payload.state === 'DELIVERED').map(row => row.payload.forecastId));
   const resultState = journalResultState(records);
   const results = new Map([...resultState.eligible].map(([id,event])=>[id,event.payload]));
@@ -50,7 +57,8 @@ export function summarizePredictionJournal(input = [], {asOf=Date.now()} = {}) {
   const byVersion = {};
   for (const version of versions) {
     const versionRows = forecasts.filter(row => row.modelVersion === version);
-    const eligibleRows = versionRows.filter(eligibleIssue);
+    const canonicalRows = versionRows.filter(row => identityRows.has(row));
+    const eligibleRows = canonicalRows.filter(eligibleIssue);
     const resolved = eligibleRows.filter(validResult);
     const outcomeValid = resolved.filter(row => journalOutcomeVector(row));
     const graded = outcomeValid.filter(row => allowedEvent(row) && validSelection(row));
@@ -84,7 +92,7 @@ export function summarizePredictionJournal(input = [], {asOf=Date.now()} = {}) {
       };
     }
     byVersion[version] = {
-      forecasts: versionRows.length, eligibleIssuedForecasts: eligibleRows.length, invalidIssuance: versionRows.length - eligibleRows.length,
+      forecasts: versionRows.length, eligibleIssuedForecasts: eligibleRows.length, invalidIssuance: canonicalRows.length - eligibleRows.length, forecastIdentityExclusions:versionRows.length - canonicalRows.length,
       graded: resolved.length, unresolved: eligibleRows.length - resolved.length,
       scorableForecasts: graded.length, invalidOrUnverifiedOutcomeSpace: resolved.length - outcomeValid.length,
       invalidResultChronology: eligibleRows.filter(row => results.has(row.forecastId) && !validResult(row)).length,
@@ -98,12 +106,13 @@ export function summarizePredictionJournal(input = [], {asOf=Date.now()} = {}) {
       referenceComparisons: baselineComparisons
     };
   }
-  return { schema:'sports-journal-summary-v2',asOf:new Date(asOf).toISOString(),inputRecords:input.length,
+  return { schema:'sports-journal-summary-v2',
+    conflictingForecastIds:identities.conflictingIds.size,duplicateForecastRecords:identities.duplicateRecords,unverifiableForecastIds:identities.invalidIdRecords,asOf:new Date(asOf).toISOString(),inputRecords:input.length,
     unverifiableRecordTimes: input.filter(row => !Number.isFinite(instant(row.recordedAt))).length,
     futureRecords:input.filter(row => Number.isFinite(instant(row.recordedAt)) && instant(row.recordedAt) > asOf).length,
     conflictingResultEvents:conflictingEvents.size, disputedResultEvents:disputedEvents.size,
     status: forecasts.length ? 'prospective_records_available' : 'no_prospective_forecasts',
-    records: records.length, forecasts: forecasts.length,
+    records: records.length, forecasts: forecasts.length,eligibleIssuedForecasts:eligibleForecasts.length,
     priceObservations: records.filter(row => row.type === 'price_observation').length,
     unlinkedPriceObservations: records.filter(row => row.type === 'unlinked_price_observation').length,
     deliveredForecasts: forecasts.filter(row => delivered.has(row.forecastId)).length,

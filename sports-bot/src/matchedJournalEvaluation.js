@@ -1,3 +1,5 @@
+import {auditJournalForecastIdentities} from './journalForecastIdentity.js';
+import {quoteTimeEpoch as time} from './oddsPricing.js';
 import {validCandidateVector} from './candidateCohorts.js';
 import { probabilityLogLoss } from './probabilityLogLoss.js';
 import {journalOutcomeVector} from './journalOutcomeSpace.js';
@@ -7,7 +9,6 @@ import {finiteNumber} from './dataValidation.js';
 
 const SIDES=['away','home','draw'];
 const COMPARATORS=['evidence','hybrid','specialist','ml','elo','market'];
-const time=value=>Date.parse(value||'');
 const mean=values=>values.reduce((a,b)=>a+b,0)/values.length;
 const winner=vector=>SIDES.filter(side=>vector[side]!==undefined).sort((a,b)=>vector[b]-vector[a])[0];
 const group=(rows,key)=>{
@@ -104,18 +105,23 @@ function strata(row){
 
 /** Diagnostic-only, same-issue comparisons. Never trains, selects, promotes or writes. */
 export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=300}={}){
-  if(!Number.isFinite(asOf)||!Number.isInteger(repetitions)||repetitions<100||repetitions>2000)throw new Error('Invalid bounded evaluation settings');
+  if(!Number.isFinite(asOf)||!Number.isFinite(new Date(asOf).getTime())||!Number.isInteger(repetitions)||repetitions<100||repetitions>2000)throw new Error('Invalid bounded evaluation settings');
   const rejects={},reject=reason=>{rejects[reason]=(rejects[reason]||0)+1;};
   const visible=records.filter(event=>Number.isFinite(time(event.recordedAt))&&time(event.recordedAt)<=asOf);
   const results=new Map([...journalResultState(visible).eligible].map(([id,event])=>[id,{...event.payload,resultRecordedAt:event.recordedAt}]));
+  const identities=auditJournalForecastIdentities(visible);
+  if(identities.conflictingRecords)rejects.forecast_identity_conflict=identities.conflictingRecords;
+  if(identities.duplicateRecords)rejects.duplicate_forecast_record=identities.duplicateRecords;
+  if(identities.invalidIdRecords)rejects.forecast_identity_missing=identities.invalidIdRecords;
   const first=new Map();
-  for(const event of visible){
+  for(const event of identities.events){
     if(event.type!=='forecast')continue;
     const row=event.payload,generated=time(row.predictionGeneratedAt),issued=time(event.recordedAt),start=time(row.startTime);
     if(row.lifecycleState!=='ISSUED'||row.recordEligibility!=='observed_pregame'){reject('issuance_unverified');continue;}
     if(![generated,issued,start].every(Number.isFinite)||generated>issued||issued>=start){reject('invalid_issuance_chronology');continue;}
-    if(!row.gameId||!row.league||!row.modelVersion||!row.horizon){reject('identity_or_horizon_missing');continue;}
-    const key=JSON.stringify([row.guildId,row.league,row.gameId,row.modelVersion,row.horizon]);
+    if(!['string','number'].includes(typeof row.gameId)||(typeof row.gameId==='number'&&!Number.isFinite(row.gameId))||!String(row.gameId).trim()
+      ||typeof row.league!=='string'||!row.league.trim()||typeof row.modelVersion!=='string'||!row.modelVersion.trim()||typeof row.horizon!=='string'||!row.horizon.trim()){reject('identity_or_horizon_missing');continue;}
+    const key=JSON.stringify([row.guildId,row.league.trim().toLowerCase(),String(row.gameId),new Date(start).toISOString(),row.modelVersion,row.horizon.trim().toLowerCase()]);
     if(!first.has(key))first.set(key,row);else reject('later_same_horizon_revision_not_selected');
   }
   const eligible=[];
@@ -125,7 +131,7 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
     if(!SIDES.includes(result.actualSide)||!Number.isFinite(time(result.observedAt))||time(result.observedAt)<time(row.startTime)||time(result.observedAt)>time(result.resultRecordedAt)||result.scheduleChanged){reject('result_chronology_or_schedule_invalid');continue;}
     if(!probabilities && row.outcomePercentages?.draw == null && row.modeledOutcomes === undefined){reject('modeled_outcome_space_unverified');continue;}
     if(!probabilities||!SIDES.includes(row.selectedSide)||probabilities[row.selectedSide]!==Math.max(...Object.values(probabilities))){reject('invalid_primary_probabilities_or_pick');continue;}
-    const game=JSON.stringify([row.league,row.gameId,new Date(time(row.startTime)).toISOString()]);
+    const game=JSON.stringify([row.league.trim().toLowerCase(),String(row.gameId),new Date(time(row.startTime)).toISOString()]);
     eligible.push({row,result,probabilities,game});
   }
   const conflicts=new Set([...group(eligible,item=>item.game)].filter(([,items])=>new Set(items.map(item=>item.result.actualSide)).size>1).map(([key])=>key));
@@ -153,8 +159,8 @@ export function evaluateMatchedJournal(records=[],{asOf=Date.now(),repetitions=3
   }
   return {schema:'sports-matched-journal-v1',asOf:new Date(asOf).toISOString(),inputRecords:records.length,
     visibleRecords:visible.length,unverifiableOrFutureRecordTimes:records.length-visible.length,
-    selectedForecasts:first.size,conflictingGames:conflicts.size,rejections:rejects,byVersion:versions,
-    selectionRule:'First issued forecast per guild/event/model-version/horizon; later revisions retained in journal but not selected.',
+    selectedForecasts:first.size,conflictingForecastIds:identities.conflictingIds.size,conflictingGames:conflicts.size,rejections:rejects,byVersion:versions,
+    selectionRule:'Earliest recorded eligible forecast per guild/canonical event/model-version/horizon after ID conflict/duplicate auditing; later revisions retained but not selected.',
     weighting:'One weight per league/event/start time, shared across its guild/horizon observations; versions evaluated separately.',
     intervalMethod:`${repetitions} paired game-cluster bootstrap replicates; null below 8 games; descriptive, no multiple-testing correction`,
     scoreDefinition:'Mean-coordinate multiclass Brier; multinomial log loss clipped at 1e-12; selected-outcome calibration.',

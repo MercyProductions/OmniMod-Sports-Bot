@@ -1,3 +1,4 @@
+import { auditJournalForecastIdentities } from './journalForecastIdentity.js';
 import { probabilityLogLoss } from './probabilityLogLoss.js';
 import { journalOutcomeVector } from './journalOutcomeSpace.js';
 import { eventObservationHash } from './journalEventMatch.js';
@@ -10,8 +11,13 @@ const add = (groups, key, row) => { if (!groups.has(key)) groups.set(key, []); g
 /** Journal-only descriptive monitoring. No fitting, model selection or automatic action. */
 export function operationalDrift(issued, results, conflicts, { asOf, windowDays, minDriftGames }) {
   const exclusions = {}, skip = reason => { exclusions[reason] = (exclusions[reason] ?? 0) + 1; };
-  const identities = new Map();
-  for (const event of issued) {
+  const identityAudit = auditJournalForecastIdentities(issued);
+  if (identityAudit.conflictingRecords) exclusions.forecast_identity_conflict = identityAudit.conflictingRecords;
+  if (identityAudit.duplicateRecords) exclusions.duplicate_forecast_record = identityAudit.duplicateRecords;
+  if (identityAudit.invalidIdRecords) exclusions.identity_or_horizon_missing = identityAudit.invalidIdRecords;
+  if (identityAudit.unverifiableRecordTimes) exclusions.issuance_chronology_invalid = identityAudit.unverifiableRecordTimes;
+  const unique = [];
+  for (const event of identityAudit.events) {
     const row = event.payload, generated = instant(row.predictionGeneratedAt), at = instant(event.recordedAt), start = instant(row.startTime);
     if (!text(row.forecastId) || !text(row.league) || !text(row.modelVersion) || !text(row.horizon)
       || !['string', 'number'].includes(typeof row.gameId) || (typeof row.gameId === 'number' && !Number.isFinite(row.gameId)) || !String(row.gameId).trim()) { skip('identity_or_horizon_missing'); continue; }
@@ -19,14 +25,7 @@ export function operationalDrift(issued, results, conflicts, { asOf, windowDays,
     const league = row.league.trim().toLowerCase(), horizon = row.horizon.trim().toLowerCase();
     const game = JSON.stringify([league, String(row.gameId), new Date(start).toISOString()]);
     const item = { event, row, generated, at, start, league, horizon, game };
-    add(identities, row.forecastId, item);
-  }
-  const identityConflicts = new Set([...identities].filter(([, rows]) => new Set(rows.map(item => eventObservationHash(item.row))).size > 1).map(([id]) => id));
-  const unique = [];
-  for (const [id, rows] of identities) {
-    if (identityConflicts.has(id)) { for (const row of rows) skip('forecast_identity_conflict'); continue; }
-    rows.sort((a, b) => a.at - b.at); unique.push(rows[0]);
-    for (let i = 1; i < rows.length; i++) skip('duplicate_forecast_record');
+    unique.push(item);
   }
   const resultSides = new Map(), disputed = new Set();
   for (const item of unique) {
