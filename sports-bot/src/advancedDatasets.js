@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { checkedNbaTeamRows, nbaGameSeasonEvidence, nbaTeamSampleEvidence } from './nbaDatasetEvidence.js';
 import { replaceBaseballRole, lookupBaseballStat, baseballSampleMeasurement } from './baseballStatIdentity.js';
 import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
@@ -328,13 +329,11 @@ export async function syncAdvancedDatasets(options = {}) {
         const resultSet = payload.resultSets?.[0] || payload.resultSet || {};
         const headers = resultSet.headers, dataRows = resultSet.rowSet;
         if (!Array.isArray(headers) || !Array.isArray(dataRows) || dataRows.some(row => !Array.isArray(row))) throw new Error('Advanced source nba-advanced-teams: unsupported payload schema');
-        const parsed = checkedDatasetRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))),
-          { source: 'nba-advanced-teams', keys: [['TEAM_NAME'],['PACE','NET_RATING','OFF_RATING','DEF_RATING']],
-            features: ['PACE','NET_RATING','OFF_RATING','DEF_RATING'], identity: row => nonemptyText(row.TEAM_NAME) });
+        const parsed = checkedNbaTeamRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))), seasonStart);
         const rows = parsed.rows;
         snapshot.basketballTeams = Object.fromEntries(rows.map((row) => [normalizeEntityName(row.TEAM_NAME), stamp({
-          team: row.TEAM_NAME, teamId: row.TEAM_ID, games: row.GP, pace: row.PACE,
-          offensiveRating: row.OFF_RATING, defensiveRating: row.DEF_RATING, netRating: row.NET_RATING
+          team: row.TEAM_NAME, teamId: row.TEAM_ID, games: finite(row.GP), pace: finite(row.PACE), nativeSeasonLabel: row.SEASON_YEAR || null,
+          offensiveRating: finite(row.OFF_RATING), defensiveRating: finite(row.DEF_RATING), netRating: finite(row.NET_RATING)
         }, 'nba-advanced-teams')]));
         recordStatus('nba-advanced-teams', nbaUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows });
         diagnostics.push(`NBA advanced teams: ${rows.length} team row(s) for ${seasonLabel}.`);
@@ -383,7 +382,7 @@ const sourceFeatureFields = {
  'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference','lineupXwobaEvidence'],
  'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference'],
  'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference'],
- 'nba-advanced-teams':['pace','efficiencyDifference'],
+ 'nba-advanced-teams':['pace','efficiencyDifference','teamSampleEvidence'],
  'tennis-atp':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches'],
  'tennis-wta':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches']
 };
@@ -494,8 +493,14 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const away = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)], 'nba-advanced-teams');
       const home = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)], 'nba-advanced-teams');
       if (away || home || ownsSource(game.advancedDataset, 'nba-advanced-teams')) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: measuredCalculation([away?.pace, home?.pace], (a, h) => (a + h) / 2), efficiencyDifference: difference(home?.netRating, away?.netRating) };
-        if (away && home) matched += 1;
+        const sourcePeriodEvidence=nbaGameSeasonEvidence(game,[away,home]);
+        const teamSampleEvidence=nbaTeamSampleEvidence(away,home);
+        const usable=away&&home&&!sourcePeriodEvidence.blocked&&teamSampleEvidence.away.positiveSample&&teamSampleEvidence.home.positiveSample&&!teamSampleEvidence.sharedTeamIdentity;
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'),
+          provider: 'NBA.com advanced team stats',sourcePeriodEvidence,teamSampleEvidence,
+          pace: usable?measuredCalculation([away.pace, home.pace], (a, h) => (a + h) / 2):null, efficiencyDifference:usable?difference(home.netRating, away.netRating):null };
+        if (usable) matched += 1;
+        if(sourcePeriodEvidence.blocked)periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }

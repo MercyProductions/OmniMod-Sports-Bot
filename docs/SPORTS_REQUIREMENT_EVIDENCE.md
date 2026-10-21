@@ -140,3 +140,7 @@ Development v6.0.25 separates batter/pitcher records, preserves ambiguous names 
 ## MLB season and sample continuation
 
 Development v6.0.26 blocks known wrong-season batting factors and requires measured, internally consistent positive samples for a complete lineup comparison. [Reproductions, controls and native/source limitations](SPORTS_MLB_SEASON_AND_SAMPLES.md); complete suite 378 passing. Statistical sample adequacy and predictive improvement remain unverified; no deployment.
+
+## NBA period and sample continuation
+
+Development v6.0.27 binds NBA source seasons using observed ESPN end-year metadata, excludes unknown/invalid team samples and rejects duplicate team identities. [Synthetic controls, three preserved real metadata checks and limitations](SPORTS_NBA_SEASON_AND_SAMPLES.md); complete suite 387 passing. No new provider calls, forecasts, deployment or demonstrated predictive improvement.

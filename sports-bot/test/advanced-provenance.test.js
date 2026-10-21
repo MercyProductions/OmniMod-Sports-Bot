@@ -168,10 +168,10 @@ test('source rows disappearing cannot leave a previously attached NFL value acti
 });
 
 test('a lost NBA side invalidates cached two-sided comparisons',async()=>{
- await seed({basketballTeams:{away:{pace:100,netRating:0,sourceFetchedAt:old},home:{pace:110,netRating:10,sourceFetchedAt:old}}});
+ await seed({basketballTeams:{away:{games:2,pace:100,netRating:0,sourceFetchedAt:old},home:{games:2,pace:110,netRating:10,sourceFetchedAt:old}}});
  const game={id:'nba',leagueKey:'nba',away:{name:'Away'},home:{name:'Home'}};
  await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.pace,105);
- await seed({basketballTeams:{away:{pace:100,netRating:0,sourceFetchedAt:old}}});
+ await seed({basketballTeams:{away:{games:2,pace:100,netRating:0,sourceFetchedAt:old}}});
  await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.pace,null);assert.equal(game.advancedDataset.efficiencyDifference,null);
 });
 
