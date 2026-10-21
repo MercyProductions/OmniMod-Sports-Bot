@@ -1,3 +1,4 @@
+import {quoteTimeEpoch} from './oddsPricing.js';
 import {collectH2HBooks} from './bookmakerIntegrity.js';
 import {inspectOddsEventCandidate,inspectOddsEventMatch,matchOddsEventCohort} from './oddsEventIdentity.js';
 import {applyManualResults} from './manualResultMatching.js';
@@ -435,8 +436,8 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
     bookmakerCount: fairRows.length,
     bookmakerIntegrity:audit,
     dispersion,
-    lastUpdate: [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).every(Boolean)
-      ? [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).sort()[0] : ''
+    lastUpdate: [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).every(value=>Number.isFinite(quoteTimeEpoch(value)))
+      ? [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).sort((a,b)=>quoteTimeEpoch(a)-quoteTimeEpoch(b))[0] : ''
   };
 }
 

@@ -1,3 +1,4 @@
+import {marketTimestampEvidence} from './quoteChronology.js';
 import {predictionInputsAt,observedInputState} from './inputChronology.js';
 import { buildEvidenceCoverage, summaryEvidence } from './evidenceCoverage.js';
 import { calibrateSelectedProbability, lookupElo } from './modelEvaluation.js';
@@ -320,9 +321,7 @@ function situationalScore(game, awayTeam, homeTeam, context) {
 function marketVector(game, profile, now) {
   const h2h = game.odds?.h2h;
   if (!h2h?.away || !h2h?.home) return null;
-  const quoteTime = Date.parse(h2h.lastUpdate || game.odds?.lastUpdate || '');
-  const times=[h2h.lastUpdate,game.odds?.lastUpdate,...['away','home','draw'].flatMap(side=>[h2h[side]?.lastUpdate,...(h2h[side]?.quotes||[]).map(row=>row.lastUpdate)])].filter(value=>value!==undefined&&value!==null&&value!=='').map(value=>typeof value==='string'?Date.parse(value):NaN);
-  if(times.some(value=>!Number.isFinite(value)||value>now)||Number.isFinite(quoteTime)&&now-quoteTime>6*60*60_000)return null;
+  if(!marketTimestampEvidence(game,now).eligible)return null;
   if (game.odds?.cacheState === 'stale') return null;
   if (!profile.twoWay && !h2h.draw) return null;
   const away = finite(h2h.away.fairProbability ?? h2h.away.implied);
@@ -452,11 +451,11 @@ function localDataConfidence(awayTeam, homeTeam, awayPlayers, homePlayers, conte
   return Math.round(clamp(score, 0, 100));
 }
 
-function modelMode(game) {
+function modelMode(game,now) {
   if (game.statusKey === 'final') return 'retrospective_ungraded';
   if (game.statusKey === 'live') return 'in_play';
   const start = new Date(game.startTime).getTime();
-  return Number.isFinite(start) && start < Date.now() ? 'late_pregame' : 'pregame';
+  return Number.isFinite(start) && start < now ? 'late_pregame' : 'pregame';
 }
 
 function confidenceBand(value) {
@@ -585,7 +584,7 @@ export function predictGame(game, index, modelContext = {}) {
   const marketMovementContribution = hasMarketMovement
     ? clamp((homeMarketMovement - awayMarketMovement) * 0.012, -0.14, 0.14)
     : 0;
-  const mode = modelMode(game);
+  const mode = modelMode(game,evidenceNow);
   let liveContribution = 0;
   if (mode === 'in_play') {
     const scoreDiff = finite(game.home?.score, 0) - finite(game.away?.score, 0);
@@ -819,6 +818,7 @@ export function predictGame(game, index, modelContext = {}) {
     uncertaintyReasons: uncertainty.reasons,
     fairOdds: probabilityToAmerican(selectedProbability),
     marketBlendWeight: round(marketBlendWeight, 4),
+    marketTimestampEvidence:marketTimestampEvidence(game,evidenceNow),
     outcomeValidationSamples,
     outcomeCalibrationError,
     valueAnalysis: analyzeOddsValue(game, {

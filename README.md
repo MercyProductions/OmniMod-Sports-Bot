@@ -161,7 +161,7 @@ Sports research updates add immutable forecast lifecycle records, per-game evide
 
 References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
 
-Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 583 passing tests; no improved forecasting or wagering performance has been established.
+Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 594 passing tests; no improved forecasting or wagering performance has been established.
 
 Journal event-association repair: [scoped identities, conflict quarantine and eligibility](docs/SPORTS_JOURNAL_EVENT_INTEGRITY.md). Development v6.0.32; original forecasts remain immutable. These are source and synthetic-regression improvements, not proof of forecasting or wagering improvement.
 
@@ -184,3 +184,5 @@ Quote refresh identity: [event-bound selection, frozen models and delayed respon
 Provider event identity: [ordered teams, bound event IDs and cohort conflicts](docs/SPORTS_PROVIDER_EVENT_IDENTITY.md), development v6.0.41. Seven old-matcher failures reproduced; injected daily-builder/quote-refresh and durable evidence paths verified. Native source truth and predictive improvement remain unproven.
 
 Bookmaker integrity: [complete books, conflict quarantine and frozen audit evidence](docs/SPORTS_BOOKMAKER_INTEGRITY.md), development v6.0.42. Nine old-parser failures reproduced; malformed provider data no longer crashes the tested daily-builder path. Predictive improvement remains unproven.
+
+Quote time integrity: [explicit timestamps, contributor ages and consistent inference cutoff](docs/SPORTS_QUOTE_TIMESTAMP_INTEGRITY.md), development v6.0.43. Seven old-source timing/normalization failures reproduced. Original quote text and timing evidence are preserved; independent publication truth and predictive improvement remain unproven.

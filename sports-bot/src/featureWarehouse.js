@@ -195,6 +195,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = D
     predictedSide: prediction.predictedSide,
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
+    marketTimestampEvidence:structuredClone(prediction.marketTimestampEvidence||null),
     bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),
     attemptedBookmakerIntegrity:structuredClone(game.oddsBookmakerEvidence||null),
     oddsMatchEvidence:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null),

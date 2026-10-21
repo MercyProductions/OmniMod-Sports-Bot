@@ -1,6 +1,6 @@
 import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
 import {journalResultState} from './journalResults.js';
-import {quotePrice} from './oddsPricing.js';
+import {quotePrice,quoteTimeEpoch} from './oddsPricing.js';
 import { createHash } from 'node:crypto';
 import { open, readFile, mkdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -46,7 +46,8 @@ function priceSnapshot(market = {}) {
       priceAmerican: quotePrice(quote)?.americanOdds ?? null,
       originalPrice: finiteNumber(quote.originalPrice ?? quote.price ?? quote.priceDecimal ?? quote.decimalOdds ?? quote.priceAmerican), originalFormat: quote.priceFormat || quote.originalFormat || 'american',
       priceDecimal: quotePrice(quote)?.decimalOdds ?? null, bookmaker: String(quote.bookmaker || '').slice(0, 120),
-      bookmakerKey: String(quote.bookmakerKey || '').slice(0, 120), quotedAt: iso(quote.lastUpdate),
+      bookmakerKey: String(quote.bookmakerKey || '').slice(0, 120), quotedAt:Number.isFinite(quoteTimeEpoch(quote.lastUpdate))?new Date(quoteTimeEpoch(quote.lastUpdate)).toISOString():null,
+      originalQuotedAt:typeof quote.lastUpdate==='string'?quote.lastUpdate:null,
       timestampSource: String(quote.timestampSource || 'unknown').slice(0, 80)
     })), availableQuoteCount: quotes.length, truncated: quotes.length > 100,
       consensusProbability: finiteNumber(market[side].fairProbability ?? market[side].implied) };
@@ -87,6 +88,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
     outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,
+    marketTimestampEvidence:structuredClone(prediction.marketTimestampEvidence||null),
     learningInputAudit: prediction.learningInputAudit || null,
     inputChronology: prediction.inputChronology || null,
     eventContext: { sport: prediction.sportProfile || game.sportGroup || null,

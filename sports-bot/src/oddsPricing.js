@@ -20,8 +20,18 @@ export function quotePrice(quote={}){
   return normalized;
 }
 
+/** Explicit timezone and real calendar date; never infer the host's local timezone. */
+export function quoteTimeEpoch(value){
+  if(typeof value!=='string')return NaN;
+  const match=/^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/i.exec(value);
+  if(!match)return NaN;
+  const [,year,month,day]=match.map(Number),calendar=new Date(0);calendar.setUTCFullYear(year,month,0);
+  if(month<1||month>12||day<1||day>calendar.getUTCDate())return NaN;
+  return Date.parse(value);
+}
+
 export function quoteTimestampVerified(quote={}){
-  return quote.timestampSource==='provider_update';
+  return quote.timestampSource==='provider_update'&&Number.isFinite(quoteTimeEpoch(quote.lastUpdate??quote.quotedAt));
 }
 
 /** One complete bookmaker's offered outcomes; never de-vig cross-book best prices. */

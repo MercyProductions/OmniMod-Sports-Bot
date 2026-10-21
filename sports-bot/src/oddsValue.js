@@ -1,4 +1,4 @@
-import {quoteTimestampVerified} from './oddsPricing.js';
+import {quoteTimestampVerified,quoteTimeEpoch} from './oddsPricing.js';
 import { americanToProbability, finiteNumber } from './dataValidation.js';
 import { sportProfile } from './sportProfiles.js';
 
@@ -19,6 +19,8 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
   const sides = profile.twoWay ? ['away', 'home'] : ['away', 'home', 'draw'];
   const start = Date.parse(game.startTime || '');
   const sharedRisks = [];
+  const receipt=game.odds?.fetchedAt,hasReceipt=receipt!==undefined&&receipt!==null&&receipt!=='',received=quoteTimeEpoch(receipt);
+  if(hasReceipt&&(!Number.isFinite(received)||received>now))sharedRisks.push('quote receipt is invalid or after the evaluation cutoff');
   const probabilities = sides.map(side => finiteNumber(model.probabilities?.[side]));
   if (probabilities.some(p => p === null || p < 0 || p > 1) || Math.abs(probabilities.reduce((sum, p) => sum + (p || 0), 0) - 1) > 0.0011)
     sharedRisks.push('outcome probability vector is missing or does not sum to one');
@@ -43,7 +45,7 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
     const quotes = (market[side]?.quotes?.length ? market[side].quotes : market[side] ? [market[side]] : [])
       .filter((quote) => payoutAtAmericanOdds(quote.price) !== null && quote.bookmaker)
       .map((quote) => {
-        const quoteTime = Date.parse(quote.lastUpdate || '');
+        const quoteTime = quoteTimeEpoch(quote.lastUpdate);
         const ageMinutes = Number.isFinite(quoteTime) ? (now - quoteTime) / 60_000 : null;
         const fresh = ageMinutes !== null && ageMinutes >= 0 && ageMinutes <= VALUE_POLICY.maxQuoteAgeMinutes && quoteTimestampVerified(quote);
         return { bookmaker: String(quote.bookmaker), bookmakerKey: String(quote.bookmakerKey || quote.bookmaker), price: Number(quote.price), quotedAt: quote.lastUpdate || '', timestampSource: quote.timestampSource || 'unknown', ageMinutes: round(ageMinutes, 2), fresh, decimalOdds: 1 + payoutAtAmericanOdds(quote.price) };
@@ -56,6 +58,7 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
     if (outcomeSamples < VALUE_POLICY.minCalibrationSamples) reasons.push(`fewer than ${VALUE_POLICY.minCalibrationSamples} archived outcomes in this side/probability bin`);
     const calibrationError = finiteNumber(model.outcomeCalibrationError?.[side]);
     if (calibrationError === null || calibrationError > 0.10) reasons.push('outcome calibration error is unknown or exceeds 10 probability points');
+    if(hasReceipt&&quotes.some(quote=>quoteTimeEpoch(quote.quotedAt)>received))reasons.push('quote update is after its recorded receipt');
     if (!best) reasons.push('no valid bookmaker price');
     else if (!best.fresh) reasons.push('quote timestamp unknown, future, fetched-only, or older than 15 minutes');
     const freshBookmakers = new Set(freshQuotes.map((quote) => quote.bookmakerKey)).size;
