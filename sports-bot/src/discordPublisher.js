@@ -1,3 +1,4 @@
+import {finalResultFooter,finalResultKey,legacyFinalMessageMatches} from './finalResultIdentity.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame} from './slateEventIdentity.js';
 import { recordPredictionJournal } from './predictionJournal.js';
@@ -409,15 +410,16 @@ export async function postDailySlate(client, slate, options = {}) {
 export async function findFinalResultMessage(client, slate, prediction, existingResources = null) {
   let resources;
   try { resources = existingResources || await setupGuildResources(client, slate.guildId); }
-  catch { return null; }
+  catch { throw new Error('Final-result history is unavailable; a new send is blocked'); }
   const channels = [];
+  let uncertain=false;
   for (const channelId of [slate.channelId, resources.resultsChannel?.id]) {
     if (!channelId || channels.some((channel) => channel.id === channelId)) continue;
     const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel?.isTextBased?.()) channels.push(channel);
+    if(channel?.isTextBased?.()&&(!channel.guildId||channel.guildId===slate.guildId))channels.push(channel);else uncertain=true;
   }
-  const title = `Final result #${prediction.index}: ${prediction.matchup}`;
-  const footer = `OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`;
+  if(!channels.length)throw new Error('Final-result history has no readable channel; a new send is blocked');
+  const footer=finalResultFooter(slate,prediction);
   for (const channel of channels) {
     try {
       let before;
@@ -427,22 +429,30 @@ export async function findFinalResultMessage(client, slate, prediction, existing
           if (message.author?.id !== client.user?.id) return false;
           return message.embeds.some((embed) => {
             if (embed.footer?.text === footer) return true;
-            const sameLegacyResult = embed.title === title && String(embed.description || '').includes(`Final score: **${prediction.finalScore}**`);
-            return sameLegacyResult && (!slate.messageId || message.reference?.messageId === slate.messageId);
+            if(legacyFinalMessageMatches(message,embed,slate,prediction))return true;
+            if(embed.footer?.text===`OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`){
+              const fields=embed.fields||[],league=fields.find(row=>row.name==='League')?.value,started=fields.find(row=>row.name==='Started')?.value;
+              const game=resolveSlateGame(journalGameIndex(slate.games||[]),prediction).game;
+              if(!game||!league||!started||(league===game.league&&started===prediction.startTimeLocal))uncertain=true;
+            }
+            return false;
           });
         });
         if (found) return found;
         if (messages.size < 100) break;
         before = messages.last()?.id;
+        if(!before||page===4)uncertain=true;
       }
     } catch {
-      // A missing history permission/channel should not stop the other result channel being checked.
+      uncertain=true; // Still search the other channel for a definitive match.
     }
   }
+  if(uncertain)throw new Error('Final-result history is incomplete; a new send is blocked');
   return null;
 }
 
 export async function postFinalResult(client, slate, final) {
+  finalResultKey(slate,final.prediction);
   const resources = await setupGuildResources(client, slate.guildId);
   const prediction = final.prediction;
   const game = final.game;
@@ -471,23 +481,23 @@ export async function postFinalResult(client, slate, final) {
       { name: 'Risk', value: prediction.riskTier ?? 'Unknown', inline: true },
       ...(highUncertainty ? [{ name: 'Pregame uncertainty', value: uncertaintyWhy, inline: false }] : [])
     )
-    .setFooter({ text: `OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}` })
+    .setFooter({ text: finalResultFooter(slate,prediction) })
     .setTimestamp(new Date());
 
   let replyMessage = null;
   if (slate.messageId && slate.channelId) {
+    let dailyMessage;
     try {
-      const channel = await client.channels.fetch(slate.channelId);
-      const dailyMessage = await channel.messages.fetch(slate.messageId);
-      replyMessage = await dailyMessage.reply({ embeds: [embed], allowedMentions: { parse: [] } });
-    } catch {
-      replyMessage = null;
+      const channel=await client.channels.fetch(slate.channelId);
+      if(channel.guildId&&channel.guildId!==slate.guildId)throw new Error('Final result channel guild mismatch');
+      dailyMessage=await channel.messages.fetch(slate.messageId);
+    } catch(error) {
+      if(error?.code!==RESTJSONErrorCodes.UnknownMessage)throw new Error('Daily-message access is uncertain; final-result send is blocked');
     }
+    // A reply rejection can follow remote acceptance. Never turn it into another send.
+    if(dailyMessage)replyMessage=await dailyMessage.reply({embeds:[embed],allowedMentions:{parse:[]}});
   }
-
-  if (!replyMessage) {
-    replyMessage = await resources.resultsChannel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-  }
+  if(!replyMessage)replyMessage=await resources.resultsChannel.send({embeds:[embed],allowedMentions:{parse:[]}});
 
   return replyMessage;
 }

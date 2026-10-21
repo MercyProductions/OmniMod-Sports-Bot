@@ -161,10 +161,12 @@ Sports research updates add immutable forecast lifecycle records, per-game evide
 
 References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
 
-Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 479 passing tests; no improved forecasting or wagering performance has been established.
+Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 494 passing tests; no improved forecasting or wagering performance has been established.
 
 Journal event-association repair: [scoped identities, conflict quarantine and eligibility](docs/SPORTS_JOURNAL_EVENT_INTEGRITY.md). Development v6.0.32; original forecasts remain immutable. These are source and synthetic-regression improvements, not proof of forecasting or wagering improvement.
 
 Scoped refresh and publication continuation: [event-bound windows, targeted forecast preservation and Discord delivery](docs/SPORTS_REFRESH_EVENT_IDENTITY.md), development v6.0.33. The full scope and remaining upstream identity work are documented there.
 
 Source/final-refresh continuation: [league/start-bound merging, quote isolation and disputed final preservation](docs/SPORTS_SOURCE_EVENT_ASSOCIATION.md), development v6.0.34. Actual-host verification and predictive improvement remain unproven.
+
+Final delivery continuation: [scoped result claims, message recovery and uncertain transport](docs/SPORTS_FINAL_DELIVERY_INTEGRITY.md), development v6.0.35. Synthetic transport verification does not establish host deployment or exactly-once multi-worker delivery.

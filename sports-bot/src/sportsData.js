@@ -1,3 +1,4 @@
+import {finalReplyFor} from './finalResultIdentity.js';
 import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
@@ -844,11 +845,6 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     if (refreshed) prediction.snapshotStage = options.marketStages?.['event:'+scopedEventKey(prediction)] || options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';
   }
   const finalReplies = { ...(options.cachedSlate?.finalReplies || {}) };
-  for (const prediction of predictions) {
-    if (prediction.originalGameId && finalReplies[prediction.originalGameId] && !finalReplies[prediction.gameId]) {
-      finalReplies[prediction.gameId] = finalReplies[prediction.originalGameId];
-    }
-  }
   const inventory = intelligence;
   const warehouse = config.featureWarehouseEnabled ? await warehouseInventory() : null;
   const warehouseData = config.featureWarehouseEnabled && config.horizonEvaluationEnabled ? await readFeatureWarehouse() : null;
@@ -985,7 +981,7 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
     const freshGame=match.game||(cachedGame.statusKey==='final'?cachedGame:null);
     if(!freshGame||freshGame.statusKey!=='final'||oldPrediction.legacyFrozenIdentityUnverified)return oldPrediction;
     const graded=attachFinalGrade(freshGame,oldPrediction);
-    const alreadyReplied=Boolean(cachedSlate.finalReplies?.[oldPrediction.gameId]);
+    const alreadyReplied=Boolean(finalReplyFor(cachedSlate,oldPrediction));
     if(!alreadyReplied&&typeof graded.predictionCorrect==='boolean')finals.push({game:freshGame,prediction:graded});
     return graded;
   });

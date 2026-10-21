@@ -1,3 +1,5 @@
+import {finalReplyFor} from './finalResultIdentity.js';
+import {deliverFinalBatch} from './finalDelivery.js';
 import {scopedEventKey} from './slateEventIdentity.js';
 import {recordPredictionJournal} from './predictionJournal.js';
 import {
@@ -16,14 +18,11 @@ import { recordSlateSnapshot } from './featureWarehouse.js';
 import { pendingFinalDateKeys } from './finalReconciliation.js';
 import { localDateKey, isDailyPostTime } from './time.js';
 import {
-  claimFinalResult,
   claimDailyProviderUsage,
-  finishFinalResult,
   finishDailyProviderUsage,
   listDailyCaches,
   readDailyCache,
   readDailyProviderUsage,
-  releaseFinalResultClaim,
   writeDailyCache
 } from './storage.js';
 import { addWatch, listWatch, removeWatch } from './watchStore.js';
@@ -36,7 +35,6 @@ import {
   findDailySlateMessage,
   logBotEvent,
   postDailySlate,
-  postFinalResult,
   postRolePanel
 } from './discordPublisher.js';
 
@@ -322,36 +320,15 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
     const now = Date.now();
     const gamesThatCouldHaveFinished = (cached.games ?? []).filter((game) => {
       if (game.statusKey === 'alert') return false;
-      if (game.statusKey === 'final') return !cached.finalReplies?.[game.id]
-        && (cached.predictions || []).some(row => String(row.gameId) === String(game.id) && row.predictionMode === 'pregame');
+      if (game.statusKey === 'final') return (cached.predictions||[]).some(row=>String(row.gameId)===String(game.id)&&(!row.leagueKey||row.leagueKey===game.leagueKey)&&row.predictionMode==='pregame'&&!finalReplyFor(cached,row));
       const start = new Date(game.startTime).getTime();
       return Number.isFinite(start) && start <= now;
     });
     if (!gamesThatCouldHaveFinished.length) return;
 
     const refreshed = await refreshFinalGrades(cached, { guildId });
-    const finalReplies = { ...(cached.finalReplies ?? {}) };
-    let postedCount = 0;
-
-    for (const final of refreshed.newFinals ?? []) {
-      const gameId = final.prediction.gameId;
-      if (finalReplies[gameId]) continue;
-      const resultClaim = await claimFinalResult(dateKey, guildId, gameId, { reason });
-      if (!resultClaim.claimed) continue;
-      try {
-        const message = await postFinalResult(client, refreshed, final);
-        const reply = {
-          messageId: message.id, channelId: message.channelId, postedAt: new Date().toISOString(),
-          correct: final.prediction.predictionCorrect
-        };
-        finalReplies[gameId] = reply;
-        await finishFinalResult(dateKey, guildId, gameId, reply);
-        postedCount += 1;
-      } catch (error) {
-        await releaseFinalResultClaim(dateKey, guildId, gameId);
-        throw error;
-      }
-    }
+    const delivery=await deliverFinalBatch(client,refreshed,{reason});
+    const {finalReplies,postedCount}=delivery;
 
     const latest = await readDailyCache(dateKey, guildId) || cached;
     const durableFinals = {
@@ -360,6 +337,8 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
       predictions: refreshed.predictions,
       diagnostics: refreshed.diagnostics,
       refreshedAt: refreshed.refreshedAt,
+      finalDeliveryFailures:delivery.failures,
+      recoveredFinalAcknowledgements:delivery.recoveredCount,
       guildId,
       finalReplies: { ...(latest.finalReplies ?? {}), ...finalReplies },
       newFinals: []

@@ -50,7 +50,7 @@ test('final result color is green for a match and red for a miss, with unknown k
 
 test('final-result dedupe checks the second channel when the first channel history is unavailable', async () => {
   const existing = { id: 'found-result', author: { id: 'sports-bot' }, embeds: [{
-    title: 'Final result #18: NSH @ TBL', footer: { text: 'OmniMod Sports result | 2026-09-20 | game-18' }
+    fields:[{name:'League',value:'NHL'},{name:'Started',value:'4:00 PM'}],title: 'Final result #18: NSH @ TBL', footer: { text: 'OmniMod Sports result | 2026-09-20 | game-18' }
   }] };
   const client = {
     user: { id: 'sports-bot' },
@@ -65,8 +65,8 @@ test('final-result dedupe checks the second channel when the first channel histo
     }) }
   };
   const found = await findFinalResultMessage(client,
-    { dateKey: '2026-09-20', guildId: 'guild', channelId: 'slate-channel' },
-    { gameId: 'game-18', index: 18, matchup: 'NSH @ TBL' },
+    { dateKey: '2026-09-20', guildId: 'guild', channelId: 'slate-channel',games:[{id:'game-18',leagueKey:'nhl',league:'NHL',startTime:'2026-09-20T21:00:00Z'}] },
+    { gameId: 'game-18',leagueKey:'nhl',startTime:'2026-09-20T21:00:00Z',startTimeLocal:'4:00 PM', index: 18, matchup: 'NSH @ TBL' },
     { resultsChannel: { id: 'results-channel' } });
   assert.equal(found, existing);
 });

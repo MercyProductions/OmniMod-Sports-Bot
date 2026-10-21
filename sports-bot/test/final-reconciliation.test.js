@@ -1,3 +1,4 @@
+import {finalResultKey} from '../src/finalResultIdentity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pendingFinalDateKeys } from '../src/finalReconciliation.js';
@@ -14,10 +15,10 @@ test('final reconciliation includes unresolved prior-date games after midnight a
 
 test('unposted known finals remain pending, while acknowledged finals and retrospective estimates do not', () => {
   const now = Date.parse('2026-10-21T06:00:00Z');
-  const cache = { dateKey: '2026-10-20', slate: { predictions: [{ gameId: 'game', predictionMode: 'pregame',
+  const cache = { dateKey: '2026-10-20', slate: {guildId:'fixture',dateKey:'2026-10-20', predictions: [{leagueKey:'nba', gameId: 'game', predictionMode: 'pregame',
     startTime: '2026-10-20T23:00:00Z', predictionCorrect: true }], finalReplies: {} } };
   assert.equal(pendingFinalDateKeys([cache], { today: '2026-10-21', now }).length, 1);
-  cache.slate.finalReplies.game = { messageId: 'fixture' };
+  const key=finalResultKey(cache.slate,cache.slate.predictions[0]);cache.slate.finalReplies[key] = {eventKey:key,messageId:'fixture',channelId:'channel'};
   assert.equal(pendingFinalDateKeys([cache], { today: '2026-10-21', now }).length, 0);
   cache.slate.finalReplies = {}; cache.slate.predictions[0].predictionMode = 'retrospective_ungraded';
   assert.equal(pendingFinalDateKeys([cache], { today: '2026-10-21', now }).length, 0);

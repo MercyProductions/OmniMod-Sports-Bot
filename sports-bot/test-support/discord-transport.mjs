@@ -10,13 +10,17 @@ export async function fakeDiscord(directory,options={}) {
  const counters={sends:0,edits:0};
  const persist=()=>writeFile(file,JSON.stringify(rows)+'\n');
  const payloadData=payload=>({...payload,embeds:payload.embeds.map(embed=>embed.toJSON())});
- const wrap=row=>({...row,edit:async payload=>{
+ const wrap=row=>({...row,reply:async payload=>{
+  if(options.replyFails)throw new Error('Synthetic reply unavailable');
+  return channel.send({...payload,reference:{messageId:row.id}});
+ },edit:async payload=>{
   counters.edits++;if(options.editFails)throw Object.assign(new Error('Synthetic edit denied'),{code:50013});
   Object.assign(row,payloadData(payload));await persist();return wrap(row);
  }});
  const channel={id:'channel',guildId:'transport',type:ChannelType.GuildText,name:'omnimod-sports',isTextBased:()=>true,
   messages:{fetch:async request=>{
    if(typeof request==='string'){
+    if(options.messageFetchFails)throw Object.assign(new Error('Synthetic message access denied'),{code:50013});
     const row=rows.find(row=>row.id===request);if(!row)throw Object.assign(new Error('Synthetic unknown message'),{code:10008});return wrap(row);
    }
    if(options.historyFails)throw Object.assign(new Error('Synthetic history denied'),{code:50013});
@@ -40,12 +44,13 @@ export async function fakeDiscord(directory,options={}) {
 
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  const [directory,mode]=process.argv.slice(2);
- if(!directory||!['crash','retry'].includes(mode))throw new Error('Invalid synthetic transport worker');
- const {postDailySlate}=await import('../src/discordPublisher.js');
+ if(!directory||!['crash','retry','final-crash','final-retry'].includes(mode))throw new Error('Invalid synthetic transport worker');
+ const {postDailySlate,postFinalResult}=await import('../src/discordPublisher.js');
  const {recordPredictionJournal}=await import('../src/predictionJournal.js');
  const slate=JSON.parse(await readFile(join(directory,'slate.json'),'utf8'));
  await recordPredictionJournal(slate);
- const remote=await fakeDiscord(directory,{crashAfterSend:mode==='crash'});
- await postDailySlate(remote.client,slate,{guildId:'transport',reuseExisting:false});
+ const remote=await fakeDiscord(directory,{crashAfterSend:['crash','final-crash'].includes(mode)});
+ if(mode.startsWith('final-'))await postFinalResult(remote.client,slate,{game:slate.games[0],prediction:slate.predictions[0]});
+ else await postDailySlate(remote.client,slate,{guildId:'transport',reuseExisting:false});
  console.log(JSON.stringify({messages:remote.rows.length,...remote.counters}));
 }
