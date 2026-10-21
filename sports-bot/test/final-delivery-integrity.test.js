@@ -65,10 +65,10 @@ test('an ambiguous legacy footer is not an acknowledgement or permission to crea
  await assert.rejects(postFinalResult(service.client,value,final(value)),/history is incomplete/);assert.equal(service.rows.length,1);
 });
 
-test('a uniquely scoped legacy result with league, start and reply evidence can be recovered',async t=>{
+test('a uniquely scoped legacy result is discovered but cannot be rewritten without a baseline',async t=>{
  const value=slate();value.games.pop();value.predictions.pop();const service=await remote(t),prediction=value.predictions[0];
  await service.channel.send({embeds:[new EmbedBuilder().setTitle(`Final result #${prediction.index}: ${prediction.matchup}`).setFooter({text:'OmniMod Sports result | 2026-10-20 | same'}).addFields({name:'League',value:'NBA'},{name:'Started',value:'2:00 PM'})]});
- assert.equal((await postFinalResult(service.client,value,final(value))).id,'message-1');assert.equal(service.rows.length,1);
+ await assert.rejects(postFinalResult(service.client,value,final(value)),error=>error.code==='CORRECTION_BASELINE_UNVERIFIED');assert.equal(service.rows.length,1);assert.equal(service.counters.edits,0);
 });
 
 test('a timeout after reply acceptance never triggers another send and retry recovers the accepted reply',async t=>{
@@ -97,10 +97,10 @@ test('new child processes recover a final after abrupt exit at remote acceptance
 });
 
 
-test('legacy league and start evidence can recover one shared-ID event without suppressing another league',async t=>{
+test('legacy scope blocks an unanchored rewrite without suppressing another league',async t=>{
  const value=slate(),service=await remote(t),prediction=value.predictions[0];
  await service.channel.send({embeds:[new EmbedBuilder().setTitle(`Final result #${prediction.index}: ${prediction.matchup}`).setFooter({text:'OmniMod Sports result | 2026-10-20 | same'}).addFields({name:'League',value:'NBA'},{name:'Started',value:'2:00 PM'})]});
- assert.equal((await postFinalResult(service.client,value,final(value))).id,'message-1');assert.equal(service.rows.length,1);
+ await assert.rejects(postFinalResult(service.client,value,final(value)),error=>error.code==='CORRECTION_BASELINE_UNVERIFIED');assert.equal(service.rows.length,1);assert.equal(service.counters.edits,0);
  assert.equal((await postFinalResult(service.client,value,final(value,1))).id,'message-2');assert.equal(service.rows.length,2);
 });
 

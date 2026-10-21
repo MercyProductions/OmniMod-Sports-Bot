@@ -4,9 +4,9 @@ This is a current-state index for the Sports reliability assignment, not a compl
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
 
-## Current assessment — October 21, 2026, 12:49 UTC
+## Current assessment — October 21, 2026
 
-Forecast model identity remains **v6.0.45**. The new change repairs the read-only prospective evaluator/planner, whose report schema is now `sports-isolated-paired-report-v2`; it does not rewrite or relabel forecast captures. Current full suite: **625 passed, zero failed/skipped**, plus syntax and whitespace checks. The reproduced prior suite had 618 passing tests. Test counts establish exercised code behavior, not forecasting quality.
+Forecast model identity remains **v6.0.45**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v2`; it does not rewrite or relabel forecast captures. Current full suite: **631 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 625 passing tests. Test counts establish exercised code behavior, not forecasting quality.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |
@@ -184,3 +184,5 @@ Development v6.0.30 preserves missing inputs, separates forecast identities and 
 ## Reviewed result recovery continuation
 
 Development v6.0.31 adds explicit journal-bound warehouse adjudication, shared writer locks and current-proof checks. [Workflow, 22 integration cases and trust limits](SPORTS_WAREHOUSE_RESULT_REVIEW.md); 447 tests passing. Labels become available at application time; original forecasts remain immutable. Source truth/reviewer identity, live operation and predictive improvement remain unverified.
+
+Legacy final protection: [lost-ack recovery cannot invent a frozen historical forecast](SPORTS_LEGACY_FINAL_PROTECTION.md). Exact desired digests recover without editing; corrections verify their remote predecessor. Unverifiable legacy baseline adoption remains unfinished.

@@ -462,6 +462,7 @@ export async function postFinalResult(client, slate, final) {
   const revision=prepareFinalRevision(slate,final),context=final.deliveryRevision||{};
   if(context.digest&&context.digest!==revision.digest)throw new Error('Final revision digest does not match the frozen result');
   const revisionFooter=finalResultFooter(slate,prediction)+' | result: '+revision.digest;
+  if(context.editOnly&&(!context.previousMessageId||!context.previousChannelId||!/^[a-f0-9]{64}$/.test(context.previousResultDigest||''))){const error=new Error('Correction requires its bound previous revision');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
   let duplicate;
   if(context.previousMessageId&&context.previousChannelId){
     const channel=await client.channels.fetch(context.previousChannelId);
@@ -470,6 +471,8 @@ export async function postFinalResult(client, slate, final) {
     if(duplicate.author?.id!==client.user?.id||!duplicate.embeds.some(embed=>matchesFinalResultFooter(embed.footer?.text,slate,prediction)))throw new Error('Correction target does not match this event');
   }else duplicate=await findFinalResultMessage(client,slate,prediction,resources);
   if(duplicate?.embeds.some(embed=>embed.footer?.text===revisionFooter))return duplicate;
+  if(duplicate&&context.editOnly&&!duplicate.embeds.some(embed=>embed.footer?.text===finalResultFooter(slate,prediction)+' | result: '+context.previousResultDigest)){const error=new Error('Correction target is not the verified preceding revision');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
+  if(duplicate&&!context.editOnly){const error=new Error('Existing final result lacks a verified correction baseline; preserve the original message for review');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
   if(context.editOnly&&!duplicate)throw new Error('Original final message is unavailable; a correction cannot create a replacement');
   const uncertaintyWhy = [prediction.abstentionReason, ...(prediction.uncertaintyReasons || []).slice(0, 3)]
     .filter(Boolean).join(' ').slice(0, 1024) || 'The leading outcome did not clear the uncertainty and evidence gates.';

@@ -33,13 +33,14 @@ export async function deliverFinalBatch(client,slate,{reason='',post=postFinalRe
     continue;
    }
    await verifyFinalResultClaim(slate.dateKey,slate.guildId,key,lease);
-   const item={...revision.final,deliveryRevision:{digest:revision.digest,previousMessageId:prior?.messageId,previousChannelId:prior?.channelId,editOnly:Boolean(prior)}};
+   const item={...revision.final,deliveryRevision:{digest:revision.digest,previousMessageId:prior?.messageId,previousChannelId:prior?.channelId,previousResultDigest:prior?.resultDigest,editOnly:Boolean(prior)}};
    const message=await post(client,slate,item);
    if(!message?.id||!message.channelId)throw new Error('Final delivery acknowledgement is incomplete');
    const reply={eventKey:key,messageId:message.id,channelId:message.channelId,postedAt:new Date().toISOString(),correct:item.prediction.predictionCorrect,
     resultDigest:revision.digest,resultObservedAt:revision.observedAt,frozenForecast:revision.frozenForecast,claimGeneration:lease.generation};
    await finishFinalResult(slate.dateKey,slate.guildId,key,reply,lease);finalReplies=mergeFinalReplies(finalReplies,{[key]:reply});postedCount++;if(prior)correctedCount++;
   }catch(error){
+   if(error?.code==='CORRECTION_BASELINE_UNVERIFIED')failureReason='correction_baseline_unverified';
    if(claimed)await releaseFinalResultClaim(slate.dateKey,slate.guildId,key,lease).catch(()=>{});
    failures.push({eventKey:key||null,gameId:String(final.prediction?.gameId||''),reason:error?.code===10008?'correction_target_missing':error?.code===50013?'delivery_access_denied':failureReason,retryable:failureReason!=='correction_baseline_unverified'});
   }

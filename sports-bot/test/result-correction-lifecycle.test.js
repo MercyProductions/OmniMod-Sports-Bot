@@ -7,12 +7,13 @@ import {randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
+import {EmbedBuilder} from 'discord.js';
 import {fakeDiscord} from '../test-support/discord-transport.mjs';
 const directory=await mkdtemp(join(tmpdir(),'sports-correction-'));process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
 const {deliverFinalBatch}=await import('../src/finalDelivery.js');
 const {postFinalResult,LOG_COLORS}=await import('../src/discordPublisher.js');
 const {readFinalResultClaim}=await import('../src/storage.js');
-const {finalResultKey}=await import('../src/finalResultIdentity.js');
+const {finalResultKey,finalResultFooter}=await import('../src/finalResultIdentity.js');
 const {pendingFinalDateKeys}=await import('../src/finalReconciliation.js');
 const {mergeFinalReplies}=await import('../src/finalResultRevision.js');
 test.after(()=>rm(directory,{recursive:true,force:true}));
@@ -31,6 +32,39 @@ function changed(value,away=4,home=1,delta=60000){
 }
 async function service(t){const path=await mkdtemp(join(tmpdir(),'sports-correction-remote-'));t.after(()=>rm(path,{recursive:true,force:true}));return {...await fakeDiscord(path),path};}
 const withReplies=(value,result)=>({...value,finalReplies:result.finalReplies});
+
+test('lost local claims cannot overwrite an existing revision using a changed cached forecast',async t=>{
+ const value=slate(),remote=await service(t);await postFinalResult(remote.client,value,value.newFinals[0]);const before=structuredClone(remote.rows),next=changed(value);next.predictions[0].predictedSide='away';next.predictions[0].predictedWinner='Changed';next.predictions[0].outcomeProbabilities={away:99,home:1,draw:0};
+ const result=await deliverFinalBatch(remote.client,next);assert.equal(result.postedCount,0);assert.equal(result.correctedCount,0);assert.equal(result.failures[0].reason,'correction_baseline_unverified');assert.equal(result.failures[0].retryable,false);assert.deepEqual(remote.rows,before);assert.equal(remote.counters.edits,0);assert.equal(Object.keys(result.finalReplies).length,0);assert.notEqual((await readFinalResultClaim(value.dateKey,value.guildId,finalResultKey(value,value.predictions[0])))?.state,'posted');
+});
+
+test('bare and scoped legacy footers cannot authorize an inferred correction baseline',async t=>{
+ for(const type of ['bare','scoped']){
+  const value=slate(),remote=await service(t),p=value.predictions[0],footer=type==='bare'?`OmniMod Sports result | ${value.dateKey} | ${p.gameId}`:finalResultFooter(value,p);
+  await remote.channel.send({embeds:[new EmbedBuilder().setTitle(`Final result #${p.index}: ${p.matchup}`).setDescription('Original historical pick and result').setFooter({text:footer}).addFields({name:'League',value:'NBA'},{name:'Started',value:'2:00 PM'})]});const before=structuredClone(remote.rows),result=await deliverFinalBatch(remote.client,value);
+  assert.equal(result.postedCount,0);assert.equal(result.failures[0].reason,'correction_baseline_unverified');assert.deepEqual(remote.rows,before);assert.equal(remote.counters.edits,0);assert.equal(remote.rows.length,1);
+ }
+});
+
+test('an exact existing revision digest can restore a lost local acknowledgement without editing',async t=>{
+ const value=slate(),remote=await service(t);await postFinalResult(remote.client,value,value.newFinals[0]);const before=structuredClone(remote.rows),result=await deliverFinalBatch(remote.client,value);
+ assert.equal(result.failures.length,0);assert.equal(result.postedCount,1);assert.equal(result.correctedCount,0);assert.equal(remote.counters.edits,0);assert.equal(remote.counters.sends,1);assert.deepEqual(remote.rows,before);const stored=await readFinalResultClaim(value.dateKey,value.guildId,finalResultKey(value,value.predictions[0]));assert.deepEqual(stored.frozenForecast.outcomeProbabilities,value.predictions[0].outcomeProbabilities);
+});
+
+test('a correction cannot overwrite a remote revision that differs from its verified predecessor',async t=>{
+ const value=slate(),remote=await service(t),first=await deliverFinalBatch(remote.client,value),next=changed(withReplies(value,first));remote.rows[0].embeds[0].footer.text=finalResultFooter(value,value.predictions[0])+' | result: '+'f'.repeat(64);const before=structuredClone(remote.rows),result=await deliverFinalBatch(remote.client,next);
+ assert.equal(result.correctedCount,0);assert.equal(result.failures[0].reason,'correction_baseline_unverified');assert.deepEqual(remote.rows,before);assert.equal(remote.counters.edits,0);assert.equal(remote.rows.length,1);
+});
+
+test('a boolean edit flag without a bound previous message and digest cannot enable correction',async t=>{
+ const value=slate(),remote=await service(t);await postFinalResult(remote.client,value,value.newFinals[0]);const next=changed(value),item={...next.newFinals[0],deliveryRevision:{editOnly:true}};
+ await assert.rejects(postFinalResult(remote.client,next,item),error=>error.code==='CORRECTION_BASELINE_UNVERIFIED');assert.equal(remote.counters.edits,0);assert.equal(remote.rows.length,1);
+});
+
+test('an accepted send timeout still recovers the exact matching revision without a replacement',async t=>{
+ const value=slate(),remote=await service(t),ambiguous=await fakeDiscord(remote.path,{ambiguousSend:true});await assert.rejects(postFinalResult(ambiguous.client,value,value.newFinals[0]),/timeout/);const restarted=await fakeDiscord(remote.path),result=await deliverFinalBatch(restarted.client,value);
+ assert.equal(result.failures.length,0);assert.equal(restarted.rows.length,1);assert.equal(restarted.counters.sends,0);assert.equal(restarted.counters.edits,0);
+});
 
 test('score corrections edit the existing message and preserve its original pregame forecast',async t=>{
  const value=slate(),remote=await service(t),first=await deliverFinalBatch(remote.client,value);assert.equal(first.postedCount,1);
