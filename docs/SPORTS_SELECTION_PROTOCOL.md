@@ -29,7 +29,7 @@ After the declared period ends, unresolved forecasts remain pending rather than 
 
 Candidate improvement is oriented **candidate versus issued champion**, reversing the matched report's primary-minus-reference convention where appropriate. Review readiness requires a positive game-bootstrap lower bound for candidate Brier improvement, mean improvement above 0.0025, and log-loss lower bound no worse than -0.003. A ready report is advisory: `promotionAllowed` remains false and approval is required. Game-cluster intervals do not remove date/team dependence, and repeated independent trials still require attention to multiple testing.
 
-The protocol currently covers pinned **ML** trials. Descriptive hybrid/specialist comparisons remain available in the matched report; a governed hybrid activation protocol and league-specific calibration study remain unfinished. No activation CLI or automatic deployment is provided.
+This initial protocol covered pinned **ML** trials. The [hybrid continuation](SPORTS_HYBRID_SELECTION_PROTOCOL.md) extends preregistered artifact-specific research review to hybrid source recipes. Executable baseline/challenger collection and league-specific calibration remain unfinished. No activation CLI or automatic deployment is provided.
 
 ## Commands
 

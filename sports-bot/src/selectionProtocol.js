@@ -1,3 +1,4 @@
+import {hybridArtifact} from './hybridArtifact.js';
 import {createHash} from 'node:crypto';
 import {mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -31,26 +32,36 @@ async function transaction(directory,action){
   }finally{await lock.close();await unlink(file+'.lock');}
 }
 
-/** Predeclare one ML artifact before a prospective, disjoint evaluation period. */
+/** Predeclare one exact ML fit or fixed hybrid recipe before a disjoint prospective period. */
 export async function registerSelectionPlan(spec,{directory,model,now=Date.now()}={}){
   if(!Number.isFinite(now)||!identifier(spec?.id)||!identifier(spec?.sport)||!identifier(spec?.league)
-    ||!['Daily','T-90','T-30','T-10'].includes(spec?.horizon)||spec?.candidate!=='ml'
+    ||!['Daily','T-90','T-30','T-10'].includes(spec?.horizon)||!['ml','hybrid'].includes(spec?.candidate)
     ||!/^\w[\w .-]{1,150}$/.test(spec?.modelVersion||'')||!/^[a-f0-9]{64}$/.test(spec?.artifactId||''))
     throw new Error('Invalid fixed model/league/horizon selection plan');
-  if(!model || model.artifactFormat !== 'sports-local-ml-artifact-v2' || model.artifactId !== localMlArtifactId(model)
-    || model.artifactId !== spec.artifactId || model.trainedAt !== spec.trainedAt || model.lastTrainingOutcomeAt !== spec.lastTrainingOutcomeAt)
-    throw new Error('Exact verified research artifact required for preregistration');
+  const isMl=spec.candidate==='ml';
+  if(isMl){
+    if(!model || model.artifactFormat!=='sports-local-ml-artifact-v2' || model.artifactId!==localMlArtifactId(model)
+      ||model.artifactId!==spec.artifactId||model.trainedAt!==spec.trainedAt||model.lastTrainingOutcomeAt!==spec.lastTrainingOutcomeAt)
+      throw new Error('Exact verified research artifact required for preregistration');
+  }else{
+    const expected=hybridArtifact(spec.sport,model?.specialistWeight);
+    if(!expected||JSON.stringify(model)!==JSON.stringify(expected)||model.artifactId!==spec.artifactId||spec.modelVersion!==expected.modelVersion)
+      throw new Error('Exact current hybrid source recipe required for preregistration');
+    if(spec.trainedAt||spec.lastTrainingOutcomeAt)throw new Error('Fixed hybrid recipes do not have fitted training timestamps');
+  }
   const artifactBytes=JSON.stringify(model)+'\n';
   const start=epoch(spec.start),end=epoch(spec.end),trained=epoch(spec.trainedAt),labels=epoch(spec.lastTrainingOutcomeAt);
-  if(![start,end,trained,labels].every(Number.isFinite)||labels>trained||trained>now||now>=start||end-start<14*86400000)
-    throw new Error('Declare after training but before an evaluation period of at least 14 days');
+  if(![start,end].every(Number.isFinite)||now>=start||end-start<14*86400000
+    ||isMl&&(![trained,labels].every(Number.isFinite)||labels>trained||trained>now))
+    throw new Error('Declare after training or recipe freeze but before an evaluation period of at least 14 days');
   const minimumDates=spec.minimumDates??8;
   if(!Number.isInteger(minimumDates)||minimumDates<8||minimumDates>10000)throw new Error('At least 8 independent dates required');
   const minimum=spec.minimumGames??75;
   if(!Number.isInteger(minimum)||minimum<75||minimum>100000)throw new Error('At least 75 independent games required');
   const plan={schema:'sports-selection-plan-v1',id:spec.id,sport:spec.sport,league:spec.league,horizon:spec.horizon,
-    candidate:'ml',artifactId:spec.artifactId,modelVersion:spec.modelVersion,trainedAt:spec.trainedAt,
-    lastTrainingOutcomeAt:spec.lastTrainingOutcomeAt,start:new Date(start).toISOString(),end:new Date(end).toISOString(),
+    candidate:spec.candidate,artifactId:spec.artifactId,modelVersion:spec.modelVersion,
+    ...(isMl?{trainedAt:spec.trainedAt,lastTrainingOutcomeAt:spec.lastTrainingOutcomeAt}
+      :{recipeFrozenAt:new Date(now).toISOString(),specialistWeight:model.specialistWeight}),start:new Date(start).toISOString(),end:new Date(end).toISOString(),
     registeredAt:new Date(now).toISOString(),minimumGames:minimum,minimumDates,
     decisionRule:'fixed artifact; matched game-cluster Brier difference lower bound > 0 and mean > .0025; log-loss lower bound >= -.003; no automatic promotion'};
   plan.artifactFile=plan.id+'-model.json';
@@ -80,7 +91,7 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
     if(now<epoch(plan.end))return {status:'awaiting_predeclared_period_end',promotionAllowed:false};
     const forecasts=records.filter(event=>event.type==='forecast'&&event.payload.lifecycleState==='ISSUED'
       &&event.payload.modelVersion===plan.modelVersion&&event.payload.league===plan.league&&event.payload.horizon===plan.horizon
-      &&event.payload.eventContext?.sport===plan.sport&&event.payload.candidateArtifactIds?.ml===plan.artifactId
+      &&event.payload.eventContext?.sport===plan.sport&&event.payload.candidateArtifactIds?.[plan.candidate]===plan.artifactId
       &&epoch(event.recordedAt)>=epoch(plan.start)&&epoch(event.recordedAt)<epoch(plan.end));
     const ids=new Set(forecasts.map(event=>event.payload.forecastId));
     const visible=records.filter(event=>epoch(event.recordedAt)<=now);
@@ -89,7 +100,7 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
     const used=new Set(state.consumedGames),overlap=forecasts.some(event=>used.has(gameKey(event.payload)));
     const subset=visible.filter(event=>ids.has(event.payload.forecastId));
     const evaluation=evaluateMatchedJournal(subset,{asOf:now});
-    const comparison=evaluation.byVersion[plan.modelVersion]?.ml;
+    const comparison=evaluation.byVersion[plan.modelVersion]?.[plan.candidate];
     const interval=comparison?.pairedGameBootstrap95;
     const independentDates=comparison?.distinctEventDates||0;
     const candidateImprovement={brier:comparison?.differences.brierImprovement==null?null:-comparison.differences.brierImprovement,

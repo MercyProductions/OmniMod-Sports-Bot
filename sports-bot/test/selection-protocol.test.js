@@ -1,3 +1,4 @@
+import {hybridArtifact,hybridArtifactId} from '../src/hybridArtifact.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
@@ -172,4 +173,70 @@ test('the research CLI pins a model and reads an explicit journal without activa
   const review=await run(process.execPath,[script,'--action=finalize',`--directory=${dir}`,'--id=cli-smoke',`--journal=${journal}`]);
   assert.equal(JSON.parse(review.stdout).status,'awaiting_predeclared_period_end');
   assert.equal(JSON.parse(await readFile(join(dir,'cli-smoke-model.json'),'utf8')).artifactId,store.sports.basketball.artifactId);
+});
+
+
+function hybridSpec(){
+ const {trainedAt,lastTrainingOutcomeAt,...base}=spec();
+ return {...base,id:'fixed-hybrid',candidate:'hybrid',artifactId:hybridArtifactId('basketball',.38)};
+}
+function hybridRows(){
+ return prospectiveRows().map(event=>{
+  if(event.type==='forecast'){
+   event.payload.candidateArtifactIds.hybrid=hybridSpec().artifactId;
+   event.payload.candidateProbabilities.hybrid={home:.8,away:.2,draw:0};
+   event.payload.candidateProbabilities.ml={home:.01,away:.99,draw:0};
+  }
+  return event;
+ });
+}
+
+test('hybrid preregistration pins the exact recipe without inventing fitted training dates',async t=>{
+ const dir=await directory(t),artifact=hybridArtifact('basketball',.38);
+ const registered=await registerSelectionPlan(hybridSpec(),{directory:dir,model:artifact,now:registeredAt});
+ assert.equal(registered.candidate,'hybrid');assert.equal(registered.trainedAt,undefined);
+ assert.equal(registered.recipeFrozenAt,iso(registeredAt));assert.equal(registered.specialistWeight,.38);
+ assert.deepEqual(JSON.parse(await readFile(join(dir,registered.artifactFile),'utf8')),artifact);
+ const changed=structuredClone(artifact);changed.sourceManifest[0].sha256='0'.repeat(64);
+ await assert.rejects(registerSelectionPlan({...hybridSpec(),id:'tampered'},{directory:dir,model:changed,now:registeredAt}),/Exact current hybrid/);
+ await assert.rejects(registerSelectionPlan({...hybridSpec(),id:'fictional-fit',trainedAt:iso(registeredAt)},{directory:dir,model:artifact,now:registeredAt}),/do not have fitted/);
+});
+
+test('hybrid trial consumes its own matched candidate scores once rather than ML scores',async t=>{
+ const dir=await directory(t);
+ await registerSelectionPlan(hybridSpec(),{directory:dir,model:hybridArtifact('basketball',.38),now:registeredAt});
+ const result=await finalizeSelectionPlan('fixed-hybrid',{directory:dir,records:hybridRows(),now:Date.parse('2101-01-16T00:00:00Z')});
+ assert.equal(result.candidate,'hybrid');assert.equal(result.status,'review_ready');
+ assert.ok(result.candidateImprovement.brier>0);assert.equal(result.evaluation.byVersion[CURRENT_MODEL_VERSION].hybrid.primary.games,75);
+ assert.equal(result.promotionAllowed,false);
+ const retry=await finalizeSelectionPlan('fixed-hybrid',{directory:dir,records:[],now:Date.parse('2101-01-17T00:00:00Z')});
+ assert.equal(retry.status,'already_finalized');assert.equal(retry.report.reportHash,result.reportHash);
+});
+
+test('hybrid and ML trials cannot overlap a league period; wrong hybrid recipe is not evaluated',async t=>{
+ const dir=await directory(t);
+ await registerSelectionPlan(spec(),{directory:dir,model:pinnedModel,now:registeredAt});
+ await assert.rejects(registerSelectionPlan(hybridSpec(),{directory:dir,model:hybridArtifact('basketball',.38),now:registeredAt}),/overlap/);
+ const other=await directory(t);
+ await registerSelectionPlan(hybridSpec(),{directory:other,model:hybridArtifact('basketball',.38),now:registeredAt});
+ const records=hybridRows();for(const event of records)if(event.type==='forecast')event.payload.candidateArtifactIds.hybrid=hybridArtifactId('basketball',.4);
+ const result=await finalizeSelectionPlan('fixed-hybrid',{directory:other,records,now:Date.parse('2101-01-16T00:00:00Z')});
+ assert.equal(result.status,'insufficient_independent_games');assert.equal(result.promotionAllowed,false);
+});
+
+test('hybrid source descriptors cannot mutate the frozen process identity',()=>{
+ const before=hybridArtifactId('basketball',.38),descriptor=hybridArtifact('basketball',.38);
+ descriptor.sourceManifest[0].sha256='0'.repeat(64);descriptor.sourceManifest.push({name:'invented.js',sha256:'0'.repeat(64)});
+ assert.equal(hybridArtifactId('basketball',.38),before);
+});
+
+test('CLI registers hybrid recipes without requiring a fitted ML model file',async t=>{
+ const dir=await directory(t),specFile=join(dir,'hybrid-plan.json'),start=Date.now()+86400000;
+ await writeFile(specFile,JSON.stringify({id:'cli-hybrid',candidate:'hybrid',sport:'basketball',league:'nba',horizon:'T-90',specialistWeight:.38,start:iso(start),end:iso(start+15*86400000)}));
+ const script=fileURLToPath(new URL('../scripts/selection-research.js',import.meta.url));
+ const registered=await promisify(execFile)(process.execPath,[script,'--action=register',`--directory=${dir}`,`--spec=${specFile}`]);
+ assert.equal(JSON.parse(registered.stdout).promotionAllowed,false);
+ const state=JSON.parse(await readFile(join(dir,'selection-state.json'),'utf8'));
+ assert.equal(state.plans['cli-hybrid'].candidate,'hybrid');assert.equal(state.plans['cli-hybrid'].trainedAt,undefined);
+ assert.equal(JSON.parse(await readFile(join(dir,'cli-hybrid-model.json'),'utf8')).schema,'sports-hybrid-recipe-v1');
 });
