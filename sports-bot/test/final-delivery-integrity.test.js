@@ -41,8 +41,8 @@ test('final reply acknowledgement and reconciliation cannot borrow the other lea
 
 test('persistent final claims and acknowledgements remain independent for scoped events',async()=>{
  const value=slate(),keys=value.predictions.map(row=>finalResultKey(value,row));
- assert.equal((await claimFinalResult(value.dateKey,'claims',keys[0])).claimed,true);assert.equal((await claimFinalResult(value.dateKey,'claims',keys[1])).claimed,true);
- await finishFinalResult(value.dateKey,'claims',keys[0],{eventKey:keys[0],messageId:'posted',channelId:'channel'});
+ const first=await claimFinalResult(value.dateKey,'claims',keys[0]);assert.equal(first.claimed,true);assert.equal((await claimFinalResult(value.dateKey,'claims',keys[1])).claimed,true);
+ await finishFinalResult(value.dateKey,'claims',keys[0],{eventKey:keys[0],messageId:'posted',channelId:'channel'},first.lease);
  assert.equal((await claimFinalResult(value.dateKey,'claims',keys[0])).claim.state,'posted');assert.equal((await claimFinalResult(value.dateKey,'claims',keys[1])).claim.state,'claimed');
 });
 

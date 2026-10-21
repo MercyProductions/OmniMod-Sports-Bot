@@ -1,3 +1,4 @@
+import {acquireFinalClaim,completeFinalClaim,abandonFinalClaim,verifyFinalClaim,preserveFinalClaimMigration} from './finalClaimStore.js';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
@@ -17,6 +18,7 @@ async function ensureDataDir({skipMigration=false} = {}) {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
     const source = path.join(legacyDataDir, entry.name);
     const destination = path.join(dataDir, entry.name);
+    if(entry.name.startsWith('final-result-')&&await preserveFinalClaimMigration(source,destination))continue;
     await fs.copyFile(source, destination, fsConstants.COPYFILE_EXCL).catch((error) => {
       if (error?.code !== 'EEXIST') throw error;
     });
@@ -124,53 +126,20 @@ export async function finishDailyProviderUsage(dateKey, guildId = '', provider =
   return updated;
 }
 
-export async function claimFinalResult(dateKey, guildId, gameId, details = {}, options = {}) {
+// options.staleMs is retained for compatibility; time does not authorize ownership transfer.
+export async function claimFinalResult(dateKey,guildId,gameId,details={},options={}){
+  const frozenDetails=structuredClone(details);
   await ensureDataDir();
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const staleMs = Math.max(60_000, Number(options.staleMs) || 30 * 60_000);
-  const now = new Date();
-  const claim = {
-    dateKey, guildId: String(guildId || ''), gameId: String(gameId || ''),
-    state: 'claimed', claimedAt: now.toISOString(), processId: process.pid, ...details
-  };
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = await fs.open(file, 'wx', 0o600);
-      try { await handle.writeFile(`${JSON.stringify(claim, null, 2)}\n`, 'utf8'); }
-      finally { await handle.close(); }
-      return { claimed: true, claim };
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      const current = await readJson(file, null, { throwOnError: true });
-      const claimedAt = Date.parse(current?.claimedAt || '');
-      if (current?.state === 'posted' || !Number.isFinite(claimedAt) || now.getTime() - claimedAt < staleMs) {
-        return { claimed: false, claim: current };
-      }
-      const stale = `${file}.stale-${process.pid}-${Date.now()}`;
-      try { await fs.rename(file, stale); }
-      catch (renameError) {
-        if (renameError?.code === 'ENOENT') continue;
-        return { claimed: false, claim: await readJson(file, current) };
-      }
-    }
-  }
-  return { claimed: false, claim: await readJson(file, null) };
+  return acquireFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},frozenDetails);
 }
-
-export async function finishFinalResult(dateKey, guildId, gameId, patch = {}) {
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const current = await readJson(file, null, { throwOnError: true });
-  if (!current) return null;
-  const updated = { ...current, ...patch, state: 'posted', postedAt: patch.postedAt || new Date().toISOString() };
-  await writeJson(file, updated, { mode: 0o600 });
-  return updated;
+export async function verifyFinalResultClaim(dateKey,guildId,gameId,lease){
+  return verifyFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},lease);
 }
-
-export async function releaseFinalResultClaim(dateKey, guildId, gameId) {
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const current = await readJson(file, null).catch(() => null);
-  if (current?.state === 'claimed' && Number(current.processId) === process.pid) await fs.unlink(file).catch(() => {});
+export async function finishFinalResult(dateKey,guildId,gameId,patch={},lease){
+  return completeFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},patch,lease);
+}
+export async function releaseFinalResultClaim(dateKey,guildId,gameId,lease){
+  return abandonFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},lease);
 }
 
 export async function readDailyCache(dateKey, guildId = '') {

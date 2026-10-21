@@ -152,9 +152,10 @@ test('final-result claims allow only one poster and survive cache rewrites', asy
     claimFinalResult(...args, { reason: 'second' })
   ]);
   assert.equal(claims.filter((row) => row.claimed).length, 1);
-  await finishFinalResult(...args, { messageId: 'message-1', channelId: 'channel-1' });
+  const owner=claims.find(row=>row.claimed);
+  await finishFinalResult(...args, { messageId: 'message-1', channelId: 'channel-1' },owner.lease);
   assert.equal((await claimFinalResult(...args, { reason: 'third' })).claimed, false);
-  await releaseFinalResultClaim(...args);
+  await releaseFinalResultClaim(...args,owner.lease);
   assert.equal((await claimFinalResult(...args, { reason: 'fourth' })).claimed, false);
 });
 
