@@ -353,6 +353,7 @@ function resultRowsFromCaches(caches) {
       if (awayScore === null || homeScore === null) continue;
       rows.push({
         id: `cache:${cache.dateKey}:${game.id}`,
+        startTime: game.startTime || null,
         dateKey: cache.dateKey,
         league: game.leagueKey || game.league,
         leagueKey: game.leagueKey,
@@ -388,6 +389,49 @@ function regressLeagueRatings(ratings, league, amount) {
   }
 }
 
+/** Consolidate cross-source copies without treating revised scores as additional games. */
+export function selectEloResults(rows = []) {
+  const buckets = new Map(), audit = {inputRows:rows.length,invalidRows:0,duplicateRows:0,conflictingEvents:0,ambiguousUntimedRows:0,selectedEvents:0};
+  for (const row of rows) {
+    if (!scoreOutcome(row.awayScore,row.homeScore) || !row.awayTeam || !row.homeTeam || !row.dateKey || !(row.leagueKey || row.league)) {audit.invalidRows++;continue;}
+    const key = JSON.stringify([row.dateKey,normalizeEntityName(row.leagueKey || row.league),normalizeEntityName(row.awayTeam),normalizeEntityName(row.homeTeam)]);
+    if (!buckets.has(key)) buckets.set(key,[]);
+    buckets.get(key).push(row);
+  }
+  const selected = [];
+  for (const bucket of buckets.values()) {
+    const timed = new Map(), untimed = [], startsById = new Map();
+    for (const row of bucket) {
+      const time = Date.parse(row.startTime || '');
+      if (!row.id || !Number.isFinite(time)) continue;
+      const times = startsById.get(String(row.id)) || new Set();times.add(time);startsById.set(String(row.id),times);
+    }
+    if ([...startsById.values()].some(times=>times.size>1)) {audit.conflictingEvents++;continue;}
+    for (const row of bucket) {
+      const start = Date.parse(row.startTime || '');
+      if (!Number.isFinite(start)) {untimed.push(row);continue;}
+      if (!timed.has(start)) timed.set(start,[]);
+      timed.get(start).push(row);
+    }
+    if (timed.size > 1) audit.ambiguousUntimedRows += untimed.length;
+    else if (timed.size === 1) timed.values().next().value.push(...untimed);
+    else timed.set(null,untimed);
+    for (const group of timed.values()) {
+      // Optional season metadata missing on one copy is not itself a conflict.
+      const scores = new Set(group.map(row=>JSON.stringify([finiteNumber(row.awayScore),finiteNumber(row.homeScore)])));
+      const venues = new Set(group.filter(row=>typeof row.neutralSite==='boolean').map(row=>row.neutralSite));
+      const seasons = new Set(group.map(row=>finiteNumber(row.seasonYear)).filter(value=>value!==null));
+      if (scores.size>1 || venues.size>1 || seasons.size>1) {audit.conflictingEvents++;continue;}
+      const row = [...group].sort((a,b)=>Number(Boolean(b.startTime))-Number(Boolean(a.startTime)) || String(a.id||'').localeCompare(String(b.id||'')))[0];
+      selected.push(row);audit.duplicateRows += group.length-1;
+    }
+  }
+  selected.sort((a,b)=>String(a.dateKey).localeCompare(String(b.dateKey)) || String(a.startTime||'').localeCompare(String(b.startTime||''))
+    || JSON.stringify([a.leagueKey||a.league,a.awayTeam,a.homeTeam]).localeCompare(JSON.stringify([b.leagueKey||b.league,b.awayTeam,b.homeTeam])));
+  audit.selectedEvents=selected.length;
+  return {rows:selected,audit};
+}
+
 export function buildEloRatings(intelligence = {}, caches = [], externalResults = []) {
   const ratings = new Map();
   for (const team of Object.values(intelligence.teams || {})) {
@@ -400,15 +444,9 @@ export function buildEloRatings(intelligence = {}, caches = [], externalResults 
     ...externalResults,
     ...resultRowsFromCaches(caches)
   ];
-  const deduped = new Map();
-  for (const row of rows) {
-    if (!scoreOutcome(row.awayScore, row.homeScore) || !row.awayTeam || !row.homeTeam) continue;
-    const key = `${row.dateKey}:${eloKey(row.leagueKey || row.league, row.awayTeam)}:${eloKey(row.leagueKey || row.league, row.homeTeam)}:${row.awayScore}:${row.homeScore}`;
-    if (!deduped.has(key)) deduped.set(key, row);
-  }
-
+  const selected = selectEloResults(rows);
   const seasonByLeague = new Map();
-  for (const row of [...deduped.values()].sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)))) {
+  for (const row of selected.rows) {
     const league = row.leagueKey || row.league;
     const seasonYear = inferredSeasonYear(row);
     const priorSeason = seasonByLeague.get(normalizeEntityName(league));
@@ -496,7 +534,7 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
   }
   return {
     intelligence:inputs.intelligence,
-    learningInputAudit:{...inputs.audit,eligibleCalibrationRows:rows.length,
+    learningInputAudit:{...inputs.audit,eloResults:selectEloResults([...Object.values(inputs.intelligence.results || {}),...inputs.externalResults,...resultRowsFromCaches(inputs.eloCaches)]).audit,eligibleCalibrationRows:rows.length,
       calibrationRowsExcludedForAvailabilityOrDuplicateConflict:collectGradedRows(caches,{modelVersion:cohort.modelVersion,horizon:cohort.horizon}).length-rows.length},
     history: { overall, bySport, rows: rows.length, cohort, evaluationVersion: EVALUATION_VERSION },
     calibration: buildCalibrationModel(rows),

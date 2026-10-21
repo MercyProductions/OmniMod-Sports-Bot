@@ -847,7 +847,7 @@ export function predictGame(game, index, modelContext = {}) {
     championModel: mlActive ? mlCandidate.modelId : modelDecision.champion === 'ml' ? 'evidence-ensemble-v6-safety-fallback' : modelDecision.championModelId,
     challengerModel: modelDecision.challengerModelId,
     championStatus: modelDecision.status,
-    candidateArtifactIds: { ml: mlCandidate.artifactId || null, featureWeights: featureLearning?.artifactId || null },
+    candidateArtifactIds: { hybrid: modelDecision.hybridArtifactId || null, ml: mlCandidate.artifactId || null, featureWeights: featureLearning?.artifactId || null },
     candidateProbabilities: {
       evidence: Object.fromEntries(Object.entries(evidenceProbabilities).map(([side, value]) => [side, round(value, 5)])),
       hybrid: Object.fromEntries(Object.entries(hybridProbabilities).map(([side, value]) => [side, round(value, 5)])),

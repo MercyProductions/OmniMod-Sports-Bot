@@ -1,3 +1,4 @@
+import {hybridArtifactId} from './hybridArtifact.js';
 import path from 'node:path';
 import { config, dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
@@ -86,7 +87,8 @@ function approvedReview(row = {}, sport = row.sport) {
   return review?.status === 'review_ready' && review.modelVersion === CURRENT_MODEL_VERSION
     && review.candidate === row.champion && review.sport === sport
     && /^[a-f0-9]{64}$/.test(review.reportHash || '') && /^[a-f0-9]{64}$/.test(review.artifactId || '')
-    && row.approvedArtifactId === review.artifactId;
+    && row.approvedArtifactId === review.artifactId
+    && (row.champion !== 'hybrid' || review.artifactId === hybridArtifactId(sport,clamp(Number(row.specialistWeight)||.38,.15,.55)));
 }
 
 function defaultSportEntry(sport) {
@@ -130,7 +132,8 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
   const reviewEligible = options.allowPromotion === true && review?.status === 'review_ready'
     && review.candidate === proposed && review.sport === sport
     && review.modelVersion === CURRENT_MODEL_VERSION && /^[a-f0-9]{64}$/.test(review.reportHash || '')
-    && /^[a-f0-9]{64}$/.test(review.artifactId || '');
+    && /^[a-f0-9]{64}$/.test(review.artifactId || '')
+    && (proposed !== 'hybrid' || review.artifactId === hybridArtifactId(sport,clamp(Number(existing.specialistWeight)||.38,.15,.55)));
   const promotable = reviewEligible && provenanceEligible && Number(fullComparison.sampleSize || 0) >= minimum &&
     Number(fullComparison.brierImprovement) > 0.0025 &&
     Number(fullComparison.logLossImprovement) >= -0.003 &&
@@ -197,6 +200,7 @@ export function modelDecisionForSport(registry = {}, sport = 'default') {
     specialistWeight: clamp(Number(row.specialistWeight) || 0.38, 0.15, 0.55),
     status: row.status || 'collecting',
     approvedArtifactId: row.approvedArtifactId || null,
+    hybridArtifactId: hybridArtifactId(sport,clamp(Number(row.specialistWeight)||.38,.15,.55)),
     sampleSize: row.evaluation?.models?.[row.champion]?.sampleSize || row.evaluation?.evidence?.sampleSize || 0
   };
 }
