@@ -79,7 +79,7 @@ test('provider imports preserve unknown sample sizes and require positive games 
 
 test('known external values preserve the existing units, difference signs and true-zero rates',async()=>{
  await writeJson(advancedDatasetSnapshotFile,{version:2,sources:[],footballSchedules:[],
-  footballTeams:{A:{epaPerGame:1,passingEpaPerGame:1,rushingEpaPerGame:1,cpoe:0},H:{epaPerGame:2,passingEpaPerGame:2,rushingEpaPerGame:2,cpoe:0}},
+  footballTeams:{A:{games:2,epaPerGame:1,passingEpaPerGame:1,rushingEpaPerGame:1,cpoe:0},H:{games:2,epaPerGame:2,passingEpaPerGame:2,rushingEpaPerGame:2,cpoe:0}},
   basketballTeams:{away:{games:2,pace:100,netRating:-2},home:{games:2,pace:110,netRating:10}},
   hockeyTeams:{A:{games:2,xGoalsFor:4,xGoalsAgainst:5,goalsAgainst:6},H:{games:2,xGoalsFor:6,xGoalsAgainst:5,goalsAgainst:4}}});
  const games=['nfl','nba','nhl'].map(leagueKey=>({id:leagueKey,leagueKey,away:{name:'Away',abbr:'A'},home:{name:'Home',abbr:'H'}}));

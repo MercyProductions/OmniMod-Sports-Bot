@@ -12,7 +12,7 @@ const {observedInputState,predictionInputsAt}=await import('../src/inputChronolo
 const {buildEvidenceCoverage}=await import('../src/evidenceCoverage.js');
 const now=Date.now(),old=new Date(now-20*86400000).toISOString();
 const ids=['tennis-atp','tennis-wta','baseball-savant-batter','baseball-savant-pitcher','nflverse-team-stats','nflverse-schedules','moneypuck-team-xg','statsbomb-open-data','nba-advanced-teams'];
-const team=()=>({epaPerGame:1,passingEpaPerGame:1,rushingEpaPerGame:0,cpoe:0,sourceFetchedAt:old});
+const team=()=>({games:2,epaPerGame:1,passingEpaPerGame:1,rushingEpaPerGame:0,cpoe:0,sourceFetchedAt:old});
 const seed=(extra={})=>writeJson(advancedDatasetSnapshotFile,{version:2,updatedAt:old,sources:[],footballTeams:{A:team(),H:team()},footballSchedules:[],...extra});
 const nflGame=()=>({id:'g',dateKey:'2099-01-01',leagueKey:'nfl',away:{abbr:'A',name:'Away'},home:{abbr:'H',name:'Home'}});
 test.after(()=>rm(directory,{recursive:true,force:true}));

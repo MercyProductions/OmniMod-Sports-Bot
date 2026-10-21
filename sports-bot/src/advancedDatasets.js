@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { checkedHockeyTeamRows, hockeyMeasurementEvidence } from './hockeyDatasetEvidence.js';
 import { planSourceCollectionPeriods } from './sourceCollectionPeriods.js';
 import { checkedNbaTeamRows, nbaGameSeasonEvidence, nbaTeamSampleEvidence } from './nbaDatasetEvidence.js';
 import { replaceBaseballRole, lookupBaseballStat, baseballSampleMeasurement } from './baseballStatIdentity.js';
@@ -8,7 +9,7 @@ import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
 import { selectMlbBatters, observationReceiptTimes } from './mlbLineupEvidence.js';
 import { composeAdvancedProvenance } from './advancedProvenance.js';
-import { finiteNumber, measuredCalculation } from './dataValidation.js';
+import { finiteNumber, measuredCalculation, measuredPerGame as perGame, teamGameSampleEvidence } from './dataValidation.js';
 import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedBaseballSeasonRows, mlbGameSeasonEvidence, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
@@ -25,7 +26,6 @@ function finite(value, fallback = null) {
   return finiteNumber(value, fallback);
 }
 
-const perGame = (total, games) => measuredCalculation([total, games], (value, count) => count > 0 ? value / count : null);
 const difference = (home, away, scale = 1) => measuredCalculation([home, away], (h, a) => (h - a) / scale);
 
 export function parseCsv(text = '') {
@@ -302,19 +302,15 @@ export async function syncAdvancedDatasets(options = {}) {
     const moneyPuckUrl = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${hockeySeason}/regular/teams.csv`;
     if (sourceDue('moneypuck-team-xg')) {
       try {
-        const parsed = checkedDatasetRows(parseCsv(await sourceText(moneyPuckUrl)), { source: 'moneypuck-team-xg',
-          keys: [['team'],['situation'],['xGoalsFor','xGoalsAgainst','goalsFor','goalsAgainst']],
-          features: ['xGoalsFor','xGoalsAgainst','goalsFor','goalsAgainst'], identity: row => nonemptyText(row.team) && nonemptyText(row.situation) });
-        const rows = parsed.rows;
-        const allSituations = rows.filter((row) => String(row.situation).toLowerCase() === 'all');
-        if (!allSituations.length) throw new Error('Advanced source moneypuck-team-xg: no all-situations observations');
+        const parsed = checkedHockeyTeamRows(parseCsv(await sourceText(moneyPuckUrl)));
+        const allSituations = parsed.rows;
         snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
           team: String(row.team || '').trim().toUpperCase(), games: finite(row.games_played),
           xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
           flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
           goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)
         }, 'moneypuck-team-xg')]));
-        recordStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, rejectedRows: parsed.rejectedRows, attribution: 'MoneyPuck.com' });
+        recordStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, rejectedRows: parsed.rejectedRows, excludedSituationRows:parsed.excludedSituationRows, attribution: 'MoneyPuck.com' });
         diagnostics.push(`MoneyPuck team xG: ${allSituations.length} team row(s) for ${hockeySeason}.`);
       } catch (error) {
         recordStatus('moneypuck-team-xg', moneyPuckUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
@@ -382,8 +378,8 @@ function playerRecord(snapshot, tour, name) {
 
 const sourceFeatureFields = {
  'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference','lineupXwobaEvidence'],
- 'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference'],
- 'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference'],
+ 'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference','teamSampleEvidence'],
+ 'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference','teamSampleEvidence'],
  'nba-advanced-teams':['pace','efficiencyDifference','teamSampleEvidence'],
  'tennis-atp':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches'],
  'tennis-wta':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches']
@@ -465,9 +461,10 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
       if (away || home || hasPeriodRelevantCache('nflverse-team-stats',[sync.snapshot.footballTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.footballTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'nflverse-team-stats')) {
         const sourcePeriodEvidence = nflGameSeasonEvidence(game, [away, home]);
-        const usable = away && home && !sourcePeriodEvidence.blocked;
+        const teamSampleEvidence=teamGameSampleEvidence(away,home);
+        const usable = away && home && !sourcePeriodEvidence.blocked && teamSampleEvidence.away.positiveSample && teamSampleEvidence.home.positiveSample;
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'),
-          provider: 'nflverse team stats', sourcePeriodEvidence,
+          provider: 'nflverse team stats', sourcePeriodEvidence,teamSampleEvidence,
           epaDifference: usable ? difference(home.epaPerGame, away.epaPerGame, 60) : null,
           passingEpaDifference: usable ? difference(home.passingEpaPerGame, away.passingEpaPerGame, 38) : null,
           rushingEpaDifference: usable ? difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24) : null,
@@ -482,12 +479,15 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
       if (away || home || hasPeriodRelevantCache('moneypuck-team-xg',[sync.snapshot.hockeyTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.hockeyTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'moneypuck-team-xg')) {
         const sourcePeriodEvidence = nhlGameSeasonEvidence(game, [away, home]);
-        const usable = away && home && !sourcePeriodEvidence.blocked;
-        const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com', sourcePeriodEvidence,
-          awayXg: usable ? perGame(away.xGoalsFor, away.games) : null, homeXg: usable ? perGame(home.xGoalsFor, home.games) : null,
-          xgDifference: usable ? difference(netRate(home, 'xGoalsFor', 'xGoalsAgainst'), netRate(away, 'xGoalsFor', 'xGoalsAgainst')) : null,
-          gsaxDifference: usable ? difference(netRate(home, 'xGoalsAgainst', 'goalsAgainst'), netRate(away, 'xGoalsAgainst', 'goalsAgainst')) : null };
+        const teamSampleEvidence=teamGameSampleEvidence(away,home);
+        const usable = away && home && !sourcePeriodEvidence.blocked && teamSampleEvidence.away.positiveSample && teamSampleEvidence.home.positiveSample;
+        const awayMeasurements=hockeyMeasurementEvidence(away),homeMeasurements=hockeyMeasurementEvidence(home);
+        for(const [side,measurements] of [['away',awayMeasurements],['home',homeMeasurements]])Object.assign(teamSampleEvidence[side],{invalidMeasurements:measurements.invalidMeasurements,missingMeasurements:measurements.missingMeasurements});
+        const netRate = (values,games,forField,againstField) => perGame(difference(values[forField], values[againstField]), games);
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com', sourcePeriodEvidence,teamSampleEvidence,
+          awayXg: usable ? perGame(awayMeasurements.values.xGoalsFor, away.games) : null, homeXg: usable ? perGame(homeMeasurements.values.xGoalsFor, home.games) : null,
+          xgDifference: usable ? difference(netRate(homeMeasurements.values,home.games, 'xGoalsFor', 'xGoalsAgainst'), netRate(awayMeasurements.values,away.games, 'xGoalsFor', 'xGoalsAgainst')) : null,
+          gsaxDifference: usable ? difference(netRate(homeMeasurements.values,home.games, 'xGoalsAgainst', 'goalsAgainst'), netRate(awayMeasurements.values,away.games, 'xGoalsAgainst', 'goalsAgainst')) : null };
         if (usable) matched += 1;
         if (sourcePeriodEvidence.blocked) periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }

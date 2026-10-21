@@ -60,6 +60,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   for(const side of ['away','home'])if(batting?.[side]?.sampleMeasurements?.some(row=>!row.positiveSample))missing.push(`${side}:advanced_batting_sample_unknown_or_invalid`);
   const teamSamples=game.advancedDataset?.teamSampleEvidence;
   for(const side of ['away','home'])if(teamSamples?.[side]&&!teamSamples[side].positiveSample)missing.push(`${side}:advanced_team_sample_unknown_or_invalid`);
+  for(const side of ['away','home'])if(teamSamples?.[side]?.invalidMeasurements?.length)missing.push(`${side}:advanced_team_measurement_invalid`);
   if(teamSamples?.sharedTeamIdentity)missing.push('advanced_dataset:shared_team_identity');
   const sides = {};
   for (const side of ['away', 'home']) {

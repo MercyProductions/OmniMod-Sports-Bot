@@ -11,6 +11,20 @@ export function finiteNumber(value, fallback = null) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+/** Presence of a count is not a claim that its sample is statistically adequate. */
+export function gameCountEvidence(value) {
+  const games = finiteNumber(value);
+  return { games, positiveSample: Number.isSafeInteger(games) && games > 0 };
+}
+
+export function teamGameSampleEvidence(away, home) {
+  return { away: gameCountEvidence(away?.games), home: gameCountEvidence(home?.games), sampleAdequacyValidated: false };
+}
+
+export function measuredPerGame(total, games) {
+  return measuredCalculation([total, games], (value, count) => gameCountEvidence(count).positiveSample ? value / count : null);
+}
+
 /** A derived measurement exists only when every required input and the result are finite. */
 export function measuredCalculation(values, calculate) {
   const observed = values.map(value => finiteNumber(value));

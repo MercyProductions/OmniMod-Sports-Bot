@@ -41,7 +41,7 @@ test('unknown season remains disclosed, invalid season is rejected, and native c
 });
 
 test('unmeasured zero negative or fractional team samples cannot supply external NBA factors',async()=>{
- for(const games of [undefined,null,0,-1,1.5]){
+ for(const games of [undefined,null,0,-1,1.5,1e18]){
   const rows=teams();rows.away.games=games;await seed(rows);const g=game(2027);await attach(g);
   assert.equal(g.advancedDataset.pace,null);assert.equal(g.advancedDataset.efficiencyDifference,null);
   assert.equal(g.advancedDataset.teamSampleEvidence.away.positiveSample,false);

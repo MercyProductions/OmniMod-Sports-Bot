@@ -148,3 +148,7 @@ Development v6.0.27 binds NBA source seasons using observed ESPN end-year metada
 ## Source-specific collection-period continuation
 
 Development v6.0.28 selects independent game-driven source periods, preserves explicit research pins and refuses ambiguous same-source seasons. [Reproductions, scope API, cache/retry/concurrency controls and actual historical import evidence](SPORTS_SOURCE_COLLECTION_PERIODS.md); complete suite 397 passing. No new provider access, forecasts, deployment or demonstrated predictive improvement.
+
+## Team rate-integrity continuation
+
+Development v6.0.29 rejects invalid NFL/NHL game denominators, validates consumed NHL totals and refuses duplicate all-situation team identities. [Reproductions, preserved signed/zero metrics and 32 actual historical arithmetic checks](SPORTS_TEAM_RATE_INTEGRITY.md); complete suite 405 passing. Sample adequacy, native publication and predictive improvement remain unverified; no deployment.

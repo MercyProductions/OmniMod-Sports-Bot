@@ -1,4 +1,4 @@
-import { finiteNumber } from './dataValidation.js';
+import { finiteNumber, teamGameSampleEvidence } from './dataValidation.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { checkedDatasetRows } from './advancedDatasetContracts.js';
 
@@ -44,8 +44,7 @@ export function nbaGameSeasonEvidence(game={},rows=[]){
 }
 
 export function nbaTeamSampleEvidence(away,home){
- const measure=row=>{const games=finiteNumber(row?.games);return {games,positiveSample:Number.isInteger(games)&&games>0};};
  const a=away?.teamId,h=home?.teamId;
  const sharedTeamIdentity=Boolean(away&&home&&(away===home||present(a)&&present(h)&&String(a).trim()===String(h).trim()));
- return {away:measure(away),home:measure(home),sharedTeamIdentity,identityBasis:present(a)&&present(h)?'native_team_ids':'normalized_team_names_only',nativeIdentityMappingVerified:false,sampleAdequacyValidated:false};
+ return {...teamGameSampleEvidence(away,home),sharedTeamIdentity,identityBasis:present(a)&&present(h)?'native_team_ids':'normalized_team_names_only',nativeIdentityMappingVerified:false,sampleAdequacyValidated:false};
 }
