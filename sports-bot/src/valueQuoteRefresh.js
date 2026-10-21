@@ -1,3 +1,4 @@
+import {beginQuoteAttempt,completeQuoteAttempt} from './quoteAttemptAudit.js';
 import {matchOddsEventCohort} from './oddsEventIdentity.js';
 import {hasQuoteScope,quotePredictions,uniqueQuoteRows} from './quoteRefreshIdentity.js';
 import {scopedEventKey,eventReference,resolveSlateGame} from './slateEventIdentity.js';
@@ -49,6 +50,7 @@ export async function claimValueRefresh({ now = Date.now(), dailyCap = config.va
   try {
     handle = await fs.open(file, 'wx', 0o600);
     await handle.writeFile(JSON.stringify(claim), 'utf8');
+    await handle.sync();
   } catch (error) {
     if (error?.code === 'EEXIST') return { claimed: false, status: 'concurrent_claim', used: todays.length, cap };
     throw new Error('Could not reserve quote refresh budget; no provider call was made.');
@@ -98,6 +100,14 @@ export async function refreshValueQuotes(slate, options = {}) {
   }
   if (!budget.claimed) return response(slate, budget.status, `Quote refresh ${budget.status}; ${budget.used}/${budget.cap} daily request slots used.${budget.retryAt ? ` Retry after ${budget.retryAt}.` : ''} Cached quotes retained.`, { budget });
 
+  const auditDirectory=options.directory??dataDir;let attempt;
+  try{attempt=await beginQuoteAttempt(auditDirectory,budget,{slate,games,models,league,now});}
+  catch{return response(slate,'audit_error','Quote-attempt audit could not be started; no provider request made. The reserved slot remains consumed.',{budget});}
+  let result;
+  const finish=async output=>{
+    try{return {...output,quoteAttemptAudit:await completeQuoteAttempt(auditDirectory,attempt,output,result,options.now??Date.now())};}
+    catch{return response(slate,'audit_error','Quote-attempt completion could not be verified; no price snapshot is issued. Preserve its audit records for review.',{budget,externalCalls:output.externalCalls,quoteAttemptAudit:attempt});}
+  };
   const url = new URL(`https://api.the-odds-api.com/v4/sports/${supported.get(league)}/odds/`);
   url.searchParams.set('apiKey', apiKey);
   url.searchParams.set('regions', String(options.oddsApiRegion || config.oddsApiRegion || 'us').split(',')[0].trim());
@@ -106,15 +116,15 @@ export async function refreshValueQuotes(slate, options = {}) {
   // Use explicit known provider event IDs where all selected games have them.
   if (games.every((game) => game.odds?.eventId && !game.odds?.freeProvider)) url.searchParams.set('eventIds', games.map((game) => game.odds.eventId).join(','));
   const request = options.fetchJson || cachedFetchJson;
-  let result;
   try {
     result = await request(url.toString(), { namespace: `value-h2h-${league}`, force: true, ttlMs: 0, staleMs: 0, timeoutMs: 15_000, secretParams: ['apiKey'] });
   } catch {
-    return response(slate, 'provider_failure', `Quote provider request failed; reserved slot ${budget.used}/${budget.cap} remains consumed. Cached quotes retained.`, { budget, externalCalls: 1 });
+    return finish(response(slate, 'provider_failure', `Quote provider request failed; reserved slot ${budget.used}/${budget.cap} remains consumed. Cached quotes retained.`, { budget, externalCalls: 1 }));
   }
   if (!result?.ok || !Array.isArray(result.json) || !['network', 'revalidated'].includes(result.cacheState)) {
-    return response(slate, 'provider_failure', `Quote provider did not return a new usable response (HTTP ${Number(result?.status) || 0}); slot ${budget.used}/${budget.cap} consumed. Cached quotes retained.`, { budget, externalCalls: 1 });
+    return finish(response(slate, 'provider_failure', `Quote provider did not return a new usable response (HTTP ${Number(result?.status) || 0}); slot ${budget.used}/${budget.cap} consumed. Cached quotes retained.`, { budget, externalCalls: 1 }));
   }
+  try {
   const issuedAt = new Date(options.now ?? Date.now()).toISOString();
   const updated = new Map();
   const matches=matchOddsEventCohort((slate.games||[]).filter(game=>game.leagueKey===league),result.json,supported.get(league));
@@ -129,7 +139,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     if (!h2h.away || !h2h.home || !h2h.bookmakerCount) continue;
     updated.set(scopedEventKey(eventReference(game)), { ...game, oddsMatchEvidence:match.evidence, odds: { eventId: event.id,eventIdentity:match.evidence, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });
   }
-  if (!updated.size) return response(slate, 'unmatched', `New ${league} h2h response matched no complete future markets; cached quotes retained. Slot ${budget.used}/${budget.cap} used.`, { budget, externalCalls: 1,oddsMatchAudit });
+  if (!updated.size) return finish(response(slate, 'unmatched', `New ${league} h2h response matched no complete future markets; cached quotes retained. Slot ${budget.used}/${budget.cap} used.`, { budget, externalCalls: 1,oddsMatchAudit }));
   const nextGames = (slate.games || []).map((game) => updated.get(scopedEventKey(eventReference(game))) || game);
   const snapshots = [];
   const predictions = uniqueQuoteRows(slate.predictions || []).map((prediction) => {
@@ -147,5 +157,6 @@ export async function refreshValueQuotes(slate, options = {}) {
   const fresh = predictions.filter((row) => hasQuoteScope(row)&&updated.has(scopedEventKey(row))).some((row) => row.valueAnalysis.outcomes.some((outcome) => outcome.quote?.fresh));
   const issuedSlate = { ...slate, generatedAt: issuedAt, games: nextGames, predictions: snapshots };
   const nextSlate = { ...slate, games: nextGames, predictions, lastValueQuoteRefreshAt: issuedAt };
-  return response(nextSlate, fresh ? 'fresh' : 'provider_quotes_stale', `${fresh ? 'Fresh' : 'Provider returned stale/unknown-time'} ${league} h2h quotes for ${updated.size} game(s); slot ${budget.used}/${budget.cap} used. Model probabilities remain frozen (modelAsOf retained).`, { budget, externalCalls: 1, issuedSlate,oddsMatchAudit });
+  return finish(response(nextSlate, fresh ? 'fresh' : 'provider_quotes_stale', `${fresh ? 'Fresh' : 'Provider returned stale/unknown-time'} ${league} h2h quotes for ${updated.size} game(s); slot ${budget.used}/${budget.cap} used. Model probabilities remain frozen (modelAsOf retained).`, { budget, externalCalls: 1, issuedSlate,oddsMatchAudit }));
+  }catch{return finish(response(slate,'processing_failure','Quote response processing failed; cached quotes retained and the reserved slot remains consumed.',{budget,externalCalls:1}));}
 }
