@@ -16,6 +16,41 @@ function entry(role,delta=0,{final=false,side='home',mode='live'}={}){
 }
 const options={asOf:base+5*3600000};
 
+function scopedEntry(role,{secondLeague='nhl',secondStart=iso(3600000)}={}){
+ const row=entry(role,role==='challenger'?1000:0),first=row.capture.slate.games[0],second={...structuredClone(first),leagueKey:secondLeague,startTime:secondStart};
+ row.capture.slate.games=[first,second];row.capture.slate.predictions=[first,second].map(game=>({...row.capture.slate.predictions[0],leagueKey:game.leagueKey,startTime:game.startTime}));return row;
+}
+
+test('paired research and final plans preserve different leagues sharing a native ID',()=>{
+ const rows=[scopedEntry('baseline'),scopedEntry('challenger')],report=evaluateProspectiveCaptures(rows,options);assert.equal(report.pairedForecasts,2);assert.deepEqual(new Set(report.pairs.map(row=>row.league)),new Set(['nba','nhl']));
+ const plan=pendingProspectiveFinalQueries(rows,options);assert.equal(plan.tasks.length,2);assert.ok(plan.tasks.every(task=>task.games.length===2));assert.ok(plan.tasks.every(task=>new Set(task.predictions.map(row=>row.leagueKey)).size===2));
+});
+
+test('paired research and final plans preserve different scheduled starts sharing a native ID',()=>{
+ const args={secondLeague:'nba',secondStart:iso(2*3600000)},rows=[scopedEntry('baseline',args),scopedEntry('challenger',args)];assert.equal(evaluateProspectiveCaptures(rows,options).pairedForecasts,2);assert.ok(pendingProspectiveFinalQueries(rows,options).tasks.every(task=>task.games.length===2));
+});
+
+test('mismatched declared forecast league or start cannot become a paired comparison',()=>{
+ for(const patch of [{leagueKey:'nhl'},{startTime:iso(2*3600000)}]){const a=entry('baseline'),b=entry('challenger',1000);Object.assign(a.capture.slate.predictions[0],patch);assert.equal(evaluateProspectiveCaptures([a,b],options).pairedForecasts,0);assert.equal(pendingProspectiveFinalQueries([a],options).tasks.length,0);}
+});
+
+test('conflicting forecast observations cannot enter a comparison by first-row selection',()=>{
+ const a=entry('baseline'),b=entry('challenger',1000);b.capture.slate.predictions.push({...b.capture.slate.predictions[0],outcomeProbabilities:{away:60,home:40,draw:0}});const report=evaluateProspectiveCaptures([a,b],options);assert.equal(report.pairedForecasts,0);assert.ok(report.rejections.conflicting_forecast_observations);assert.equal(pendingProspectiveFinalQueries([b],options).tasks.length,0);
+});
+
+test('conflicting source observations remain excluded while identical duplicates coalesce',()=>{
+ const a=entry('baseline'),b=entry('challenger',1000);b.capture.slate.games.push(structuredClone(b.capture.slate.games[0]));assert.equal(evaluateProspectiveCaptures([a,b],options).pairedForecasts,1);b.capture.slate.games[1].detail='contradictory provider observation';assert.equal(evaluateProspectiveCaptures([a,b],options).pairedForecasts,0);
+});
+
+test('within-capture final conflicts cannot silently grade a pair or stop final queries',()=>{
+ const rows=[entry('baseline'),entry('challenger',1000),entry('baseline',0,{final:true})],conflict=entry('challenger',0,{final:true});const final=conflict.capture.slate.games[0];conflict.capture.slate.games.unshift({...structuredClone(final),away:{...final.away,score:100},home:{...final.home,score:90}});rows.push(conflict);
+ const report=evaluateProspectiveCaptures(rows,options);assert.equal(report.pairedForecasts,1);assert.equal(report.rejections.ambiguous_final_source_observations,1);assert.equal(report.matched.rejections.unresolved,1);const plan=pendingProspectiveFinalQueries(rows,options);assert.equal(plan.conflictingFinalEvents,1);assert.ok(plan.tasks.some(task=>task.role==='challenger'));
+});
+
+test('scoped comparisons and final planning never rewrite the frozen input captures',()=>{
+ const rows=[scopedEntry('baseline'),scopedEntry('challenger')],before=structuredClone(rows);evaluateProspectiveCaptures(rows,options);pendingProspectiveFinalQueries(rows,options);assert.deepEqual(rows,before);
+});
+
 test('collector waits for an actually observed clock value and bounds persistent or larger skew',async()=>{
  let observed=base,elapsed=0,pauses=0;
  const injected={clock:()=>observed,monotonic:()=>elapsed,pause:async ms=>{pauses++;elapsed+=ms;observed+=ms;}};
