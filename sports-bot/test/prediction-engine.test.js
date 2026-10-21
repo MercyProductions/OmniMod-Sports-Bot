@@ -180,13 +180,14 @@ test('automatic external results update Elo and bounded recent head-to-head', ()
   const externalResults = Array.from({ length: 6 }, (_, index) => ({
     id: `external-${index}`, dateKey: `2098-12-${String(index + 1).padStart(2, '0')}`,
     startTime: `2098-12-${String(index + 1).padStart(2, '0')}T20:00:00Z`,
+    observedAt:`2098-12-${String(index+1).padStart(2,'0')}T23:00:00Z`,
     league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball',
     awayTeam: 'Away Team', homeTeam: 'Home Team', awayScore: 90, homeScore: 110
   }));
   const ratings = buildEloRatings({ teams: {}, results: {} }, [], externalResults);
   assert.ok(lookupElo(ratings, 'nba', 'Home Team') > 1500);
 
-  const baselineContext = context();
+  const baselineContext = {...context(),now:Date.parse('2099-01-01T12:00:00Z')};
   const baseline = predictGame(game(), 0, baselineContext);
   const enriched = predictGame(game(), 0, { ...baselineContext, externalResults });
   assert.ok(enriched.outcomeProbabilities.home > baseline.outcomeProbabilities.home);

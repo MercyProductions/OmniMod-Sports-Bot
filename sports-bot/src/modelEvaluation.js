@@ -533,6 +533,7 @@ export async function loadModelContext(guildId = '', days = 365, options = {}) {
     bySport[key] = evaluatePredictionRows(rows.filter((row) => profileKey(row.prediction) === key));
   }
   return {
+    now:cutoff,
     intelligence:inputs.intelligence,
     learningInputAudit:{...inputs.audit,eloResults:selectEloResults([...Object.values(inputs.intelligence.results || {}),...inputs.externalResults,...resultRowsFromCaches(inputs.eloCaches)]).audit,eligibleCalibrationRows:rows.length,
       calibrationRowsExcludedForAvailabilityOrDuplicateConflict:collectGradedRows(caches,{modelVersion:cohort.modelVersion,horizon:cohort.horizon}).length-rows.length},

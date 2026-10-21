@@ -1,3 +1,4 @@
+import {predictionInputsAt,observedInputState} from './inputChronology.js';
 import { buildEvidenceCoverage, summaryEvidence } from './evidenceCoverage.js';
 import { calibrateSelectedProbability, lookupElo } from './modelEvaluation.js';
 import { normalizeEntityName } from './intelligenceStore.js';
@@ -130,10 +131,10 @@ function contextForGame(game, intelligence, now) {
   return { combined, manual };
 }
 
-function localFreshness(row) {
+function localFreshness(row, now = Date.now()) {
   if (!row?.updatedAt) return 0.55;
-  const ageDays = Math.max(0, (Date.now() - new Date(row.updatedAt).getTime()) / 86_400_000);
-  if (Date.parse(row.updatedAt) > Date.now()) return 0;
+  const ageDays = Math.max(0, (now - new Date(row.updatedAt).getTime()) / 86_400_000);
+  if (Date.parse(row.updatedAt) > now) return 0;
   if (!Number.isFinite(ageDays)) return 0.55;
   if (ageDays <= 7) return 1;
   if (ageDays <= 30) return 0.9;
@@ -193,7 +194,7 @@ function availabilityFraction(player) {
   return clamp(availability > 1 ? availability / 100 : availability, 0, 1);
 }
 
-function playerAvailabilityScore(players, profile) {
+function playerAvailabilityScore(players, profile, now) {
   if (!players.length) return { score: 0, unavailableImpact: 0, coverage: 0, details: [] };
   let score = 0;
   let unavailableImpact = 0;
@@ -216,7 +217,7 @@ function playerAvailabilityScore(players, profile) {
       details.push(`${player.name}: ${Math.round(availability * 100)}% available${projection ? `, ${projection.expectedWorkload} ${projection.workloadUnit}` : ''}, impact ${round(impact, 1)}`);
     }
   }
-  const freshness = players.reduce((total, row) => total + localFreshness(row), 0) / players.length;
+  const freshness = players.reduce((total, row) => total + localFreshness(row, now), 0) / players.length;
   return {
     score: clamp(score, -18, 12),
     unavailableImpact: round(unavailableImpact, 1),
@@ -316,11 +317,12 @@ function situationalScore(game, awayTeam, homeTeam, context) {
   return { score: clamp(score, -3, 3), details, weatherSeverity };
 }
 
-function marketVector(game, profile) {
+function marketVector(game, profile, now) {
   const h2h = game.odds?.h2h;
   if (!h2h?.away || !h2h?.home) return null;
   const quoteTime = Date.parse(h2h.lastUpdate || game.odds?.lastUpdate || '');
-  if (Number.isFinite(quoteTime) && (Date.now() - quoteTime > 6 * 60 * 60_000 || quoteTime - Date.now() > 5 * 60_000)) return null;
+  const times=[h2h.lastUpdate,game.odds?.lastUpdate,...['away','home','draw'].flatMap(side=>[h2h[side]?.lastUpdate,...(h2h[side]?.quotes||[]).map(row=>row.lastUpdate)])].filter(value=>value!==undefined&&value!==null&&value!=='').map(value=>typeof value==='string'?Date.parse(value):NaN);
+  if(times.some(value=>!Number.isFinite(value)||value>now)||Number.isFinite(quoteTime)&&now-quoteTime>6*60*60_000)return null;
   if (game.odds?.cacheState === 'stale') return null;
   if (!profile.twoWay && !h2h.draw) return null;
   const away = finite(h2h.away.fairProbability ?? h2h.away.implied);
@@ -344,15 +346,15 @@ function marketVector(game, profile) {
   return vector;
 }
 
-function sourceFreshnessMinutes(game) {
+function sourceFreshnessMinutes(game, now) {
   const time = game.sourceMeta?.fetchedAt || game.sourceMeta?.cachedAt || '';
   const parsed = new Date(time).getTime();
-  return Number.isFinite(parsed) ? Math.max(0, (Date.now() - parsed) / 60_000) : null;
+  return Number.isFinite(parsed) && parsed <= now ? (now - parsed) / 60_000 : null;
 }
 
-function marketFreshnessMinutes(market) {
+function marketFreshnessMinutes(market, now) {
   const parsed = new Date(market?.lastUpdate || '').getTime();
-  return Number.isFinite(parsed) ? Math.max(0, (Date.now() - parsed) / 60_000) : null;
+  return Number.isFinite(parsed) && parsed <= now ? (now - parsed) / 60_000 : null;
 }
 
 function headToHeadScore(game, results = []) {
@@ -392,12 +394,12 @@ function headToHeadScore(game, results = []) {
 }
 
 function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
-  const externalScoreboard = /espn|api|provider/i.test(`${game.source || ''} ${game.sourceMeta?.provider || ''}`) && !/manual/i.test(game.source || '');
+  const externalScoreboard = !['after_information_cutoff','invalid_observation_time'].includes(observedInputState(game.sourceMeta,now)) && /espn|api|provider/i.test(`${game.source || ''} ${game.sourceMeta?.provider || ''}`) && !/manual/i.test(game.source || '');
   let score = externalScoreboard ? 28 : 0;
   if (externalScoreboard && game.id && game.startTime && game.away?.name && game.home?.name) score += 12;
   if (externalScoreboard && parseRecord(game.away?.record).present && parseRecord(game.home?.record).present) score += 10;
   if (externalScoreboard && game.statusKey && game.statusLabel) score += 5;
-  const freshness = sourceFreshnessMinutes(game);
+  const freshness = sourceFreshnessMinutes(game, now);
   if (externalScoreboard && freshness !== null) {
     score += freshness <= 15 ? 8 : freshness <= 60 ? 5 : freshness <= 360 ? 2 : 0;
   }
@@ -430,7 +432,7 @@ function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
     score += freeSingleBook ? 5 : 12;
     score += clamp(market.bookmakerCount, 0, 8) * 2;
     if (market.bookmakerCount >= 2) score += market.dispersion <= 0.025 ? 6 : market.dispersion <= 0.06 ? 3 : 0;
-    const age = marketFreshnessMinutes(market);
+    const age = marketFreshnessMinutes(market, now);
     score += age !== null && age <= 30 ? 3 : 0;
   }
   const independentMarket = Boolean(market && !game.odds?.freeProvider && market.bookmakerCount >= 2);
@@ -438,13 +440,13 @@ function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
   return Math.round(clamp(score, 0, independentMarket ? 100 : independentOfficial ? 96 : 88));
 }
 
-function localDataConfidence(awayTeam, homeTeam, awayPlayers, homePlayers, context, history) {
+function localDataConfidence(awayTeam, homeTeam, awayPlayers, homePlayers, context, history, now) {
   let score = 5;
-  if (awayTeam && !awayTeam.autoGenerated) score += 17 * localFreshness(awayTeam);
-  if (homeTeam && !homeTeam.autoGenerated) score += 17 * localFreshness(homeTeam);
+  if (awayTeam && !awayTeam.autoGenerated) score += 17 * localFreshness(awayTeam, now);
+  if (homeTeam && !homeTeam.autoGenerated) score += 17 * localFreshness(homeTeam, now);
   score += awayPlayers.coverage * 15;
   score += homePlayers.coverage * 15;
-  if (context) score += 12 * localFreshness(context);
+  if (context) score += 12 * localFreshness(context, now);
   const samples = Number(history?.overall?.sampleSize || 0);
   score += clamp(samples / 100, 0, 1) * 12;
   return Math.round(clamp(score, 0, 100));
@@ -491,17 +493,19 @@ function rescaleProbabilities(vector, selectedSide, calibratedProbability) {
 }
 
 export function predictGame(game, index, modelContext = {}) {
+  if(modelContext.now!==undefined&&!Number.isFinite(modelContext.now))throw new Error('Valid prediction information cutoff required');
+  const evidenceNow = modelContext.now ?? Date.now();
+  const inputs = predictionInputsAt(game,modelContext,evidenceNow);game=inputs.game;modelContext=inputs.context;
   const intelligence = modelContext.intelligence || {};
-  const evidenceNow = Number.isFinite(modelContext.now) ? modelContext.now : Date.now();
   const profile = sportProfile(game);
   const awayTeam = findTeamProfile(game, 'away', intelligence, evidenceNow);
   const homeTeam = findTeamProfile(game, 'home', intelligence, evidenceNow);
   const awayPlayerRows = playersForTeam(game, 'away', intelligence, evidenceNow);
   const homePlayerRows = playersForTeam(game, 'home', intelligence, evidenceNow);
-  const awayPlayers = playerAvailabilityScore(awayPlayerRows, profile);
-  const homePlayers = playerAvailabilityScore(homePlayerRows, profile);
-  const manualAwayPlayers = playerAvailabilityScore(awayPlayerRows.filter((row) => !row.autoGenerated), profile);
-  const manualHomePlayers = playerAvailabilityScore(homePlayerRows.filter((row) => !row.autoGenerated), profile);
+  const awayPlayers = playerAvailabilityScore(awayPlayerRows, profile, evidenceNow);
+  const homePlayers = playerAvailabilityScore(homePlayerRows, profile, evidenceNow);
+  const manualAwayPlayers = playerAvailabilityScore(awayPlayerRows.filter((row) => !row.autoGenerated), profile, evidenceNow);
+  const manualHomePlayers = playerAvailabilityScore(homePlayerRows.filter((row) => !row.autoGenerated), profile, evidenceNow);
   const { combined: context, manual: manualContext } = contextForGame(game, intelligence, evidenceNow);
   const situation = situationalScore(game, awayTeam, homeTeam, context);
   const headToHead = headToHeadScore(game, modelContext.externalResults || []);
@@ -628,9 +632,9 @@ export function predictGame(game, index, modelContext = {}) {
     draw: drawProbability
   };
 
-  const market = marketVector(game, profile);
+  const market = marketVector(game, profile, evidenceNow);
   const apiConfidenceValue = apiConfidence(game, market, awayTeam, homeTeam, evidenceNow);
-  const localConfidenceValue = localDataConfidence(awayTeam, homeTeam, manualAwayPlayers, manualHomePlayers, manualContext, modelContext.history);
+  const localConfidenceValue = localDataConfidence(awayTeam, homeTeam, manualAwayPlayers, manualHomePlayers, manualContext, modelContext.history, evidenceNow);
   const drift = modelContext.drift?.[profile.key] || modelContext.drift?.all || { status: 'insufficient', penalty: 0 };
   const driftPenalty = clamp(finite(drift.penalty, 0), 0, 0.35);
   const evidenceQualityValue = Math.round(clamp(apiConfidenceValue * 0.45 + localConfidenceValue * 0.45 + (parseRecord(game.away?.record).present && parseRecord(game.home?.record).present ? 10 : 0) - driftPenalty * 25, 0, 100));
@@ -774,6 +778,7 @@ export function predictGame(game, index, modelContext = {}) {
 
   return {
     gameId: game.id,
+    inputChronology: inputs.audit,
     evidenceCoverage: buildEvidenceCoverage(game, { now: evidenceNow, players: { away: awayPlayerRows, home: homePlayerRows }, teams: { away: awayTeam, home: homeTeam } }),
     index: index + 1,
     league: game.league,

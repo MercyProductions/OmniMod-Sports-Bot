@@ -779,7 +779,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     intelligence,
     externalResults: automatic.historyResults,
     asOfDateKey: dateKey,
-    asOf: localDateKey(new Date()) === dateKey ? Date.now() : undefined
+    asOf: localDateKey(new Date()) <= dateKey ? Date.now() : undefined
   });
   modelContext.modelRegistry = modelRegistry;
   modelContext.localMlModels = localMlModels;

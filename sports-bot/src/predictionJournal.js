@@ -72,6 +72,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,
     learningInputAudit: prediction.learningInputAudit || null,
+    inputChronology: prediction.inputChronology || null,
     eventContext: { sport: prediction.sportProfile || game.sportGroup || null,
       season: game.seasonYear ?? game.season?.year ?? null, seasonType: game.seasonType ?? game.season?.type ?? null },
     valueDecision: prediction.valueAnalysis?.bestOpportunity ? {

@@ -46,6 +46,7 @@ test('strict offline slate builds from local schedule, players, teams, and histo
   assert.equal(slate.predictions[0].predictedWinner, 'Local Home');
   assert.equal(slate.predictions[0].apiConfidenceValue, 0);
   assert.ok(slate.predictions[0].localDataConfidenceValue > 20);
+  assert.ok(Date.parse(slate.predictions[0].inputChronology.cutoffAt)<=Date.now());
   assert.equal(slate.modelSummary.externalCalls, 0);
 
   const inventory = await intelligenceInventory('guild-offline');
