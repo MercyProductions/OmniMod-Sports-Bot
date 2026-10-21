@@ -28,3 +28,5 @@ export function matchJournalGame(index,subject={}){
   return {game:null,reason,candidateCount:(candidates.length?candidates:all).length,observations,
     observationsTruncated:(candidates.length?candidates:all).length>10};
 }
+
+export {signature as eventObservationHash};

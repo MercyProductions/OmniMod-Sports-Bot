@@ -1,4 +1,6 @@
-import {scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
+import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
+import {journalGameIndex} from './journalEventMatch.js';
+import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
 import {normalizeOddsPrice} from './oddsPricing.js';
 import { config } from './config.js';
 import { enrichGamesAutomatically } from './autoEnrichment.js';
@@ -368,19 +370,13 @@ function manualGame(row) {
   };
 }
 
-function gamesMatch(left, right) {
-  if (String(left.id) === String(right.id)) return true;
-  return normalizeName(left.away?.name) === normalizeName(right.away?.name) &&
-    normalizeName(left.home?.name) === normalizeName(right.home?.name) &&
-    normalizeName(left.leagueKey || left.league) === normalizeName(right.leagueKey || right.league);
-}
-
-function mergeLocalGames(scoreboardGames, intelligence, dateKey) {
+export function mergeLocalGames(scoreboardGames, intelligence, dateKey) {
   const games = [...scoreboardGames];
   for (const row of Object.values(intelligence?.games || {})) {
     if (String(row.dateKey || row.startTime).slice(0, 10) !== dateKey) continue;
     const local = manualGame(row);
-    const index = games.findIndex((game) => gamesMatch(game, local));
+    const match=matchSourceEvent(games,local);
+    const index=match.game?games.indexOf(match.game):-1;
     if (index === -1) games.push(local);
     else games[index] = {
       ...games[index],
@@ -596,19 +592,20 @@ async function enrichWithOdds(games, options = {}) {
   return { games, diagnostics, alerts, externalCalls };
 }
 
-function carryForwardOdds(games, cachedSlate) {
+export function carryForwardOdds(games, cachedSlate) {
   if (!cachedSlate?.games?.length) return games;
   for (const game of games) {
-    const previous = cachedSlate.games.find((row) => gamesMatch(game, row));
+    const previous=matchSourceEvent(cachedSlate.games,game).game;
     if (previous?.odds && !game.odds) game.odds = { ...previous.odds, cacheState: 'daily_snapshot' };
   }
   return games;
 }
 
-function mergeTargetedGames(freshGames, cachedSlate) {
+export function mergeTargetedGames(freshGames, cachedSlate) {
   if (!cachedSlate?.games?.length) return freshGames;
-  const merged = cachedSlate.games.map((cached) => {
-    const fresh = freshGames.find((candidate) => gamesMatch(candidate, cached));
+  const merged = cachedSlate.games.flatMap((cached) => {
+    const match=matchSourceEvent(freshGames,cached),fresh=match.game;
+    if(match.observations.length>1)return [structuredClone(cached),...match.observations.map(game=>({...game,id:cached.id,upstreamEventId:game.id}))];
     if (!fresh) return structuredClone(cached);
     return {
       ...cached,
@@ -619,7 +616,7 @@ function mergeTargetedGames(freshGames, cachedSlate) {
     };
   });
   for (const fresh of freshGames) {
-    if (!merged.some((cached) => gamesMatch(cached, fresh))) merged.push(fresh);
+    if (!merged.some((cached) => sourceEventsMatch(cached, fresh))) merged.push(fresh);
   }
   return merged;
 }
@@ -657,7 +654,8 @@ export function attachFinalGrade(game, prediction, now = Date.now()) {
 }
 
 function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refreshGameIds = null, refreshEventKeys = null, frozenPredictions = scopedSlatePredictions(cachedSlate||{})) {
-  const previousGame = (cachedSlate?.games || []).find((candidate) => gamesMatch(game, candidate));
+  const previousGame=matchSourceEvent(cachedSlate?.games||[],game).game
+    || resolveSlateGame(journalGameIndex(cachedSlate?.games||[]),{...eventReference(game),startTime:null}).game;
   const sameLeague=previousGame&&String(previousGame.leagueKey||'').toLowerCase()===String(game.leagueKey||'').toLowerCase();
   const legacyPrevious=sameLeague&&!Number.isFinite(Date.parse(previousGame.startTime||''))
     ?frozenPredictions.get(scopedEventKey(eventReference(previousGame))):null;
@@ -972,25 +970,34 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
   const scoreboard = await fetchEspnGames(date, { ...options, leagueKeys });
   let freshGames = mergeLocalGames(scoreboard.games, modelContext.intelligence, cachedSlate.dateKey);
   freshGames = applyManualResults(freshGames, modelContext.intelligence, cachedSlate.dateKey);
-  const freshById = new Map(freshGames.map((game) => [game.id, game]));
+  const cachedIndex=journalGameIndex(cachedSlate.games||[]),associations=new Map(),rejections=[];
+  for(const cachedGame of cachedSlate.games||[]){
+    const match=matchSourceEvent(freshGames,cachedGame),key=scopedEventKey(eventReference(cachedGame));
+    associations.set(key,match);
+    if(match.reason)rejections.push({...eventReference(cachedGame),reason:match.reason,observationCount:match.observations.length});
+  }
   const finals = [];
   const predictions = (cachedSlate.predictions ?? []).map((oldPrediction) => {
-    const cachedGame = (cachedSlate.games ?? []).find((game) => game.id === oldPrediction.gameId);
-    const freshGame = freshById.get(oldPrediction.gameId) || freshGames.find((game) => cachedGame && gamesMatch(game, cachedGame))
-      || (cachedGame?.statusKey === 'final' ? cachedGame : null);
-    if (!freshGame || freshGame.statusKey !== 'final') return oldPrediction;
-    const graded = attachFinalGrade(freshGame, oldPrediction);
-    const alreadyReplied = Boolean(cachedSlate.finalReplies?.[oldPrediction.gameId]);
-    if (!alreadyReplied && typeof graded.predictionCorrect === 'boolean') finals.push({ game: freshGame, prediction: graded });
+    const cachedGame=resolveSlateGame(cachedIndex,oldPrediction).game;
+    if(!cachedGame){rejections.push({gameId:String(oldPrediction.gameId),leagueKey:oldPrediction.leagueKey||'',startTime:oldPrediction.startTime||null,reason:'cached_forecast_event_not_unique'});return {...oldPrediction,predictionCorrect:null,actualSide:'',actualWinner:''};}
+    const match=associations.get(scopedEventKey(eventReference(cachedGame)));
+    if(match.observations.length>1)return {...oldPrediction,predictionCorrect:null,actualSide:'',actualWinner:'',finalScore:''};
+    const freshGame=match.game||(cachedGame.statusKey==='final'?cachedGame:null);
+    if(!freshGame||freshGame.statusKey!=='final'||oldPrediction.legacyFrozenIdentityUnverified)return oldPrediction;
+    const graded=attachFinalGrade(freshGame,oldPrediction);
+    const alreadyReplied=Boolean(cachedSlate.finalReplies?.[oldPrediction.gameId]);
+    if(!alreadyReplied&&typeof graded.predictionCorrect==='boolean')finals.push({game:freshGame,prediction:graded});
     return graded;
   });
-  const games = (cachedSlate.games ?? []).map((cachedGame) => {
-    const fresh = freshById.get(cachedGame.id) || freshGames.find((game) => gamesMatch(game, cachedGame));
-    return !fresh ? cachedGame : String(fresh.id) === String(cachedGame.id) ? fresh
-      : { ...fresh, id: cachedGame.id, upstreamEventId: fresh.id };
+  const games=(cachedSlate.games||[]).flatMap(cachedGame=>{
+    const match=associations.get(scopedEventKey(eventReference(cachedGame)));
+    if(match.observations.length>1)return match.observations.map(game=>({...game,id:cachedGame.id,upstreamEventId:game.id}));
+    const fresh=match.game;
+    return !fresh?cachedGame:String(fresh.id)===String(cachedGame.id)?fresh:{...fresh,id:cachedGame.id,upstreamEventId:fresh.id};
   });
   const refreshed = { ...cachedSlate, refreshedAt: new Date().toISOString(), games, predictions,
-    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.'],
+    finalAssociationRejections:rejections,
+    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.',`Final source association rejections: ${rejections.length}`],
     alerts: [], newFinals: finals };
   // Save outcomes before Discord delivery: a transport failure cannot erase the result observation.
   await recordPredictionJournal(refreshed, { lifecycle: 'results_only' });
