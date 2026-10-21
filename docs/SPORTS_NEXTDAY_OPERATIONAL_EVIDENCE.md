@@ -54,3 +54,5 @@ The unchanged source suite was reproduced: **672 passed, zero failures/skips**. 
 Next: reconcile eligible results using each study's pinned worker, retain unresolved/conflicting observations, collect adequate independent dates/leagues and verify the actual host when its location is supplied. Missing source entitlement/publication truth, full settlement evidence, universal provider auditing and reviewed legacy result adoption remain unresolved. No better accuracy, calibration or after-cost performance is claimed.
 
 Sports stays in progress; full Crypto then Stocks requirements remain queued. No merge, deployment, model promotion or live trading.
+
+Subsequent user clarification: Sports is not currently running. This resolves the runtime-status question without converting the earlier census into proof of absence. There is no active Sports instance to inspect; installed source/data/configuration/registry/jobs and live startup behavior remain unverified. This work does not start or deploy the bot.
