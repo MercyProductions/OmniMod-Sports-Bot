@@ -195,6 +195,7 @@ function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = D
     predictedSide: prediction.predictedSide,
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
+    oddsMatchEvidence:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null),
     candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities,
     referenceBaselines: prediction.referenceBaselines || null,
@@ -259,7 +260,8 @@ function compactMarket(game = {}, meta = {}) {
     bookmakerCount: Number(game.odds?.h2h?.bookmakerCount || game.odds?.bookmakerCount || 0),
     dispersion: Number(game.odds?.h2h?.dispersion || 0),
     provider: game.odds?.provider || game.odds?.freeProvider || '',
-    cacheState: game.odds?.cacheState || ''
+    cacheState: game.odds?.cacheState || '',
+    eventIdentity:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null)
   };
 }
 

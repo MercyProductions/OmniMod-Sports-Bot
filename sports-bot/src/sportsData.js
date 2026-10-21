@@ -1,3 +1,4 @@
+import {inspectOddsEventCandidate,inspectOddsEventMatch,matchOddsEventCohort} from './oddsEventIdentity.js';
 import {applyManualResults} from './manualResultMatching.js';
 export {applyManualResults} from './manualResultMatching.js';
 import {finalReplyMatches} from './finalResultRevision.js';
@@ -499,19 +500,12 @@ export function bestSpreadTotalMarkets(bookmakers, game) {
   return { spread: spread.favorite ? spread : null, total: total.over || total.under ? total : null };
 }
 
-export function oddsEventMatches(game, event) {
-  const teams = [normalizeName(event.home_team), normalizeName(event.away_team), ...(event.teams ?? []).map(normalizeName)];
-  const start = Date.parse(game.startTime || '');
-  const eventStart = Date.parse(event.commence_time || '');
-  return Number.isFinite(start) && Number.isFinite(eventStart) && Math.abs(start - eventStart) <= 60 * 60_000 &&
-    teams.includes(normalizeName(game.away.name)) && teams.includes(normalizeName(game.home.name));
+export function oddsEventMatches(game,event){
+  return inspectOddsEventCandidate(game,event,ODDS_SPORT_KEYS[game.leagueKey]||'').eligible;
 }
 
-export function matchingOddsEvent(game, events = []) {
-  const matches = events.filter((event) => oddsEventMatches(game, event))
-    .sort((a, b) => Math.abs(Date.parse(a.commence_time) - Date.parse(game.startTime)) - Math.abs(Date.parse(b.commence_time) - Date.parse(game.startTime)));
-  if (matches.length > 1 && Math.abs(Date.parse(matches[0].commence_time) - Date.parse(game.startTime)) === Math.abs(Date.parse(matches[1].commence_time) - Date.parse(game.startTime))) return null;
-  return matches[0] || null;
+export function matchingOddsEvent(game,events=[]){
+  return inspectOddsEventMatch(game,events,ODDS_SPORT_KEYS[game.leagueKey]||'').event;
 }
 
 async function enrichWithOdds(games, options = {}) {
@@ -557,13 +551,16 @@ async function enrichWithOdds(games, options = {}) {
       diagnostics.push(`${sportKey}: live provider returned ${result.upstreamStatus}; using stale cached odds.`);
     }
     let matched = 0;
+    const matches=matchOddsEventCohort(sportGames,result.json,sportKey);
     for (const game of sportGames) {
-      const event = matchingOddsEvent(game, result.json);
+      const match=matches.get(scopedEventKey(eventReference(game)));game.oddsMatchEvidence=match.evidence;
+      const event = match.event;
       if (!event) continue;
       const h2h = bestH2HMarket(event.bookmakers, game);
       const extra = bestSpreadTotalMarkets(event.bookmakers, game);
       const paidOdds = {
         eventId: event.id,
+        eventIdentity:match.evidence,
         commenceTime: event.commence_time,
         h2h,
         spread: extra.spread,
@@ -589,7 +586,7 @@ async function enrichWithOdds(games, options = {}) {
       matched += 1;
     }
     const remaining = result.headers['x-requests-remaining'] ?? 'unknown';
-    diagnostics.push(`${sportKey}: matched ${matched}/${sportGames.length}, source=${result.cacheState}, quota remaining ${remaining}`);
+    diagnostics.push(`${sportKey}: matched ${matched}/${sportGames.length}, source=${result.cacheState}, identity rejected ${sportGames.filter(game=>game.oddsMatchEvidence?.status==='rejected').length}, quota remaining ${remaining}`);
     if (Number.parseInt(String(remaining), 10) === 0) alerts.push({ type: 'odds_api_limit', provider: 'The Odds API', sportKey, status: result.status, message: 'The Odds API reported zero requests remaining.', remaining: 0 });
   }));
   return { games, diagnostics, alerts, externalCalls };

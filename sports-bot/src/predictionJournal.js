@@ -113,7 +113,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
       cacheState: String(game.odds?.cacheState || 'unknown'),
       identity: { localGameId: String(game.id || ''), league: String(game.leagueKey || ''),
         providerEventId: String(game.odds?.eventId || ''), providerStartTime: iso(game.odds?.commenceTime),
-        matchStatus: String(game.odds?.matchStatus || 'unknown') },
+        matchStatus: String(game.odds?.matchStatus || 'unknown'),matchEvidence:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null) },
       settlementVerified: game.odds?.h2h?.settlementVerified === true, outcomes: offeredOdds },
     modelUsesMarket: Number(prediction.marketBlendWeight || 0) > 0,
     confidence: { dataQuality: finiteNumber(prediction.evidenceQualityValue), uncertaintyPoints: finiteNumber(prediction.predictionUncertaintyPoints),
