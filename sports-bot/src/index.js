@@ -1,4 +1,5 @@
-import {mergeValueQuoteRefresh,refreshScopedPredictionValues} from './quoteRefreshIdentity.js';
+import {persistValueQuoteRefresh} from './quoteCachePersistence.js';
+import {refreshScopedPredictionValues} from './quoteRefreshIdentity.js';
 import {persistFinalRefresh} from './finalCacheMerge.js';
 import {deliverFinalBatch} from './finalDelivery.js';
 import {scopedEventKey} from './slateEventIdentity.js';
@@ -1018,9 +1019,9 @@ async function handleSportsCommand(interaction) {
         // Issued price decisions get new timestamps; frozen model forecasts do not.
         await recordPredictionJournal(refreshed.issuedSlate, { lifecycle: 'prices_only' });
         await recordSlateSnapshot(refreshed.issuedSlate);
-        const latest = await readDailyCache(cached.dateKey, guildId) || cached;
-        cached = mergeValueQuoteRefresh(latest,refreshed);
-        cached = await writeDailyCache(cached.dateKey, cached, guildId);
+        cached = await persistValueQuoteRefresh(cached,refreshed);
+        const audit=cached.priceCacheMergeAudit;
+        if(audit)quoteStatus+=` Cache reconciliation: ${audit.appliedEvents} event(s) updated; ${audit.rejected.length} snapshot rejection(s).`;
       }
     }
     cached = refreshScopedPredictionValues(cached);

@@ -26,17 +26,30 @@ function forecastIdentity(row){
 export function mergeValueQuoteRefresh(latest,refreshed,now=Date.now()){
  const current=structuredClone(latest),issued=refreshed?.issuedSlate;
  if(!issued||String(issued.guildId||'')!==String(current.guildId||'')||issued.dateKey!==current.dateKey)return current;
- const currentPredictions=quotePredictions(current),newPredictions=quotePredictions(issued),source=journalGameIndex(issued.games||[]),target=journalGameIndex(current.games||[]),updates=new Map();
+ const currentPredictions=quotePredictions(current),newPredictions=quotePredictions(issued),source=journalGameIndex(issued.games||[]),target=journalGameIndex(current.games||[]),updates=new Map(),rejected=[];
+ for(const row of uniqueQuoteRows(issued.predictions||[])){
+  if(!hasQuoteScope(row)||!newPredictions.has(scopedEventKey(row)))rejected.push({eventKey:hasQuoteScope(row)?scopedEventKey(row):null,reason:'issued_forecast_scope_not_unique'});
+ }
  for(const [key,row] of newPredictions){
-  const before=currentPredictions.get(key);if(!before||forecastIdentity(before)!==forecastIdentity(row))continue;
-  const game=resolveSlateGame(target,before).game,fresh=resolveSlateGame(source,row).game;
-  if(!game||!fresh||game.statusKey!=='scheduled'||Date.parse(game.startTime)<=now||!fresh.odds?.quoteRefreshOnly)continue;
-  if(game.away?.name!==fresh.away?.name||game.home?.name!==fresh.home?.name)continue;
-  const fetched=Date.parse(fresh.odds.fetchedAt||''),previous=Date.parse(game.odds?.fetchedAt||'');
-  if(!Number.isFinite(fetched)||fetched>now||(Number.isFinite(previous)&&previous>fetched))continue;
+  const before=currentPredictions.get(key),game=before&&resolveSlateGame(target,before).game,fresh=resolveSlateGame(source,row).game;
+  let reason;
+  if(!before)reason='current_forecast_missing_or_ambiguous';
+  else if(forecastIdentity(before)!==forecastIdentity(row))reason='forecast_changed';
+  else if(!game||!fresh)reason='event_missing_or_ambiguous';
+  else if(game.statusKey!=='scheduled'||Date.parse(game.startTime)<=now)reason='event_no_longer_pregame';
+  else if(!fresh.odds?.quoteRefreshOnly)reason='not_explicit_price_snapshot';
+  else if(game.away?.name!==fresh.away?.name||game.home?.name!==fresh.home?.name)reason='participants_changed';
+  else {
+   const fetched=Date.parse(fresh.odds.fetchedAt||''),previous=Date.parse(game.odds?.fetchedAt||'');
+   if(!Number.isFinite(fetched)||fetched>now)reason='quote_receipt_invalid';
+   else if(Number.isFinite(previous)&&previous>fetched)reason='newer_quote_already_cached';
+   else if(previous===fetched&&game.odds?.quoteRefreshOnly&&eventObservationHash(game.odds)!==eventObservationHash(fresh.odds))reason='conflicting_quote_receipt';
+  }
+  if(reason){rejected.push({eventKey:key,reason});continue;}
   updates.set(key,structuredClone(fresh.odds));
  }
  const next={...current,games:(current.games||[]).map(game=>updates.has(scopedEventKey(eventReference(game)))?{...game,odds:updates.get(scopedEventKey(eventReference(game)))}:game)};
+ next.priceCacheMergeAudit={observedAt:new Date(now).toISOString(),appliedEvents:updates.size,rejected};
  if(updates.size)next.lastValueQuoteRefreshAt=refreshed.slate.lastValueQuoteRefreshAt;
  return refreshScopedPredictionValues(next,now);
 }

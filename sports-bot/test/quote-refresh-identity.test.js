@@ -7,6 +7,7 @@ import {randomUUID} from 'node:crypto';
 const directory=await mkdtemp(join(tmpdir(),'sports-scoped-quotes-'));process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
 const {refreshValueQuotes}=await import('../src/valueQuoteRefresh.js');
 const {mergeValueQuoteRefresh,refreshScopedPredictionValues}=await import('../src/quoteRefreshIdentity.js');
+const {persistValueQuoteRefresh}=await import('../src/quoteCachePersistence.js');
 const {recordPredictionJournal,readPredictionJournal}=await import('../src/predictionJournal.js');
 const {writeDailyCache,readDailyCache}=await import('../src/storage.js');
 test.after(()=>rm(directory,{recursive:true,force:true}));
@@ -81,4 +82,95 @@ test('scoped cache persistence and journal price observations retain the origina
 test('identical duplicate observations coalesce without repeating a value-board opportunity',async()=>{
  const value=slate();value.games.push(structuredClone(value.games[0]));value.predictions.push(structuredClone(value.predictions[0]));let calls=0;
  const refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>{calls++;return result([value.games[0]]);}}));assert.equal(calls,1);assert.equal(refreshed.issuedSlate.predictions.length,1);assert.equal(refreshScopedPredictionValues(refreshed.slate,now).predictions.length,1);
+});
+
+test('a cache race retries price persistence without another provider call or loss of unrelated finals',async()=>{
+ let value=slate([game(),game('nhl')]);value=await writeDailyCache(value.dateKey,value,value.guildId);let calls=0,writes=0;
+ const refreshed=await refreshValueQuotes(value,options({league:'nba',fetchJson:async()=>{calls++;return result([value.games[0]]);}}));
+ const saved=await persistValueQuoteRefresh(value,refreshed,{clock:()=>now,write:async(...args)=>{
+  if(++writes===1){const current=await readDailyCache(value.dateKey,value.guildId);current.games[1].statusKey='final';current.predictions[1].predictionCorrect=true;current.messageId='new-message';current.finalReplies={unrelated:{claimGeneration:4}};await writeDailyCache(value.dateKey,current,value.guildId);}
+  return writeDailyCache(...args);
+ }});
+ assert.equal(calls,1);assert.equal(writes,2);assert.equal(refreshed.externalCalls,1);assert.equal(refreshed.budget.used,1);
+ assert.equal(saved.games[0].odds.quoteRefreshOnly,true);assert.equal(saved.games[1].statusKey,'final');assert.equal(saved.predictions[1].predictionCorrect,true);
+ assert.equal(saved.messageId,'new-message');assert.equal(saved.finalReplies.unrelated.claimGeneration,4);
+ assert.deepEqual(saved.predictions[0].outcomeProbabilities,value.predictions[0].outcomeProbabilities);assert.equal(saved.priceCacheMergeAudit.appliedEvents,1);
+});
+
+test('a forecast changed during the first save is preserved with an explicit price rejection',async()=>{
+ let value=slate();value=await writeDailyCache(value.dateKey,value,value.guildId);let writes=0;
+ const refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));
+ const saved=await persistValueQuoteRefresh(value,refreshed,{clock:()=>now,write:async(...args)=>{
+  if(++writes===1){const current=await readDailyCache(value.dateKey,value.guildId);current.predictions[0].outcomeProbabilities.home=91;await writeDailyCache(value.dateKey,current,value.guildId);}
+  return writeDailyCache(...args);
+ }});
+ assert.equal(saved.predictions[0].outcomeProbabilities.home,91);assert.equal(saved.games[0].odds.quoteRefreshOnly,undefined);
+ assert.equal(saved.priceCacheMergeAudit.appliedEvents,0);assert.equal(saved.priceCacheMergeAudit.rejected[0].reason,'forecast_changed');
+});
+
+test('a newer cached quote arriving during persistence cannot be rolled back on retry',async()=>{
+ let value=slate();value=await writeDailyCache(value.dateKey,value,value.guildId);let writes=0;
+ const refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));
+ const saved=await persistValueQuoteRefresh(value,refreshed,{clock:()=>now+3000,write:async(...args)=>{
+  if(++writes===1){const current=await readDailyCache(value.dateKey,value.guildId);current.games[0].odds={eventId:'newer',fetchedAt:new Date(now+2000).toISOString()};await writeDailyCache(value.dateKey,current,value.guildId);}
+  return writeDailyCache(...args);
+ }});
+ assert.equal(saved.games[0].odds.eventId,'newer');assert.equal(saved.priceCacheMergeAudit.rejected[0].reason,'newer_quote_already_cached');
+});
+
+test('a retry crossing the game start does not apply the formerly pregame quote',async()=>{
+ let value=slate();value=await writeDailyCache(value.dateKey,value,value.guildId);let writes=0,reads=0;
+ const refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));
+ const saved=await persistValueQuoteRefresh(value,refreshed,{clock:()=>++reads===1?now:now+7200000,write:async(...args)=>{
+  if(++writes===1){const current=await readDailyCache(value.dateKey,value.guildId);current.messageId='concurrent';await writeDailyCache(value.dateKey,current,value.guildId);}
+  return writeDailyCache(...args);
+ }});
+ assert.equal(reads,2);assert.equal(saved.games[0].odds.quoteRefreshOnly,undefined);
+ assert.equal(saved.priceCacheMergeAudit.rejected[0].reason,'event_no_longer_pregame');
+});
+
+test('price retries are bounded and do not retry other storage failures',async()=>{
+ const value=slate();let calls=0,writes=0;
+ const refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>{calls++;return result(value.games);}}));
+ const settings={read:async()=>value,clock:()=>now,write:async()=>{writes++;throw Object.assign(new Error('conflict'),{code:'DAILY_CACHE_CONFLICT'});}};
+ await assert.rejects(persistValueQuoteRefresh(value,refreshed,settings),{code:'DAILY_CACHE_CONFLICT'});assert.equal(writes,3);
+ writes=0;settings.write=async()=>{writes++;throw new Error('disk unavailable');};
+ await assert.rejects(persistValueQuoteRefresh(value,refreshed,settings),/disk unavailable/);assert.equal(writes,1);assert.equal(calls,1);
+});
+
+test('price persistence freezes issued snapshots before asynchronous cache reads',async()=>{
+ const value=slate(),refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));let release;
+ const gate=new Promise(resolve=>{release=resolve;});
+ const pending=persistValueQuoteRefresh(value,refreshed,{read:async()=>{await gate;return value;},write:async(date,row)=>row,clock:()=>now});
+ refreshed.issuedSlate.games[0].odds.eventId='mutated';refreshed.issuedSlate.predictions[0].outcomeProbabilities.home=99;release();
+ const saved=await pending;assert.equal(saved.games[0].odds.eventId,value.games[0].odds.eventId);assert.equal(saved.predictions[0].outcomeProbabilities.home,65);
+});
+
+test('missing caches, foreign scopes and invalid retry bounds never write a price cache',async()=>{
+ const value=slate(),refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));let writes=0;
+ const settings={read:async()=>null,write:async()=>{writes++;},clock:()=>now};
+ await assert.rejects(persistValueQuoteRefresh(value,refreshed,settings),/disappeared/);
+ await assert.rejects(persistValueQuoteRefresh(value,refreshed,{...settings,read:async()=>({...value,guildId:'other'})}),/scope/);
+ await assert.rejects(persistValueQuoteRefresh(value,{...refreshed,issuedSlate:{...refreshed.issuedSlate,dateKey:'other'}},settings),/scope/);
+ await assert.rejects(persistValueQuoteRefresh(value,refreshed,{...settings,attempts:99}),/bound/);assert.equal(writes,0);
+});
+
+test('ambiguous issued snapshots have auditable rejection reasons rather than an array-order choice',async()=>{
+ const value=slate(),refreshed=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));
+ const conflicting=structuredClone(refreshed.issuedSlate.predictions[0]);conflicting.outcomeProbabilities.home=99;refreshed.issuedSlate.predictions.push(conflicting);
+ const saved=mergeValueQuoteRefresh(value,refreshed,now);assert.equal(saved.priceCacheMergeAudit.appliedEvents,0);
+ assert.equal(saved.priceCacheMergeAudit.rejected.length,2);assert.ok(saved.priceCacheMergeAudit.rejected.every(row=>row.reason==='issued_forecast_scope_not_unique'));
+});
+
+test('different explicit quote snapshots with equal receipt times cannot overwrite by arrival order',async()=>{
+ const value=slate(),first=await refreshValueQuotes(value,options({fetchJson:async()=>result(value.games)}));
+ const second=await refreshValueQuotes(value,options({fetchJson:async()=>{
+  const response=result(value.games);
+  for(const book of response.json[0].bookmakers)book.markets[0].outcomes[1].price=-150;
+  return response;
+ }}));
+ assert.equal(first.issuedSlate.games[0].odds.fetchedAt,second.slate.games[0].odds.fetchedAt);
+ const saved=mergeValueQuoteRefresh(second.slate,first,now);
+ assert.equal(saved.games[0].odds.h2h.home.price,-150);
+ assert.equal(saved.priceCacheMergeAudit.rejected[0].reason,'conflicting_quote_receipt');
 });
