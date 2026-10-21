@@ -1,3 +1,4 @@
+import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import {hybridArtifactId} from './hybridArtifact.js';
 import path from 'node:path';
 import { config, dataDir } from './config.js';
@@ -36,7 +37,7 @@ function scoreModel(rows, model) {
     const vector = row.candidateProbabilities[model];
     const sides = row.actualSide === 'draw' || vectorValue(vector, 'draw') > 0 ? ['away', 'home', 'draw'] : ['away', 'home'];
     brier += sides.reduce((sum, side) => sum + (vectorValue(vector, side) - Number(side === row.actualSide)) ** 2, 0) / sides.length;
-    logLoss += -Math.log(clamp(vectorValue(vector, row.actualSide), 0.001, 0.999));
+    logLoss += probabilityLogLoss(vectorValue(vector, row.actualSide));
   }
   return { sampleSize: eligible.length, brierScore: brier / eligible.length, logLoss: logLoss / eligible.length };
 }
@@ -69,6 +70,7 @@ export function evaluateCandidateModels(rows = []) {
   const bestChallenger = ranked[0]?.[0] || 'hybrid';
   return {
     cohort: selected.cohort,
+    logLossProtocol: LOG_LOSS_PROTOCOL,
     models,
     evidence,
     hybrid,

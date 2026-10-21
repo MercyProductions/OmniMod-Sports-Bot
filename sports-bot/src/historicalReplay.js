@@ -1,3 +1,4 @@
+import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import path from 'node:path';
 import { dataDir } from './config.js';
 import { readFeatureWarehouse } from './featureWarehouse.js';
@@ -50,7 +51,7 @@ function scoreCandidates(rows) {
       const vector = row.candidateProbabilities[name];
       const sides = row.actualSide === 'draw' || Number(vector.draw) > 0 ? ['away', 'home', 'draw'] : ['away', 'home'];
       brier += sides.reduce((sum, side) => sum + (Number(vector[side] || 0) - Number(side === row.actualSide)) ** 2, 0) / sides.length;
-      logLoss += -Math.log(clamp(Number(vector[row.actualSide] || 0), 0.001, 0.999));
+      logLoss += probabilityLogLoss(Number(vector[row.actualSide] || 0));
     }
     return [name, { sampleSize: eligible.length, brierScore: brier / eligible.length, logLoss: logLoss / eligible.length }];
   }));
@@ -158,6 +159,7 @@ export function replayHistoricalResults(results = [], options = {}) {
     version: 1,
     generatedAt: new Date().toISOString(),
     asOfDateKey: cutoffDateKey,
+    logLossProtocol: LOG_LOSS_PROTOCOL,
     resultCount: sorted.length,
     predictionCount: predictions.length,
     timeIntegrity: 'Only earlier dateKey results are used. Actual historical result-availability times remain unverified; research replay is not prospective promotion evidence.',

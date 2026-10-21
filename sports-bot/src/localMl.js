@@ -1,3 +1,4 @@
+import { probabilityLogLoss } from './probabilityLogLoss.js';
 import { quoteTimeEpoch as instant } from './oddsPricing.js';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -156,8 +157,8 @@ function scoreRows(rows, model = null) {
     const sides = twoWay && row.actualSide !== 'draw' ? ['away', 'home'] : ['away', 'home', 'draw'];
     baselineBrier += sides.reduce((sum, side) => sum + (baseline[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
     modelBrier += sides.reduce((sum, side) => sum + (predicted[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
-    baselineLogLoss += -Math.log(Math.max(1e-12, baseline[row.actualSide]));
-    modelLogLoss += -Math.log(Math.max(1e-12, predicted[row.actualSide]));
+    baselineLogLoss += probabilityLogLoss(baseline[row.actualSide]);
+    modelLogLoss += probabilityLogLoss(predicted[row.actualSide]);
   }
   const count = rows.length;
   return {

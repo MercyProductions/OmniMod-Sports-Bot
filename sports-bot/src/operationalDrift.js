@@ -1,3 +1,4 @@
+import { probabilityLogLoss } from './probabilityLogLoss.js';
 import { journalOutcomeVector } from './journalOutcomeSpace.js';
 import { eventObservationHash } from './journalEventMatch.js';
 import { quoteTimeEpoch as instant } from './oddsPricing.js';
@@ -64,7 +65,7 @@ export function operationalDrift(issued, results, conflicts, { asOf, windowDays,
     if (!cohorts.has(key)) cohorts.set(key, { league: item.league, modelVersion: row.modelVersion, horizon: item.horizon, previous: [], recent: [] });
     const actual = item.result.actualSide;
     cohorts.get(key)[period].push({ brier: sides.reduce((sum, side) => sum + (vector[side] - Number(side === actual)) ** 2, 0),
-      logLoss: -Math.log(Math.max(1e-12, vector[actual])), confidence: vector[row.selectedSide], correct: Number(row.selectedSide === actual) });
+      logLoss: probabilityLogLoss(vector[actual]), confidence: vector[row.selectedSide], correct: Number(row.selectedSide === actual) });
   }
   const metrics = rows => {
     if (!rows.length) return { games: 0, brier: null, logLoss: null, accuracy: null, calibrationGap: null };

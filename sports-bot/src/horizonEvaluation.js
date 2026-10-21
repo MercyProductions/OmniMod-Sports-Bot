@@ -1,8 +1,5 @@
+import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import { finiteNumber } from './dataValidation.js';
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
 
 function normalizedPrediction(row = {}) {
   const source = row.outcomeProbabilities || row.candidateProbabilities?.[row.championModel] || row.candidateProbabilities?.evidence || {};
@@ -157,7 +154,7 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
       selectedProbability,
       correct: selectedSide === row.actualSide,
       brier,
-      logLoss: -Math.log(clamp(prediction.vector[row.actualSide] || 0, 0.001, 0.999)),
+      logLoss: probabilityLogLoss(prediction.vector[row.actualSide] || 0),
       modelVsCloseEdge: Number.isFinite(closingProbability) ? selectedProbability - closingProbability : null
     });
   }
@@ -173,6 +170,7 @@ export function evaluatePredictionHorizons(predictions = [], markets = [], optio
     methodology: 'One declared model version; overall uses latest frozen pregame forecast per game. Horizon groups are separate correlated populations. Intervals use game-IID bootstrap, not day/league-cluster validation.',
     modelVersion: selectedVersion,
     versionsAvailable: versions,
+    logLossProtocol: LOG_LOSS_PROTOCOL,
     scoreDefinition: 'Full-outcome Brier (mean over outcome coordinates) and multinomial log loss; distinct from selected-outcome binary scores.',
     overall: summarize([...latestByGame.values()]),
     byHorizon: group('horizon'),

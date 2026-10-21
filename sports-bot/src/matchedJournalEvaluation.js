@@ -1,3 +1,4 @@
+import { probabilityLogLoss } from './probabilityLogLoss.js';
 import {journalOutcomeVector} from './journalOutcomeSpace.js';
 import {journalResultState} from './journalResults.js';
 import {quotePrice,quoteTimestampVerified} from './oddsPricing.js';
@@ -33,7 +34,7 @@ function marketVerified(row){
 function score(probabilities,actual,sides,selected=winner(probabilities)){
   return {accuracy:Number(selected===actual),
     brier:sides.reduce((sum,side)=>sum+(probabilities[side]-Number(side===actual))**2,0)/sides.length,
-    logLoss:-Math.log(Math.max(1e-12,probabilities[actual])),selectedProbability:probabilities[selected]};
+    logLoss:probabilityLogLoss(probabilities[actual]),selectedProbability:probabilities[selected]};
 }
 
 function summarize(pairs,which){
