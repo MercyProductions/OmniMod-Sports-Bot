@@ -68,3 +68,7 @@ The actual publisher/cache/journal now has isolated send/edit/history failure te
 ## Refresh issuance continuation
 
 Completion now agrees with durable journal issuance, not merely attempted issuance. Only accepted candidates replace cached predictions; rejected/new unsolicited candidates remain outside the publishable slate. Delivery must match immutable issued probabilities. [Source mechanisms, reproduced failures and limits](SPORTS_REFRESH_ISSUANCE.md); latest suite 259 passing, syntax checks pass. Full runtime timers, live Discord, nested provenance and actual predictive performance remain unverified.
+
+## Derived input chronology continuation
+
+Development v6.0.10 closes reproduced parent/derived participation, roster, advanced and nested-receipt cutoff gaps. [Evidence, tests and remaining advanced-adapter defects](SPORTS_DERIVED_INPUT_CHRONOLOGY.md); latest suite 264 passing, syntax checks pass. Unknown provenance remains unknown and complete point-in-time integrity remains false. No claim of improved forecast performance or deployed verification.

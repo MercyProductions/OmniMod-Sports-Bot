@@ -3,11 +3,20 @@ const time=value=>Date.parse(value||'');
 /** Known observation times only; absence remains explicitly unknown, never a publication-time attestation. */
 export function observedInputState(row,cutoff){
  const values=[row?.updatedAt,row?.fetchedAt,row?.sourceFetchedAt,row?.recordedAt,row?.observedAt,row?.sourceObservationAt,
-  row?.sourceMeta?.fetchedAt,row?.sourceMeta?.sourceObservationAt,...Object.values(row?.fetchedAtBySide||{})]
+  row?.sourceMeta?.fetchedAt,row?.sourceMeta?.sourceObservationAt,...Object.values(row?.fetchedAtBySide||{}),
+  ...(Array.isArray(row?.sourceReceiptTimes)?row.sourceReceiptTimes:[]),
+  ...(Array.isArray(row?.matches)?row.matches.flatMap(match=>[match?.fetchedAt,match?.sourceObservationAt]):[]),
+  row?.environment?.fetchedAt,row?.environment?.sourceFetchedAt,row?.environment?.sourceObservationAt]
   .filter(value=>value!==undefined&&value!==null&&value!=='');
  if(!values.length)return 'unknown';
  const timestamps=values.map(time);
- return timestamps.some(value=>!Number.isFinite(value))?'invalid_observation_time':timestamps.some(value=>value>cutoff)?'after_information_cutoff':'observed_by_cutoff';
+ if(timestamps.some(value=>!Number.isFinite(value)))return 'invalid_observation_time';
+ if(timestamps.some(value=>value>cutoff))return 'after_information_cutoff';
+ const missing=value=>value===undefined||value===null||value==='';
+ if((Array.isArray(row?.sourceReceiptTimes)&&row.sourceReceiptTimes.some(missing))
+  ||Object.values(row?.fetchedAtBySide||{}).some(missing)
+  ||(Array.isArray(row?.matches)&&row.matches.some(match=>missing(match?.fetchedAt)&&missing(match?.sourceObservationAt))))return 'unknown';
+ return 'observed_by_cutoff';
 }
 
 /** Clone inference inputs and exclude known invalid/future observations and their inseparable derived aggregates. */
@@ -23,17 +32,43 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  };
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration'])safe[field]=retain(game[field],field);
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary'])safe[field]=retain(game[field],field);
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
  safe.autoPlayers=(game.autoPlayers||[]).filter(row=>retain(row,'auto_player'));
- if(safe.autoPlayers.length!==(game.autoPlayers||[]).length){safe.autoLineup=null;excluded['autoLineup:excluded_player_dependency']=1;}
+ safe.autoLineups=(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_player'));
+ safe.participationProjections=(game.participationProjections||[]).filter(row=>retain(row,'participation_projection'));
+ let excludedNestedProjection=false;
+ safe.autoPlayers=safe.autoPlayers.map(row=>{
+  if(!row.participationProjection||retain(row.participationProjection,'player_participation_projection'))return row;
+  excludedNestedProjection=true;const copy={...row};delete copy.participationProjection;return copy;
+ });
+ const clearParticipation=reason=>{
+  safe.participationSummary=null;safe.participationProjections=[];
+  safe.autoPlayers=safe.autoPlayers.map(row=>{const copy={...row};delete copy.participationProjection;return copy;});
+  excluded['participation_derived_inputs:'+reason]=1;
+ };
+ if(excludedNestedProjection){safe.autoLineup=null;excluded['autoLineup:excluded_projection_dependency']=1;}
+ if(safe.autoPlayers.length!==(game.autoPlayers||[]).length||safe.autoLineups.length!==(game.autoLineups||[]).length){
+  safe.autoLineup=null;excluded['autoLineup:excluded_player_dependency']=1;clearParticipation('player_or_lineup_unavailable');
+ }
+ if(excludedNestedProjection||(game.autoLineup&&!safe.autoLineup)||(game.participationSummary&&!safe.participationSummary)
+  ||safe.participationProjections.length!==(game.participationProjections||[]).length)clearParticipation('aggregate_dependency_unavailable');
+ if(Object.entries(game.autoTeamMetrics||{}).some(([side,row])=>row&&!safe.autoTeamMetrics[side])){
+  safe.advancedDataset=null;excluded['advancedDataset:excluded_team_dependency']=1;
+ }
  if(game.autoEnrichment&&!safe.autoEnrichment){
-  safe.autoPlayers=[];safe.autoLineup=null;safe.autoContext=null;
+  safe.autoPlayers=[];safe.autoLineups=[];safe.autoLineup=null;safe.autoContext=null;safe.eventEnvironment=null;safe.advancedDataset=null;
+  clearParticipation('summary_unavailable');
   excluded['summary_derived_inputs:parent_unavailable']=1;
  }
  if(game.autoHistory&&!safe.autoHistory){
   safe.autoTeamMetrics={};safe.autoLineup=null;safe.advancedDataset=null;
+  clearParticipation('history_unavailable');
   excluded['history_derived_inputs:parent_unavailable']=1;
+ }
+ if(game.sourceCorroboration&&!safe.sourceCorroboration){
+  safe.autoContext=null;safe.eventEnvironment=null;
+  excluded['corroboration_derived_inputs:parent_unavailable']=1;
  }
  const schedule=observedInputState(game.sourceMeta,cutoff);
  if(['after_information_cutoff','invalid_observation_time'].includes(schedule)){
@@ -53,7 +88,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   next.history={overall:{sampleSize:0}};excluded['learning_context:after_information_cutoff']=1;
  }
  return {game:safe,context:next,audit:{schema:'sports-input-cutoff-v1',cutoffAt:new Date(cutoff).toISOString(),excluded,unknownAvailability:unknown,
-  scope:'Provided context collections and per-game automatic inputs; selected evidence coverage is reported separately.',
+  scope:'Provided context collections, selected nested receipts and dependent automatic aggregates; evidence coverage is reported separately.',
   pointInTimeComplete:false,limitations:['Declared receipt/update times are not independently verified publication times.',
    'Untimestamped legacy profiles remain explicitly unknown; older revisions are not reconstructed.',
    'Untimestamped derived aggregates and manually supplied learned state require further provenance review.']}};

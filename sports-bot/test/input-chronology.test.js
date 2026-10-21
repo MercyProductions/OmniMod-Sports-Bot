@@ -63,3 +63,68 @@ test('unknown legacy availability remains disclosed and invalid or newer seconda
  const filtered=predictionInputsAt(game(),{intelligence:{teams:{legacy:{name:'H',powerRating:70}}}},now);
  assert.ok(filtered.context.intelligence.teams.legacy);assert.equal(filtered.audit.unknownAvailability.manual_teams,1);
 });
+
+test('excluded summary evidence cannot survive as roster coverage or participation uncertainty',()=>{
+ const baseline=predictGame(game(),0,{now}),input=game();
+ input.autoEnrichment={fetchedAt:after};
+ input.autoLineups=[{athleteId:'p',team:'H',name:'Future Player',role:'Guard',starter:true,confirmedStarter:true}];
+ input.autoPlayers=[{sourceAthleteId:'p',team:'H',name:'Future Player',updatedAt:before,participationProjection:{availabilityProbability:0,expectedShare:0}}];
+ input.participationSummary={away:{players:5,projectedMissingImpact:8,uncertainty:1},home:{players:5,uncertainty:1}};
+ input.participationProjections=[{team:'H',uncertainty:1}];input.eventEnvironment={indoor:true};input.advancedDataset={lineupXwobaDifference:.3};
+ const filtered=predictionInputsAt(input,{},now);
+ assert.equal(filtered.game.autoLineups.length,0);assert.equal(filtered.game.participationSummary,null);
+ assert.equal(filtered.game.participationProjections.length,0);assert.equal(filtered.game.eventEnvironment,null);
+ assert.equal(filtered.game.advancedDataset,null);
+ const predicted=predictGame(input,0,{now});
+ assert.equal(predicted.predictionUncertaintyPoints,baseline.predictionUncertaintyPoints);
+ assert.equal(predicted.factors.find(row=>row.label==='Projected participation').present,false);
+ assert.equal(input.autoLineups.length,1);assert.ok(input.participationSummary);
+});
+
+test('known future nested receipts and their environment context cannot pass as untimestamped inputs',()=>{
+ const input=game();input.sourceCorroboration={matches:[{provider:'fixture',fetchedAt:after}]};
+ input.autoContext={factors:{windSpeedMph:60}};input.eventEnvironment={windSpeedMph:60};
+ input.advancedDataset={sourceReceiptTimes:[before,after],efficiencyDifference:20};
+ const filtered=predictionInputsAt(input,{},now);
+ assert.equal(filtered.game.sourceCorroboration,null);assert.equal(filtered.game.autoContext,null);
+ assert.equal(filtered.game.eventEnvironment,null);assert.equal(filtered.game.advancedDataset,null);
+ assert.equal(filtered.audit.excluded['sourceCorroboration:after_information_cutoff'],1);
+});
+
+test('future or removed derived-player inputs invalidate dependent aggregates without mutating source players',()=>{
+ const input=game();input.autoTeamMetrics={home:{sourceFetchedAt:after,powerRating:99}};
+ input.advancedDataset={efficiencyDifference:30};
+ input.autoPlayers=[{name:'A',team:'H',updatedAt:before,participationProjection:{startProbability:1}}];
+ input.autoLineups=[{name:'A',team:'H',fetchedAt:after,starter:true}];
+ input.participationSummary={home:{players:1,uncertainty:1}};
+ const filtered=predictionInputsAt(input,{},now);
+ assert.equal(filtered.game.advancedDataset,null);assert.equal(filtered.game.participationSummary,null);
+ assert.equal(filtered.game.autoPlayers[0].participationProjection,undefined);
+ assert.ok(input.autoPlayers[0].participationProjection);
+});
+
+test('future nested participation metadata cannot be hidden by an older player receipt',()=>{
+ const input=game();input.autoPlayers=[{name:'A',team:'H',updatedAt:before,status:'Out',
+  participationProjection:{updatedAt:after,startProbability:1,expectedShare:1}}];
+ input.participationSummary={home:{players:1,uncertainty:.1}};
+ const filtered=predictionInputsAt(input,{},now);
+ assert.equal(filtered.game.autoPlayers[0].status,'Out');
+ assert.equal(filtered.game.autoPlayers[0].participationProjection,undefined);
+ assert.equal(filtered.game.participationSummary,null);
+ assert.equal(filtered.audit.excluded['player_participation_projection:after_information_cutoff'],1);
+ assert.ok(input.autoPlayers[0].participationProjection);
+});
+
+test('contemporaneous nested evidence is retained and unknown provenance is not fabricated',()=>{
+ const input=game();input.sourceCorroboration={matches:[{fetchedAt:before}]};
+ input.advancedDataset={sourceReceiptTimes:[before,null],efficiencyDifference:0};
+ input.autoPlayers=[{name:'A',team:'H',updatedAt:before,participationProjection:{updatedAt:before,startProbability:1}}];
+ input.autoLineups=[{name:'A',team:'H',fetchedAt:before,starter:true}];
+ input.participationSummary={home:{players:1,uncertainty:.1}};
+ const filtered=predictionInputsAt(input,{},now);
+ assert.equal(filtered.game.advancedDataset.efficiencyDifference,0);
+ assert.equal(filtered.game.autoLineups.length,1);assert.ok(filtered.game.participationSummary);
+ assert.equal(filtered.game.autoPlayers[0].participationProjection.startProbability,1);
+ assert.equal(filtered.audit.unknownAvailability.advancedDataset,1);
+ assert.deepEqual(filtered.audit.excluded,{});assert.equal(filtered.audit.pointInTimeComplete,false);
+});
