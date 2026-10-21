@@ -124,3 +124,7 @@ Development v6.0.21 compares declared game seasons with native or validated-cont
 ## NHL composite/request-period continuation
 
 Development v6.0.22 decodes official consecutive-year NHL game identifiers and blocks known mismatched or unmapped MoneyPuck request periods. [Real-metadata evidence, synthetic controls and access/licensing limits](SPORTS_NHL_REQUEST_SEASON_BINDING.md); complete suite 342 passing. Native dataset period validation remains false after an HTTP 403; no production change or demonstrated predictive improvement.
+
+## Current contributor replacement continuation
+
+Development v6.0.23 replaces provenance with its owned fields, invalidates stale comparisons when contributors disappear and checks nested receipt chronology. [Reproductions, branch controls and conservative migration limits](SPORTS_ADVANCED_CONTRIBUTOR_REPLACEMENT.md); complete suite 352 passing. Permanent journals remain append-only; current context is no longer an accumulated receipt history. No deployment or demonstrated predictive improvement.

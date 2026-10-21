@@ -1,5 +1,6 @@
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
+import { ADVANCED_PROVENANCE_METADATA_FIELDS } from './advancedProvenance.js';
 import { finiteNumber } from './dataValidation.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
 export { isConfirmedStarter } from './playerEvidence.js';
@@ -50,7 +51,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   if (advancedRefreshes.some(row => row.state === 'failed')) missing.push('advanced_dataset:refresh_failed');
   const sourcePeriodEvidence = game.advancedDataset?.sourcePeriodEvidence || null;
   if (sourcePeriodEvidence && sourcePeriodEvidence.state !== 'matched') missing.push(`advanced_dataset:${sourcePeriodEvidence.state}`);
-  const measurementMetadata = new Set(['provider','provenancePolicy','sourceReceiptTimes','sourceRefreshStatuses','publicationTimeVerified','sourceRequestKeys','requestedSourceKey','sourcePeriodEvidence',
+  const measurementMetadata = new Set([...ADVANCED_PROVENANCE_METADATA_FIELDS,'provider','provenancePolicy','sourceReceiptTimes','sourceRefreshStatuses','publicationTimeVerified','sourceRequestKeys','requestedSourceKey','sourcePeriodEvidence',
     'updatedAt','fetchedAt','sourceFetchedAt','observedAt','sourceObservationAt']);
   const missingMeasurements = Object.entries(game.advancedDataset || {}).filter(([key, value]) => !measurementMetadata.has(key)
     && (value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value)))).map(([key]) => key);
@@ -109,6 +110,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
       sourceRequestKeys: game.advancedDataset?.sourceRequestKeys || [], requestedSourceKey: game.advancedDataset?.requestedSourceKey || null,
       sourceRefreshStatuses: advancedRefreshes, sourcePeriodEvidence,
+      sourceContributions: Array.isArray(game.advancedDataset?.sourceContributions) ? game.advancedDataset.sourceContributions.map(entry => ({
+        sourceId: entry?.sourceId || 'unknown', fields: Array.isArray(entry?.fields) ? entry.fields.filter(key=>typeof key==='string') : [],
+        sourceReceiptTimes: Array.isArray(entry?.sourceReceiptTimes) ? entry.sourceReceiptTimes.map(timestamp) : [null],
+        sourceRequestKeys: Array.isArray(entry?.sourceRequestKeys) ? [...entry.sourceRequestKeys] : [null]
+      })) : null,
       missingMeasurements, measurementCoverageScope: 'Enumerated missing fields only; not a league completeness attestation.',
       missingOrInvalidReceipts: advancedReceipts.filter(value => value === null).length,
       nativePublicationVerified: false },

@@ -5,6 +5,7 @@ export function observedInputState(row,cutoff){
  const values=[row?.updatedAt,row?.fetchedAt,row?.sourceFetchedAt,row?.recordedAt,row?.observedAt,row?.sourceObservationAt,
   row?.sourceMeta?.fetchedAt,row?.sourceMeta?.sourceObservationAt,...Object.values(row?.fetchedAtBySide||{}),
   ...(Array.isArray(row?.sourceReceiptTimes)?row.sourceReceiptTimes:[]),
+  ...(Array.isArray(row?.sourceContributions)?row.sourceContributions.flatMap(entry=>Array.isArray(entry?.sourceReceiptTimes)?entry.sourceReceiptTimes:[]):[]),
   ...(Array.isArray(row?.matches)?row.matches.flatMap(match=>[match?.fetchedAt,match?.sourceObservationAt]):[]),
   row?.environment?.fetchedAt,row?.environment?.sourceFetchedAt,row?.environment?.sourceObservationAt]
   .filter(value=>value!==undefined&&value!==null&&value!=='');
@@ -14,6 +15,7 @@ export function observedInputState(row,cutoff){
  if(timestamps.some(value=>value>cutoff))return 'after_information_cutoff';
  const missing=value=>value===undefined||value===null||value==='';
  if((Array.isArray(row?.sourceReceiptTimes)&&row.sourceReceiptTimes.some(missing))
+  ||(Array.isArray(row?.sourceContributions)&&row.sourceContributions.some(entry=>!Array.isArray(entry?.sourceReceiptTimes)||!entry.sourceReceiptTimes.length||entry.sourceReceiptTimes.some(missing)))
   ||Object.values(row?.fetchedAtBySide||{}).some(missing)
   ||(Array.isArray(row?.matches)&&row.matches.some(match=>missing(match?.fetchedAt)&&missing(match?.sourceObservationAt))))return 'unknown';
  return 'observed_by_cutoff';

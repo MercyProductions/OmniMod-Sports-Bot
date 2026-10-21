@@ -3,6 +3,7 @@ import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
+import { composeAdvancedProvenance } from './advancedProvenance.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
 import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
@@ -376,12 +377,21 @@ function playerRecord(snapshot, tour, name) {
   return snapshot.tennis?.[tour]?.[key] || null;
 }
 
-function receiptProvenance(previous, rows) {
-  const inherited = Array.isArray(previous?.sourceReceiptTimes) ? previous.sourceReceiptTimes
-    : previous && Object.keys(previous).length ? [null] : [];
-  return { sourceReceiptTimes: [...inherited, ...rows.map(row => row?.sourceFetchedAt || null)],
-    sourceRequestKeys: [...(previous?.sourceRequestKeys || []), ...rows.map(row => row?.sourceRequestKey || null)],
-    publicationTimeVerified: false, provenancePolicy: 'contributing-row-receipts-v1' };
+const sourceFeatureFields = {
+ 'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference'],
+ 'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference'],
+ 'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference'],
+ 'nba-advanced-teams':['pace','efficiencyDifference'],
+ 'tennis-atp':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches'],
+ 'tennis-wta':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches']
+};
+
+const sourceProviders = {'baseball-savant-batter':'MLB Baseball Savant','nflverse-team-stats':'nflverse team stats',
+ 'moneypuck-team-xg':'MoneyPuck.com','nba-advanced-teams':'NBA.com advanced team stats','tennis-atp':'Jeff Sackmann tennis datasets','tennis-wta':'Jeff Sackmann tennis datasets'};
+function ownsSource(previous, sourceId) {
+ return Boolean(previous && ((Array.isArray(previous.sourceContributions) && previous.sourceContributions.some(row=>row?.sourceId===sourceId))
+  || (Array.isArray(previous.sourceRequestKeys) && previous.sourceRequestKeys.some(key=>{try{return JSON.parse(key)?.source===sourceId;}catch{return false;}}))
+  || previous.provider===sourceProviders[sourceId]));
 }
 
 export async function attachAdvancedDatasetContext(games = [], options = {}) {
@@ -393,12 +403,13 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
   const periodRejections = [];
   const provenance = (previous, rows, sourceId) => {
     const status = (sync.snapshot.sources || []).find(row => row.id === sourceId);
-    return { ...receiptProvenance(previous, rows), requestedSourceKey: sync.requestIdentities[sourceId], sourceRefreshStatuses: [...(previous?.sourceRefreshStatuses || []), {
+    return composeAdvancedProvenance(previous, {sourceId, fields:sourceFeatureFields[sourceId] || [], rows,
+      requestKey:sync.requestIdentities[sourceId], refreshStatus:{
       sourceId, state: status?.ok === true ? 'success' : status?.ok === false ? 'failed' : 'unknown',
       requestKey: status?.requestKey || null, lastSuccessRequestKey: status?.lastSuccessRequestKey || null,
       checkedAt: status?.checkedAt || null, lastSuccessAt: status?.lastSuccessAt || (status?.ok ? status.checkedAt : null) || null,
       retryAfter: status?.retryAfter || null, providerRetryAfter: status?.providerRetryAfter || null
-    }] };
+    }});
   };
   const sourceCorroborations = config.sourceRedundancyEnabled ? corroborateScheduleRows(games.filter((game) => game.leagueKey === 'nfl'),
     (sync.snapshot.footballSchedules || []).filter(row => eligibleRow(row, 'nflverse-schedules')), {
@@ -426,19 +437,19 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
       };
       const away = sideMetric('away'), home = sideMetric('home');
       const awayXwoba = away.value, homeXwoba = home.value;
-      if (awayXwoba !== null || homeXwoba !== null) {
+      if (awayXwoba !== null || homeXwoba !== null || ownsSource(game.advancedDataset, 'baseball-savant-batter')) {
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [...away.rows, ...home.rows], 'baseball-savant-batter'), provider: 'MLB Baseball Savant',
           awayLineupXwoba: awayXwoba, homeLineupXwoba: homeXwoba,
-          lineupXwobaCoverage: awayXwoba !== null && homeXwoba !== null ? 'both_sides' : 'partial',
+          lineupXwobaCoverage: awayXwoba !== null && homeXwoba !== null ? 'both_sides' : awayXwoba !== null || homeXwoba !== null ? 'partial' : 'none',
           lineupXwobaDifference: awayXwoba !== null && homeXwoba !== null ? homeXwoba - awayXwoba : null };
-        matched += 1;
+        if (awayXwoba !== null || homeXwoba !== null) matched += 1;
       }
       continue;
     }
     if (leagueKey === 'nfl') {
       const away = eligibleRow(sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()], 'nflverse-team-stats');
       const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
-      if (away || home) {
+      if (away || home || ownsSource(game.advancedDataset, 'nflverse-team-stats')) {
         const sourcePeriodEvidence = nflGameSeasonEvidence(game, [away, home]);
         const usable = away && home && !sourcePeriodEvidence.blocked;
         game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'),
@@ -455,7 +466,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nhl') {
       const away = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
       const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
-      if (away || home) {
+      if (away || home || ownsSource(game.advancedDataset, 'moneypuck-team-xg')) {
         const sourcePeriodEvidence = nhlGameSeasonEvidence(game, [away, home]);
         const usable = away && home && !sourcePeriodEvidence.blocked;
         const netRate = (row, forField, againstField) => perGame(difference(row[forField], row[againstField]), row.games);
@@ -471,9 +482,9 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nba') {
       const away = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)], 'nba-advanced-teams');
       const home = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)], 'nba-advanced-teams');
-      if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: measuredCalculation([away.pace, home.pace], (a, h) => (a + h) / 2), efficiencyDifference: difference(home.netRating, away.netRating) };
-        matched += 1;
+      if (away || home || ownsSource(game.advancedDataset, 'nba-advanced-teams')) {
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'), provider: 'NBA.com advanced team stats', pace: measuredCalculation([away?.pace, home?.pace], (a, h) => (a + h) / 2), efficiencyDifference: difference(home?.netRating, away?.netRating) };
+        if (away && home) matched += 1;
       }
       continue;
     }
@@ -481,20 +492,20 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     const tour = String(game.leagueKey).toLowerCase();
     const away = eligibleRow(playerRecord(sync.snapshot, tour, game.away?.name), `tennis-${tour}`);
     const home = eligibleRow(playerRecord(sync.snapshot, tour, game.home?.name), `tennis-${tour}`);
-    if (!away || !home) continue;
+    if (!away && !home && !ownsSource(game.advancedDataset, `tennis-${tour}`)) continue;
     const surface = String(game.autoContext?.surface || game.autoContext?.factors?.surface || '').toLowerCase();
-    const awaySurface = finite(away.surfaces?.[surface], finite(away.elo));
-    const homeSurface = finite(home.surfaces?.[surface], finite(home.elo));
-    game.advancedDataset = {
+    const awaySurface = finite(away?.surfaces?.[surface], finite(away?.elo));
+    const homeSurface = finite(home?.surfaces?.[surface], finite(home?.elo));
+    game.advancedDataset = { ...(game.advancedDataset || {}),
       provider: 'Jeff Sackmann tennis datasets',
-      ...provenance(null, [away, home], `tennis-${tour}`),
+      ...provenance(game.advancedDataset, [away, home], `tennis-${tour}`),
       surface,
       surfaceEloDifference: difference(homeSurface, awaySurface),
-      serveReturnDifference: measuredCalculation([home.serveWon, home.returnWon, away.serveWon, away.returnWon], (homeServe, homeReturn, awayServe, awayReturn) => homeServe + homeReturn - awayServe - awayReturn),
-      awayMatches: away.matches,
-      homeMatches: home.matches
+      serveReturnDifference: measuredCalculation([home?.serveWon, home?.returnWon, away?.serveWon, away?.returnWon], (homeServe, homeReturn, awayServe, awayReturn) => homeServe + homeReturn - awayServe - awayReturn),
+      awayMatches: away?.matches ?? null,
+      homeMatches: home?.matches ?? null
     };
-    matched += 1;
+    if (away && home) matched += 1;
   }
   return { ...sync, matched, sourceCorroborations, periodRejections };
 }

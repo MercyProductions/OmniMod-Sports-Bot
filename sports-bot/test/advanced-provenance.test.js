@@ -128,3 +128,78 @@ test('independent schedule receipts use the actual row and never the container t
 });
 
 const nflCsv=(text,url)=>text.split('\n').map((line,index)=>!line?'':index===0?'season,season_type,'+line:String(url.match(/reg_(\d{4})/)[1])+',REG,'+line).join('\n');
+
+
+test('repeated attachment has bounded current receipts and one status per source',async()=>{
+ await seed();const game=nflGame();
+ for(let i=0;i<5;i++)await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.deepEqual(game.advancedDataset.sourceReceiptTimes,[old,old]);assert.equal(game.advancedDataset.sourceRefreshStatuses.length,1);
+});
+
+test('replaced source values replace their old receipts and refresh failures',async()=>{
+ await seed({sources:[{id:'nflverse-team-stats',ok:false,checkedAt:old}]});const game=nflGame();
+ await attachAdvancedDatasetContext([game],{localOnly:true});
+ const fresh=new Date(now).toISOString();await seed({footballTeams:{A:{...team(),sourceFetchedAt:fresh},H:{...team(),epaPerGame:3,sourceFetchedAt:fresh}},sources:[{id:'nflverse-team-stats',ok:true,checkedAt:fresh}]});
+ await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.deepEqual(game.advancedDataset.sourceReceiptTimes,[fresh,fresh]);assert.equal(game.advancedDataset.sourceRefreshStatuses.length,1);
+ assert.equal(game.advancedDataset.sourceRefreshStatuses[0].state,'success');
+});
+
+test('independent historical fields retain their own receipt while refreshed fields do not accumulate ancestors',async()=>{
+ await seed();const game=nflGame();const inherited=new Date(now-30*86400000).toISOString();
+ game.advancedDataset={provider:'historical boxscore',playValueDifference:.1,epaDifference:99,sourceReceiptTimes:[inherited]};
+ for(let i=0;i<4;i++)await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.equal(game.advancedDataset.playValueDifference,.1);assert.deepEqual(game.advancedDataset.sourceReceiptTimes,[inherited,old,old]);
+ assert.ok(game.advancedDataset.sourceContributions.some(row=>row.fields.includes('playValueDifference')));
+});
+
+test('fully replaced legacy values cannot retain obsolete future observation times',async()=>{
+ await seed();const game=nflGame();game.advancedDataset={provider:'old external data',epaDifference:99,sourceReceiptTimes:[new Date(now+86400000).toISOString()],fetchedAt:new Date(now+86400000).toISOString()};
+ await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.equal(observedInputState(game.advancedDataset,now),'observed_by_cutoff');assert.deepEqual(game.advancedDataset.sourceReceiptTimes,[old,old]);
+});
+
+
+test('source rows disappearing cannot leave a previously attached NFL value active',async()=>{
+ await seed();const game=nflGame();await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.ok(Number.isFinite(game.advancedDataset.epaDifference));await seed({footballTeams:{}});
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.epaDifference,null);
+ assert.ok(game.advancedDataset.sourceReceiptTimes.every(value=>value===null));
+});
+
+test('a lost NBA side invalidates cached two-sided comparisons',async()=>{
+ await seed({basketballTeams:{away:{pace:100,netRating:0,sourceFetchedAt:old},home:{pace:110,netRating:10,sourceFetchedAt:old}}});
+ const game={id:'nba',leagueKey:'nba',away:{name:'Away'},home:{name:'Home'}};
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.pace,105);
+ await seed({basketballTeams:{away:{pace:100,netRating:0,sourceFetchedAt:old}}});
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.pace,null);assert.equal(game.advancedDataset.efficiencyDifference,null);
+});
+
+test('changed MLB lineup membership cannot retain the previous lineup estimate',async()=>{
+ await seed({baseballPlayers:{p:{name:'P',role:'batter',expectedWoba:.3,sourceFetchedAt:old},q:{name:'Q',role:'batter',expectedWoba:.4,sourceFetchedAt:old}}});
+ const game={id:'mlb',leagueKey:'mlb',away:{name:'Away'},home:{name:'Home'},autoPlayers:[{team:'Away',name:'P'},{team:'Home',name:'Q'}]};
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.ok(game.advancedDataset.lineupXwobaDifference>0);
+ game.autoPlayers=[];await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.lineupXwobaDifference,null);
+});
+
+
+test('missing tennis contributors clear prior comparisons without erasing independent features',async()=>{
+ await seed({tennis:{atp:{away:{elo:1500,matches:2,serveWon:.6,returnWon:.4,sourceFetchedAt:old},home:{elo:1600,matches:2,serveWon:.65,returnWon:.45,sourceFetchedAt:old}}}});
+ const game={id:'tennis',leagueKey:'atp',away:{name:'Away'},home:{name:'Home'},advancedDataset:{playValueDifference:.1,sourceReceiptTimes:[old]}};
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.surfaceEloDifference,100);
+ await seed({tennis:{atp:{}}});await attachAdvancedDatasetContext([game],{localOnly:true});
+ assert.equal(game.advancedDataset.surfaceEloDifference,null);assert.equal(game.advancedDataset.playValueDifference,.1);
+});
+
+test('nested contributor receipts cannot hide future or unknown observations behind an older flat receipt',()=>{
+ const data={sourceReceiptTimes:[old],sourceContributions:[{sourceReceiptTimes:[new Date(now+1000).toISOString()]}]};
+ assert.equal(observedInputState(data,now),'after_information_cutoff');
+ data.sourceContributions=[{sourceReceiptTimes:[null]}];assert.equal(observedInputState(data,now),'unknown');
+ assert.doesNotThrow(()=>buildEvidenceCoverage({advancedDataset:{sourceReceiptTimes:[old],sourceContributions:[null]}},{now}));
+});
+
+test('unattributed inherited fields preserve known future nested receipts during legacy migration',async()=>{
+ await seed();const game=nflGame();game.advancedDataset={playValueDifference:.1,epaDifference:99,sourceReceiptTimes:[old],sourceContributions:[{sourceReceiptTimes:[new Date(now+1000).toISOString()]}]};
+ await attachAdvancedDatasetContext([game],{localOnly:true});assert.equal(game.advancedDataset.playValueDifference,.1);
+ assert.equal(observedInputState(game.advancedDataset,now),'after_information_cutoff');
+});
