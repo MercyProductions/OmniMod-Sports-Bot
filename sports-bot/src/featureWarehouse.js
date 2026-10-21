@@ -195,6 +195,8 @@ function publicPrediction(prediction = {}, slate = {}, game = {}, capturedAt = D
     predictedSide: prediction.predictedSide,
     outcomeProbabilities: prediction.outcomeProbabilities,
     valueAnalysis: prediction.valueAnalysis || null,
+    bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),
+    attemptedBookmakerIntegrity:structuredClone(game.oddsBookmakerEvidence||null),
     oddsMatchEvidence:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null),
     candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities,
@@ -261,6 +263,7 @@ function compactMarket(game = {}, meta = {}) {
     dispersion: Number(game.odds?.h2h?.dispersion || 0),
     provider: game.odds?.provider || game.odds?.freeProvider || '',
     cacheState: game.odds?.cacheState || '',
+    bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),
     eventIdentity:structuredClone(game.odds?.eventIdentity||game.oddsMatchEvidence||null)
   };
 }

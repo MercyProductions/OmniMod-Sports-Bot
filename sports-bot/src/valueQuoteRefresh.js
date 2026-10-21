@@ -125,6 +125,7 @@ export async function refreshValueQuotes(slate, options = {}) {
     const event = match.event;
     if (!event) continue;
     const h2h = bestH2HMarket(event.bookmakers, game);
+    oddsMatchAudit.at(-1).bookmakerIntegrity=h2h.bookmakerIntegrity;
     if (!h2h.away || !h2h.home || !h2h.bookmakerCount) continue;
     updated.set(scopedEventKey(eventReference(game)), { ...game, oddsMatchEvidence:match.evidence, odds: { eventId: event.id,eventIdentity:match.evidence, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });
   }

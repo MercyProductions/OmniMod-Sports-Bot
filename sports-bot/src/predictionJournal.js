@@ -108,6 +108,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
       laterThanPrediction: Boolean(generatedAt && iso(meta?.fetchedAt) && Date.parse(meta.fetchedAt) > Date.parse(generatedAt))
     }])),
     odds: { status: hasOfferedPrice ? 'available' : 'unavailable',
+      bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),attemptedBookmakerIntegrity:structuredClone(game.oddsBookmakerEvidence||null),
       provider: String(game.odds?.provider || game.odds?.freeProvider || '').slice(0, 120),
       rules: String(game.odds?.h2h?.rules || game.odds?.rules || 'unknown').slice(0, 120),
       cacheState: String(game.odds?.cacheState || 'unknown'),

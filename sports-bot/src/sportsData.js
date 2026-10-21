@@ -1,3 +1,4 @@
+import {collectH2HBooks} from './bookmakerIntegrity.js';
 import {inspectOddsEventCandidate,inspectOddsEventMatch,matchOddsEventCohort} from './oddsEventIdentity.js';
 import {applyManualResults} from './manualResultMatching.js';
 export {applyManualResults} from './manualResultMatching.js';
@@ -5,7 +6,6 @@ import {finalReplyMatches} from './finalResultRevision.js';
 import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
-import {normalizeOddsPrice} from './oddsPricing.js';
 import { config } from './config.js';
 import { enrichGamesAutomatically } from './autoEnrichment.js';
 import { attachAdvancedDatasetContext } from './advancedDatasets.js';
@@ -398,30 +398,11 @@ function bestQuote(quotes) {
 }
 
 export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}) {
-  const awayAliases = [normalizeName(game.away.name), normalizeName(game.away.abbr)];
-  const homeAliases = [normalizeName(game.home.name), normalizeName(game.home.abbr)];
   const fairRows = [];
   const quoteGroups = { away: [], home: [], draw: [] };
   const twoWay = sportProfile(game).twoWay;
-  const seenBooks = new Set();
-  for (const bookmaker of bookmakers ?? []) {
-    const bookId = bookmaker.key || bookmaker.title;
-    if (!bookId || seenBooks.has(bookId)) continue;
-    const market = (bookmaker.markets ?? []).find((row) => row.key === 'h2h');
-    if (!market) continue;
-    const book = {};
-    for (const outcome of market.outcomes ?? []) {
-      const normalized = normalizeName(outcome.name);
-      const side = awayAliases.includes(normalized) ? 'away' : homeAliases.includes(normalized) ? 'home' : /draw|tie/i.test(String(outcome.name)) ? 'draw' : '';
-      const normalizedPrice = normalizeOddsPrice(outcome.price, oddsFormat);
-      const price = normalizedPrice?.americanOdds ?? null;
-      const rawImplied = normalizedPrice?.impliedProbability ?? null;
-      if (!side || rawImplied === null) continue;
-      book[side] = { side, bookmaker: bookmaker.title || bookmaker.key || 'Book', bookmakerKey: bookmaker.key || bookmaker.title, name: outcome.name, price, originalPrice: normalizedPrice.originalPrice, originalFormat: normalizedPrice.originalFormat, rawImplied, lastUpdate: market.last_update || bookmaker.last_update || '', timestampSource: market.last_update ? 'provider_update' : 'bookmaker_update_unverified' };
-    }
-    if (!book.away || !book.home) continue;
-    if (twoWay ? Boolean(book.draw) : !book.draw) continue;
-    seenBooks.add(bookId);
+  const {books,audit}=collectH2HBooks(bookmakers,game,{twoWay,oddsFormat});
+  for (const book of books) {
     const total = book.away.rawImplied + book.home.rawImplied + (book.draw?.rawImplied || 0);
     if (total <= 0) continue;
     const fair = {};
@@ -433,7 +414,7 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
     }
     fairRows.push(fair);
   }
-  if (!fairRows.length) return { away: null, home: null, draw: null, bookmakerCount: 0, dispersion: 1, lastUpdate: '' };
+  if (!fairRows.length) return { away: null, home: null, draw: null, bookmakerCount: 0, dispersion: 1, lastUpdate: '',bookmakerIntegrity:audit };
   const output = {};
   for (const side of ['away', 'home', 'draw']) {
     const quotes = quoteGroups[side];
@@ -452,6 +433,7 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
     ...output,
     rules: !twoWay ? 'regulation_3way' : ['baseball', 'basketball', 'hockey'].includes(sportProfile(game).key) ? 'full_game_2way' : 'unverified_settlement',
     bookmakerCount: fairRows.length,
+    bookmakerIntegrity:audit,
     dispersion,
     lastUpdate: [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).every(Boolean)
       ? [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).sort()[0] : ''
@@ -465,10 +447,13 @@ export function bestSpreadTotalMarkets(bookmakers, game) {
   };
   const spreadRows = { away: [], home: [] };
   const totalRows = { over: [], under: [] };
-  for (const bookmaker of bookmakers ?? []) {
-    for (const market of bookmaker.markets ?? []) {
+  for (const bookmaker of Array.isArray(bookmakers)?bookmakers:[]) {
+    if(!bookmaker||!Array.isArray(bookmaker.markets))continue;
+    for (const market of bookmaker.markets) {
+      if(!market||!Array.isArray(market.outcomes))continue;
       if (market.key === 'spreads') {
-        for (const outcome of market.outcomes ?? []) {
+        for (const outcome of market.outcomes) {
+          if(!outcome)continue;
           const normalized = normalizeName(outcome.name);
           const side = aliases.away.includes(normalized) ? 'away' : aliases.home.includes(normalized) ? 'home' : '';
           const point = finiteNumber(outcome.point);
@@ -477,7 +462,8 @@ export function bestSpreadTotalMarkets(bookmakers, game) {
         }
       }
       if (market.key === 'totals') {
-        for (const outcome of market.outcomes ?? []) {
+        for (const outcome of market.outcomes) {
+          if(!outcome)continue;
           const side = /over/i.test(outcome.name) ? 'over' : /under/i.test(outcome.name) ? 'under' : '';
           const point = finiteNumber(outcome.point);
           if (!side || point === null || americanToProbability(outcome.price) === null) continue;
@@ -557,6 +543,7 @@ async function enrichWithOdds(games, options = {}) {
       const event = match.event;
       if (!event) continue;
       const h2h = bestH2HMarket(event.bookmakers, game);
+      game.oddsBookmakerEvidence=h2h.bookmakerIntegrity;
       const extra = bestSpreadTotalMarkets(event.bookmakers, game);
       const paidOdds = {
         eventId: event.id,
