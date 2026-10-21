@@ -160,15 +160,21 @@ function cacheRevision(slate) {
   return revision;
 }
 
-// Serialize local writers; the owner lock excludes other processes. A revision
-// check is still required: locking a stale whole-object write would lose updates.
+// Both replacement and read/modify/write transactions share the same queue and owner lock.
+async function withDailyCacheWrite(file, operation) {
+  const previous = dailyCacheWrites.get(file) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => withAuditFileLock(file, operation));
+  dailyCacheWrites.set(file, pending);
+  try { return await pending; }
+  finally { if (dailyCacheWrites.get(file) === pending) dailyCacheWrites.delete(file); }
+}
+
 export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?? '', options = {}) {
   const snapshot = structuredClone(slate);
   const expected = options.expectedRevision ?? cacheRevision(snapshot);
   if (!Number.isSafeInteger(expected) || expected < 0) throw new Error('Invalid expected daily cache revision.');
   const file = dailyCachePath(dateKey, guildId);
-  const previous = dailyCacheWrites.get(file) ?? Promise.resolve();
-  const operation = previous.catch(() => {}).then(() => withAuditFileLock(file, async () => {
+  return withDailyCacheWrite(file, async () => {
     const current = await readJson(file, null, { throwOnError: true, redactErrors: true });
     const revision = cacheRevision(current);
     if (expected !== revision) {
@@ -180,10 +186,25 @@ export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?
     const persisted = { ...snapshot, cacheRevision: revision + 1 };
     await writeJson(file, persisted);
     return persisted;
-  }));
-  dailyCacheWrites.set(file, operation);
-  try { return await operation; }
-  finally { if (dailyCacheWrites.get(file) === operation) dailyCacheWrites.delete(file); }
+  });
+}
+
+// Callback may perform bounded local journal I/O, never provider or Discord requests.
+export async function updateDailyCache(dateKey, guildId, update) {
+  const file = dailyCachePath(dateKey, guildId);
+  return withDailyCacheWrite(file, async () => {
+    const current = await readJson(file, null, { throwOnError: true, redactErrors: true });
+    if (!current) throw new Error('Daily cache disappeared; reload before updating.');
+    const revision = cacheRevision(current);
+    if (revision === Number.MAX_SAFE_INTEGER) throw new Error('Daily cache revision exhausted.');
+    const proposal = await update(structuredClone(current));
+    if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) throw new Error('Daily cache updater must return a slate.');
+    if (cacheRevision(proposal) !== revision) throw new Error('Daily cache updater changed the revision.');
+    if (proposal.dateKey !== current.dateKey || String(proposal.guildId || '') !== String(current.guildId || '')) throw new Error('Daily cache updater changed the scope.');
+    const persisted = { ...structuredClone(proposal), cacheRevision: revision + 1 };
+    await writeJson(file, persisted);
+    return persisted;
+  });
 }
 
 export async function listDailyCaches(limit = 30, guildId = '') {

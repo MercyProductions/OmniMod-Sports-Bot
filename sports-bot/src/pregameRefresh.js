@@ -52,7 +52,7 @@ export function markPregameRefreshes(slate = {}, due = [], refreshedAt = new Dat
 }
 
 /** Mark only a freshly obtained summary plus a new pregame forecast as completed. */
-export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due = [], attemptedAt, completedAt, { blockedGameIds = [], blockedEventKeys = [] } = {}) {
+export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due = [], attemptedAt, completedAt, { blockedGameIds = [], blockedEventKeys = [], cacheBlockedEventKeys = [] } = {}) {
   const began = finiteTime(attemptedAt), ended = finiteTime(completedAt);
   if (began === null || ended === null || ended < began) throw new Error('Invalid pregame refresh attempt timestamps.');
   const games=journalGameIndex(rebuilt.games||[]),previousIndex=journalGameIndex(previous.games||[]);
@@ -65,7 +65,8 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
     const fetched = finiteTime(game?.autoEnrichment?.fetchedAt), generated = finiteTime(prediction?.predictionGeneratedAt), start = finiteTime(game?.startTime);
     const issuable = forecastIssuanceEvidence(prediction||{}, game||{}, rebuilt, ended).recordEligibility === 'observed_pregame';
     const journalBlocked = blockedGameIds.includes(String(row.gameId))||blockedEventKeys.includes(key);
-    const valid = !journalBlocked && game?.statusKey === 'scheduled' && start !== null && ended < start
+    const cacheBlocked = cacheBlockedEventKeys.includes(key);
+    const valid = !cacheBlocked && !journalBlocked && game?.statusKey === 'scheduled' && start !== null && ended < start
       && ['network', 'revalidated'].includes(game?.autoEnrichment?.cacheState)
       && fetched !== null && fetched >= began && fetched <= ended
       && prediction?.predictionMode === 'pregame' && generated !== null && generated >= fetched && generated <= ended && issuable;
@@ -79,7 +80,8 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
       ...(fetched === null || fetched < began || fetched > ended ? ['summary_receipt_outside_attempt'] : []),
       ...(prediction?.predictionMode !== 'pregame' || generated === null || fetched === null || generated < fetched || generated > ended ? ['pregame_forecast_not_verified'] : []),
       ...(!issuable ? ['forecast_issuance_not_verified'] : []),
-      ...(journalBlocked ? ['journal_issuance_not_verified'] : [])
+      ...(journalBlocked ? ['journal_issuance_not_verified'] : []),
+      ...(cacheBlocked ? ['cache_event_changed_during_refresh'] : [])
     ] });
   }
   const previousGameKeys=new Set((previous.games||[]).map(game=>scopedEventKey(eventReference(game))));
@@ -125,8 +127,8 @@ export function nextPregameRefresh(slate = {}, now = new Date(), options = {}) {
 }
 
 /** Commit eligible refreshed forecasts only after the same completion gate used by the scheduler. */
-export async function completeAndJournalPregameRefresh(previous, rebuilt, due, attemptedAt, completedAt, journalOptions = {}) {
-  let attempt = completePregameRefreshAttempt(previous, rebuilt, due, attemptedAt, completedAt);
+export async function completeAndJournalPregameRefresh(previous, rebuilt, due, attemptedAt, completedAt, { cacheBlockedEventKeys = [], ...journalOptions } = {}) {
+  let attempt = completePregameRefreshAttempt(previous, rebuilt, due, attemptedAt, completedAt, { cacheBlockedEventKeys });
   const key=row=>scopedEventKey(row),index=journalGameIndex(rebuilt.games||[]);
   const predictionKey=row=>{const game=resolveSlateGame(index,row).game;return game?key(eventReference(game)):null;};
   let completed=new Set(attempt.completed.map(key));
@@ -138,7 +140,7 @@ export async function completeAndJournalPregameRefresh(previous, rebuilt, due, a
   const verified=new Set(issuance.verifiedIssuedForecasts.map(row=>key({...row,leagueKey:row.league})));
   const blockedEventKeys=[...completed].filter(value=>!verified.has(value));
   if(blockedEventKeys.length){
-    attempt=completePregameRefreshAttempt(previous,rebuilt,due,attemptedAt,completedAt,{blockedEventKeys});
+    attempt=completePregameRefreshAttempt(previous,rebuilt,due,attemptedAt,completedAt,{blockedEventKeys,cacheBlockedEventKeys});
     completed=new Set(attempt.completed.map(key));
   }
   await recordPredictionJournal(rebuilt,{...journalOptions,now,lifecycle:'refresh_attempt',refreshAttempt:{

@@ -1,3 +1,4 @@
+import {persistPregameRefresh} from './pregameCachePersistence.js';
 import {persistValueQuoteRefresh} from './quoteCachePersistence.js';
 import {refreshScopedPredictionValues} from './quoteRefreshIdentity.js';
 import {persistFinalRefresh} from './finalCacheMerge.js';
@@ -15,7 +16,7 @@ import { buildCommands } from './commands.js';
 import { formatValueDetails, valueOpportunityLine } from './oddsValue.js';
 import { refreshValueQuotes } from './valueQuoteRefresh.js';
 import { buildDailySlate, refreshFinalGrades, supportedLeagues } from './sportsData.js';
-import { duePregameRefreshes, completeAndJournalPregameRefresh, buildJournaledPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
+import { duePregameRefreshes, buildJournaledPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
 import { recordSlateSnapshot } from './featureWarehouse.js';
 import { pendingFinalDateKeys } from './finalReconciliation.js';
 import { localDateKey, isDailyPostTime } from './time.js';
@@ -382,22 +383,12 @@ async function refreshDuePregameGames(reason = 'timer', guildId = config.guildId
       marketStages: stages
     }));
     const refreshedAt = nowLabel();
-    const latest = await readDailyCache(dateKey, guildId) || cached;
-    const attempt = await completeAndJournalPregameRefresh(latest, {
-      ...slate,
-      guildId,
-      messageId: cached.messageId || '',
-      channelId: cached.channelId || '',
-      postedAt: cached.postedAt || '',
-      finalReplies: latest.finalReplies || cached.finalReplies || {},
-      providerDailyUsage: cached.providerDailyUsage || null
-    }, due, attemptedAt, refreshedAt);
-    let durable = attempt.slate;
+    const attempt = await persistPregameRefresh(cached, slate, due, attemptedAt, refreshedAt);
+    const durable = attempt.slate;
     if (config.featureWarehouseEnabled && attempt.completed.length) {
-      const accepted = new Set(attempt.completed.map(row => String(row.gameId)));
-      await recordSlateSnapshot({ ...durable, predictions: durable.predictions.filter(row => accepted.has(String(row.gameId))) });
+      const accepted = new Set(attempt.completed.map(scopedEventKey));
+      await recordSlateSnapshot({ ...durable, predictions: durable.predictions.filter(row => accepted.has(scopedEventKey(row))) });
     }
-    durable = await writeDailyCache(dateKey, durable, guildId, { expectedRevision: cached.cacheRevision ?? 0 });
     if (!attempt.completed.length) {
       runtimeState.nextPregameRefreshAt = nextPregameRefresh(durable, new Date(), { windows: config.pregameRefreshWindows })?.dueAt || '';
       return durable;

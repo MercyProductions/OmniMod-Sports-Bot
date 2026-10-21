@@ -1,11 +1,16 @@
+import {randomUUID} from 'node:crypto';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {persistPregameRefresh} from '../src/pregameCachePersistence.js';
+import {readDailyCache,writeDailyCache,updateDailyCache} from '../src/storage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {duePregameRefreshes,markPregameRefreshes,nextPregameRefresh,completePregameRefreshAttempt,completeAndJournalPregameRefresh} from '../src/pregameRefresh.js';
 import {eventReference,scopedEventKey} from '../src/slateEventIdentity.js';
-import {readPredictionJournal} from '../src/predictionJournal.js';
+import {recordPredictionJournal,readPredictionJournal} from '../src/predictionJournal.js';
 import {formatSlateEmbeds} from '../src/discordPublisher.js';
 const now=Date.parse('2026-10-21T18:00:00Z'),iso=offset=>new Date(now+offset).toISOString();
 function slate(){
@@ -67,4 +72,112 @@ test('Discord attaches each retrospective score to its own league and hides ambi
  const bad=slate();bad.games.push({...structuredClone(bad.games[0]),statusKey:'postponed'});bad.predictions[0].predictionConfidence='99.9%';
  const hidden=formatSlateEmbeds(bad)[0].toJSON().fields;assert.match(hidden[0].value,/could not be matched uniquely/);assert.doesNotMatch(hidden[0].value,/99.9%|Pick:/);assert.match(hidden[1].value,/NHL Home/);
  assert.notEqual(scopedEventKey(eventReference(bad.games[0])),scopedEventKey(eventReference(bad.games[1])));
+});
+
+async function cachedFixture(){const value=slate();value.guildId='pregame-'+randomUUID();return writeDailyCache(value.dateKey,value,value.guildId);}
+const persist=(base,fresh,due,path,clock=()=>now+1000)=>persistPregameRefresh(base,fresh,due,iso(0),iso(800),{file:path,clock});
+
+test('a targeted refresh preserves concurrent quotes and metadata while issuing only its scoped new forecasts',async t=>{
+ const base=await cachedFixture(),fresh=rebuilt(base),due=duePregameRefreshes(base,new Date(now)),path=await file(t);
+ await recordPredictionJournal(base,{file:path,now});
+ const latest=structuredClone(base);latest.games[0].odds={price:'concurrent'};latest.messageId='new-message';latest.finalReplies={other:{claimGeneration:4}};
+ await writeDailyCache(base.dateKey,latest,base.guildId);
+ const result=await persist(base,fresh,due,path),saved=await readDailyCache(base.dateKey,base.guildId);
+ assert.equal(result.completed.length,2);assert.equal(saved.games[0].odds.price,'concurrent');assert.equal(saved.messageId,'new-message');
+ assert.equal(saved.finalReplies.other.claimGeneration,4);assert.equal(saved.pregameRefreshDeliveryPending,true);
+ assert.deepEqual(saved.predictions.map(row=>row.outcomeProbabilities.home),[70,70]);
+ const records=await readPredictionJournal(path),forecasts=records.filter(row=>row.type==='forecast');assert.equal(forecasts.length,4);
+ assert.equal(forecasts.filter(row=>row.payload.outcomePercentages.home===60).length,2);
+ assert.equal(saved.pregameCacheMergeAudit.appliedEvents,2);
+});
+
+test('a changed cache forecast is rejected before issuance while another league completes',async t=>{
+ const base=await cachedFixture(),fresh=rebuilt(base),due=duePregameRefreshes(base,new Date(now)),path=await file(t),latest=structuredClone(base);
+ latest.predictions[0].outcomeProbabilities.home=85;await writeDailyCache(base.dateKey,latest,base.guildId);
+ const priorContract=await completeAndJournalPregameRefresh(latest,fresh,due,iso(0),iso(1000),{file:await file(t)});
+ assert.equal(priorContract.completed.length,2);
+ const result=await persist(base,fresh,due,path),records=await readPredictionJournal(path);
+ assert.equal(result.completed.length,1);assert.equal(result.completed[0].leagueKey,'nhl');assert.equal(result.slate.predictions[0].outcomeProbabilities.home,85);
+ assert.equal(result.slate.pregameCacheMergeAudit.rejected[0].reason,'cache_forecast_changed');
+ assert.ok(result.rejected[0].reasons.includes('cache_event_changed_during_refresh'));
+ assert.deepEqual(records.filter(row=>row.type==='forecast').map(row=>row.payload.league),['nhl']);
+ assert.equal(duePregameRefreshes(result.slate,new Date(now)).length,1);
+});
+
+test('waiting until after kickoff cannot issue or complete the expired event',async t=>{
+ const base=await cachedFixture(),fresh=rebuilt(base),path=await file(t);
+ const result=await persist(base,fresh,duePregameRefreshes(base,new Date(now)),path,()=>now+400000);
+ assert.equal(result.completed.length,1);assert.equal(result.completed[0].leagueKey,'nba');
+ assert.ok(result.rejected[0].reasons.includes('start_or_completion_invalid'));
+ const forecasts=(await readPredictionJournal(path)).filter(row=>row.type==='forecast');assert.equal(forecasts.length,1);assert.equal(forecasts[0].recordedAt,iso(400000));
+});
+
+test('queued refresh inputs are frozen and stale writers cannot enter between validation and save',async t=>{
+ const base=await cachedFixture(),fresh=rebuilt(base),due=duePregameRefreshes(base,new Date(now)),path=await file(t);
+ let entered,release;const ready=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const holding=updateDailyCache(base.dateKey,base.guildId,async current=>{entered();await gate;current.predictions[0].outcomeProbabilities.home=90;return current;});
+ await ready;const pending=persist(base,fresh,due,path);
+ const stale=assert.rejects(writeDailyCache(base.dateKey,{...base,messageId:'stale'},base.guildId),{code:'DAILY_CACHE_CONFLICT'});
+ fresh.predictions[1].outcomeProbabilities.home=99;release();await holding;
+ const result=await pending;await stale;
+ assert.equal(result.slate.predictions[0].outcomeProbabilities.home,90);assert.equal(result.slate.predictions[1].outcomeProbabilities.home,70);
+ assert.notEqual(result.slate.messageId,'stale');assert.equal(result.completed.length,1);
+});
+
+test('journal failure leaves the cache revision and refresh windows unchanged',async t=>{
+ const base=await cachedFixture(),path=await file(t),blocked=path+'.block';await writeFile(blocked,'not a directory');
+ await assert.rejects(persist(base,rebuilt(base),duePregameRefreshes(base,new Date(now)),join(blocked,'journal.jsonl')));
+ assert.deepEqual(await readDailyCache(base.dateKey,base.guildId),base);
+});
+
+test('missing or foreign cache scope cannot create issued forecasts or restore a deleted cache',async t=>{
+ const base=slate();base.guildId='missing-'+randomUUID();const path=await file(t);
+ await assert.rejects(persist(base,rebuilt(base),duePregameRefreshes(base,new Date(now)),path),/disappeared/);
+ assert.equal(await readDailyCache(base.dateKey,base.guildId),null);assert.equal((await readPredictionJournal(path)).length,0);
+ const existing=await cachedFixture(),fresh=rebuilt(existing);fresh.guildId='foreign';
+ await assert.rejects(persist(existing,fresh,duePregameRefreshes(existing,new Date(now)),path),/scope/);
+ assert.deepEqual(await readDailyCache(existing.dateKey,existing.guildId),existing);
+});
+
+test('stale summaries and journal-rejected identities still cannot complete durable refresh windows',async t=>{
+ for(const mode of ['stale','rejected']){
+  const base=await cachedFixture(),fresh=rebuilt(base),path=await file(t);
+  if(mode==='stale')fresh.games[1].autoEnrichment.cacheState='stale';
+  else await recordPredictionJournal({...fresh,predictions:[fresh.predictions[1]]},{file:path,now:now+800,lifecycle:'rejected'});
+  const result=await persist(base,fresh,duePregameRefreshes(base,new Date(now)),path);
+  assert.equal(result.completed.length,1);assert.equal(result.completed[0].leagueKey,'nba');assert.equal(result.slate.predictions[1].outcomeProbabilities.home,60);
+  assert.equal(duePregameRefreshes(result.slate,new Date(now)).length,1);
+ }
+});
+
+test('an independently completed refresh window is not overwritten by an older fetch',async t=>{
+ const base=await cachedFixture(),fresh=rebuilt(base),due=duePregameRefreshes(base,new Date(now)),path=await file(t);
+ const latest=markPregameRefreshes(base,[due[0]],iso(-100));await writeDailyCache(base.dateKey,latest,base.guildId);
+ const result=await persist(base,fresh,due,path);
+ assert.equal(result.completed.length,1);assert.equal(result.completed[0].leagueKey,'nhl');
+ assert.equal(result.slate.pregameCacheMergeAudit.rejected[0].reason,'cache_refresh_window_changed');
+ assert.equal(result.slate.predictions[0].outcomeProbabilities.home,60);
+});
+
+test('invalid cache updater output cannot erase data and a failed updater releases its queue',async()=>{
+ const base=await cachedFixture();
+ await assert.rejects(updateDailyCache(base.dateKey,base.guildId,()=>null),/return a slate/);
+ await assert.rejects(updateDailyCache(base.dateKey,base.guildId,current=>({...current,cacheRevision:99})),/changed the revision/);
+ await assert.rejects(updateDailyCache(base.dateKey,base.guildId,current=>({...current,guildId:'foreign'})),/changed the scope/);
+ assert.deepEqual(await readDailyCache(base.dateKey,base.guildId),base);
+ const saved=await updateDailyCache(base.dateKey,base.guildId,current=>({...current,messageId:'after failure'}));
+ assert.equal(saved.messageId,'after failure');assert.equal(saved.cacheRevision,base.cacheRevision+1);
+});
+
+test('a writer in another process cannot enter a held cache update transaction',async()=>{
+ const base=await cachedFixture();let entered,release;
+ const ready=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+ const held=updateDailyCache(base.dateKey,base.guildId,async current=>{entered();await gate;return {...current,messageId:'transaction-owner'};});
+ await ready;
+ try{
+  const module=new URL('../src/storage.js',import.meta.url).href;
+  const code=`import {writeDailyCache} from ${JSON.stringify(module)};try{await writeDailyCache(${JSON.stringify(base.dateKey)},${JSON.stringify(base)},${JSON.stringify(base.guildId)});process.exitCode=2;}catch(error){if(!error.message.includes('locked'))throw error;}`;
+  await promisify(execFile)(process.execPath,['--input-type=module','-e',code],{env:process.env,windowsHide:true,timeout:10000});
+ }finally{release();await held;}
+ const saved=await readDailyCache(base.dateKey,base.guildId);assert.equal(saved.messageId,'transaction-owner');assert.equal(saved.cacheRevision,base.cacheRevision+1);
 });
