@@ -136,6 +136,70 @@ test('pregame completion preserves earlier windows and retries stale or failed e
   assert.equal(failed.slate.pregameRefreshDeliveryPending, false);
 });
 
+test('refresh completion preserves untouched forecasts and cannot publish unsolicited or rejected new predictions',()=>{
+  const previous=slate(),rebuilt=slate();
+  const oldOther={...previous.predictions[0],gameId:'other',outcomeProbabilities:{home:55,away:45,draw:0}};
+  previous.predictions.push(oldOther);previous.games.push({...previous.games[0],id:'other'});
+  rebuilt.games[0].autoEnrichment.fetchedAt=time(500);rebuilt.predictions[0].predictionGeneratedAt=time(700);
+  rebuilt.predictions.push({...oldOther,outcomeProbabilities:{home:99,away:1,draw:0}},
+    {...rebuilt.predictions[0],gameId:'unsolicited'});
+  rebuilt.games.push({...rebuilt.games[0],id:'other'},{...rebuilt.games[0],id:'unsolicited'});
+  const result=completePregameRefreshAttempt(previous,rebuilt,[{gameId:'game',dueWindows:[30]}],time(0),time(1000));
+  assert.equal(result.completed.length,1);
+  assert.deepEqual(result.slate.predictions.find(row=>row.gameId==='other'),oldOther);
+  assert.equal(result.slate.predictions.some(row=>row.gameId==='unsolicited'),false);
+  assert.ok(result.slate.games.some(row=>row.id==='unsolicited'));
+  const rejected=completePregameRefreshAttempt({games:[],predictions:[]},slate(),[{gameId:'game',dueWindows:[30]}],time(0),time(1000));
+  assert.equal(rejected.completed.length,0);assert.equal(rejected.slate.predictions.length,0);
+});
+
+test('refresh completion does not claim malformed or event-inconsistent forecasts as successful',()=>{
+  for(const change of [row=>row.outcomeProbabilities={home:NaN,away:35},row=>row.startTime=time(7200000),row=>row.leagueKey='nfl',row=>delete row.modelVersion]){
+    const previous=slate(),rebuilt=slate();
+    rebuilt.games[0].autoEnrichment.fetchedAt=time(500);rebuilt.predictions[0].predictionGeneratedAt=time(700);
+    change(rebuilt.predictions[0]);
+    const result=completePregameRefreshAttempt(previous,rebuilt,[{gameId:'game',dueWindows:[30]}],time(0),time(1000));
+    assert.equal(result.completed.length,0);assert.deepEqual(result.slate.predictions,previous.predictions);
+  }
+});
+
+test('journal issuance rejects mismatched schedule and league evidence using the refresh policy',async t=>{
+  for(const change of [row=>row.startTime=time(7200000),row=>row.leagueKey='nfl']){
+    const file=await fixture(t),value=slate();change(value.predictions[0]);
+    await recordPredictionJournal(value,{file,now});
+    const rows=await readFullPredictionJournal(file);
+    assert.equal(rows.filter(row=>row.type==='forecast').length,0);
+    assert.ok(rows.some(row=>row.type==='unverifiable_observation'));
+  }
+});
+
+test('journal refusal of a reused rejected or mutated identity cannot complete a refresh',async t=>{
+  for(const lifecycle of ['provisional','issued','rejected']){
+    const file=await fixture(t),rebuilt=slate(),previous=slate();
+    rebuilt.games[0].autoEnrichment.fetchedAt=time(500);rebuilt.predictions[0].predictionGeneratedAt=time(700);
+    await recordPredictionJournal(rebuilt,{file,now:now+800,lifecycle});
+    if(lifecycle!=='rejected')rebuilt.predictions[0].outcomeProbabilities={home:75,away:25,draw:0};
+    const attempt=await completeAndJournalPregameRefresh(previous,rebuilt,[{gameId:'game',dueWindows:[30]}],time(0),time(1000),{file});
+    assert.equal(attempt.completed.length,0);
+    assert.deepEqual(attempt.slate.predictions,previous.predictions);
+    const records=await readFullPredictionJournal(file);
+    assert.equal(records.find(row=>row.type==='refresh_attempt').payload.games[0].status,'rejected');
+    assert.ok(records.find(row=>row.type==='refresh_attempt').payload.games[0].reasons.includes('journal_issuance_not_verified'));
+  }
+});
+
+test('delivery must match frozen probabilities but may acknowledge an unchanged forecast after kickoff',async t=>{
+  const file=await fixture(t),value=slate();await recordPredictionJournal(value,{file,now});
+  value.messageId='message';value.channelId='channel';
+  const changed=structuredClone(value);changed.predictions[0].outcomeProbabilities={home:75,away:25,draw:0};
+  await recordPredictionJournal(changed,{file,now:now+1000,lifecycle:'delivered'});
+  assert.equal((await readFullPredictionJournal(file)).filter(row=>row.payload.state==='DELIVERED').length,0);
+  value.games[0].statusKey='live';
+  await recordPredictionJournal(value,{file,now:now+7200000,lifecycle:'delivered'});
+  const delivered=(await readFullPredictionJournal(file)).filter(row=>row.payload.state==='DELIVERED');
+  assert.equal(delivered.length,1);assert.equal(delivered[0].recordedAt,time(7200000));
+});
+
 test('new model and horizon cohorts are not pooled with older or replay forecasts', () => {
   const base = { gameId: 'g', dateKey: '2026-10-01', sport: 'basketball', actualSide: 'home',
     source: 'frozen-production', modelVersion: 'v6.0.1', snapshotStage: 't-30',

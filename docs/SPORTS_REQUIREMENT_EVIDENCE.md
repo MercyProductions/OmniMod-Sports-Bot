@@ -64,3 +64,7 @@ Development v6.0.9 introduces distinct-player reconciliation shared by advanced 
 ## Transport recovery continuation
 
 The actual publisher/cache/journal now has isolated send/edit/history failure tests and a real child-process exit/restart test at simulated remote acceptance. Delivery acknowledges exactly the formatter-retained rows. See [confirmed defects, 253-test result and explicit limits](SPORTS_TRANSPORT_RECOVERY.md). This strengthens the earlier module-reimport evidence; live Discord, distributed concurrency, all scheduler branches and mid-append crash recovery remain unverified. No deployment or performance improvement is asserted.
+
+## Refresh issuance continuation
+
+Completion now agrees with durable journal issuance, not merely attempted issuance. Only accepted candidates replace cached predictions; rejected/new unsolicited candidates remain outside the publishable slate. Delivery must match immutable issued probabilities. [Source mechanisms, reproduced failures and limits](SPORTS_REFRESH_ISSUANCE.md); latest suite 259 passing, syntax checks pass. Full runtime timers, live Discord, nested provenance and actual predictive performance remain unverified.

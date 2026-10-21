@@ -13,6 +13,7 @@ process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
 const {postDailySlate}=await import('../src/discordPublisher.js');
 const {recordPredictionJournal,readPredictionJournal}=await import('../src/predictionJournal.js');
 const {CURRENT_MODEL_VERSION}=await import('../src/modelIdentity.js');
+const {completeAndJournalPregameRefresh}=await import('../src/pregameRefresh.js');
 function slate(id){
  const now=Date.now(),generatedAt=new Date(now-1000).toISOString(),startTime=new Date(now+3600000).toISOString();
  return {guildId:'transport',dateKey:'2099-01-01',generatedAt,timezone:'America/Chicago',source:'Synthetic transport fixture',
@@ -97,6 +98,30 @@ test('only forecasts actually retained by the Discord character budget are ackno
  const rows=await readPredictionJournal();
  const ids=new Set(rows.filter(row=>row.type==='forecast'&&row.payload.gameId.startsWith('large-')).map(row=>row.payload.forecastId));
  assert.equal(delivered(rows).filter(row=>ids.has(row.payload.forecastId)).length,shown);
+});
+
+test('mixed targeted refresh publishes only accepted forecasts while rejected and unsolicited observations stay auditable',async t=>{
+ const path=await remoteDirectory(t),value=slate('refresh-accepted');
+ const began=Date.now()-5000,received=new Date(began+1000).toISOString(),generated=new Date(began+2000).toISOString();
+ value.games[0].autoEnrichment={cacheState:'network',fetchedAt:received};
+ value.predictions[0].predictionGeneratedAt=generated;
+ value.games.push({...value.games[0],id:'refresh-rejected',autoEnrichment:{cacheState:'stale',fetchedAt:received}},
+  {...value.games[0],id:'refresh-unsolicited'});
+ value.predictions.push({...value.predictions[0],gameId:'refresh-rejected'},
+  {...value.predictions[0],gameId:'refresh-unsolicited'});
+ await recordPredictionJournal(value,{lifecycle:'provisional'});
+ const result=await completeAndJournalPregameRefresh({guildId:'transport',games:[],predictions:[]},value,
+  [{gameId:'refresh-accepted',dueWindows:[30]},{gameId:'refresh-rejected',dueWindows:[30]}],
+  new Date(began).toISOString(),new Date().toISOString());
+ assert.equal(result.completed.length,1);assert.equal(result.rejected.length,1);
+ assert.deepEqual(result.slate.predictions.map(row=>row.gameId),['refresh-accepted']);
+ const remote=await fakeDiscord(path);await postDailySlate(remote.client,result.slate,{reuseExisting:false});
+ assert.equal(remote.rows[0].embeds.flatMap(embed=>embed.fields||[]).length,1);
+ const rows=await readPredictionJournal(),observations=rows.filter(row=>row.type==='provisional_forecast'&&row.payload.gameId.startsWith('refresh-'));
+ assert.equal(observations.length,3);
+ const ids=new Set(observations.map(row=>row.payload.forecastId));
+ assert.equal(rows.filter(row=>row.type==='forecast'&&ids.has(row.payload.forecastId)).length,1);
+ assert.equal(delivered(rows).filter(row=>ids.has(row.payload.forecastId)).length,1);
 });
 
 test('abrupt exit after remote acceptance recovers in new processes without duplicating or changing the forecast',async t=>{

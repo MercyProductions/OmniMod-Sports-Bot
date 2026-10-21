@@ -13,7 +13,8 @@ const { refreshPredictionValue } = await import('../src/oddsValue.js');
 const { buildCommands } = await import('../src/commands.js');
 const { collectGradedRows, buildCalibrationModel, buildOutcomeValidation } = await import('../src/modelEvaluation.js');
 
-const now = Date.now();
+// All quote scenarios inject their clock; use midday so retry offsets do not cross a daily reset.
+const now = Date.parse('2026-10-20T18:00:00Z');
 const modelAsOf = new Date(now - 3_600_000).toISOString();
 const startTime = new Date(now + 3_600_000).toISOString();
 const quoteTime = new Date(now - 30_000).toISOString();

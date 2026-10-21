@@ -205,6 +205,8 @@ test('actual targeted slate builder journals provisionally until the scheduler a
   assert.equal(records.filter(row=>row.type==='provisional_forecast').length,1);
   const attempt=await completeAndJournalPregameRefresh({},rebuilt,[{gameId:id,dueWindows:[30]}],before,new Date().toISOString());
   assert.equal(attempt.completed.length,0);
+  assert.equal(attempt.slate.predictions.length,0);
+  assert.equal(attempt.slate.games.length,1);
   const all=await readPredictionJournal(predictionJournalFile);
   const forecastIds=new Set(records.map(row=>row.payload.forecastId));
   records=all.filter(row=>forecastIds.has(row.payload.forecastId));

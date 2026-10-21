@@ -10,6 +10,10 @@ import { predictionHorizon } from './horizonEvaluation.js';
 export const predictionJournalFile = join(dataDir, 'prediction-journal.jsonl');
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const iso = value => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
+const matchesIssuedSnapshot = (issued, snapshot) => issued?.lifecycleState === 'ISSUED'
+  && issued.recordEligibility === 'observed_pregame'
+  && issued.forecastId === snapshot.forecastId && issued.startTime === snapshot.startTime
+  && issued.selectedSide === snapshot.selectedSide && digest(issued.outcomePercentages) === digest(snapshot.outcomePercentages);
 let writeChain = Promise.resolve();
 
 export async function readPredictionJournal(file = predictionJournalFile) {
@@ -48,26 +52,36 @@ function priceSnapshot(market = {}) {
   return result;
 }
 
-function forecastSnapshot(prediction, game, slate, capturedAt) {
+export function forecastIssuanceEvidence(prediction = {}, game = {}, slate = {}, capturedAt = Date.now()) {
   const generatedAt = iso(prediction.predictionGeneratedAt || slate.generatedAt), startTime = iso(prediction.startTime || game.startTime);
   const version = String(prediction.modelVersion || 'legacy-unversioned');
-  const horizon = predictionHorizon({ ...prediction, minutesToStart: generatedAt && startTime
-    ? (Date.parse(startTime) - Date.parse(generatedAt)) / 60_000 : null });
-  const identity = { guildId: String(slate.guildId || ''), league: String(prediction.leagueKey || game.leagueKey || ''),
-    gameId: String(prediction.gameId), modelVersion: version, horizon, predictionGeneratedAt: generatedAt };
-  const observedPregame = prediction.predictionMode === 'pregame' && game.statusKey === 'scheduled'
+  const identityVerified = prediction.gameId !== undefined && game.id !== undefined && String(prediction.gameId) === String(game.id)
+    && (!prediction.leagueKey || !game.leagueKey || String(prediction.leagueKey) === String(game.leagueKey))
+    && (!prediction.startTime || !game.startTime || iso(prediction.startTime) === iso(game.startTime));
+  const observedPregame = identityVerified && Number.isFinite(capturedAt)
+    && prediction.predictionMode === 'pregame' && game.statusKey === 'scheduled'
     && generatedAt && startTime && Date.parse(generatedAt) <= capturedAt && capturedAt < Date.parse(startTime);
-  const dataTimes = { schedule: game.sourceMeta, summary: game.autoEnrichment, history: game.autoHistory };
   const vector = Object.fromEntries(['away', 'home', 'draw'].map(side => [side, finiteNumber(prediction.outcomeProbabilities?.[side])]));
   const probabilityValid = vector.away !== null && vector.home !== null
     && Object.values(vector).filter(value => value !== null).every(value => value >= 0 && value <= 100)
     && Math.abs(Object.values(vector).reduce((sum, value) => sum + (value || 0), 0) - 100) <= 0.5;
+  return { generatedAt, startTime, version, vector,
+    recordEligibility: observedPregame && probabilityValid && version !== 'legacy-unversioned'
+      ? 'observed_pregame' : 'unverifiable_or_late_observation' };
+}
+
+function forecastSnapshot(prediction, game, slate, capturedAt) {
+  const { generatedAt, startTime, version, vector, recordEligibility } = forecastIssuanceEvidence(prediction, game, slate, capturedAt);
+  const horizon = predictionHorizon({ ...prediction, minutesToStart: generatedAt && startTime
+    ? (Date.parse(startTime) - Date.parse(generatedAt)) / 60_000 : null });
+  const identity = { guildId: String(slate.guildId || ''), league: String(prediction.leagueKey || game.leagueKey || ''),
+    gameId: String(prediction.gameId), modelVersion: version, horizon, predictionGeneratedAt: generatedAt };
+  const dataTimes = { schedule: game.sourceMeta, summary: game.autoEnrichment, history: game.autoHistory };
   const offeredOdds = priceSnapshot(game.odds?.h2h);
   const hasOfferedPrice = Object.values(offeredOdds).some(outcome => outcome.offeredQuotes.some(quote =>
     quote.priceAmerican !== null && Math.abs(quote.priceAmerican) >= 100 && quote.bookmaker));
   return { forecastId: digest(identity), ...identity, startTime, snapshotStage: prediction.snapshotStage || 'daily',
-    recordEligibility: observedPregame && probabilityValid && version !== 'legacy-unversioned'
-      ? 'observed_pregame' : 'unverifiable_or_late_observation',
+    recordEligibility,
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
     outcomePercentages: vector, recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,
@@ -136,7 +150,7 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           durationMs: Date.parse(ended) - Date.parse(started), games: games.map(row => ({
             gameId: String(row.gameId), status: row.status,
             reasons: (row.reasons || []).filter(value => ['build_failed','game_not_scheduled','start_or_completion_invalid',
-              'summary_not_revalidated','summary_receipt_outside_attempt','pregame_forecast_not_verified'].includes(value)),
+              'summary_not_revalidated','summary_receipt_outside_attempt','pregame_forecast_not_verified','forecast_issuance_not_verified','journal_issuance_not_verified'].includes(value)),
             dueWindows: (row.dueWindows || []).filter(value => Number.isInteger(value) && value > 0 && value <= 720)
           })) };
         const attemptId = digest({ guildId: payload.guildId, attemptedAt: started, gameIds: payload.games.map(row => row.gameId).sort() });
@@ -189,7 +203,7 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         const snapshot = forecastSnapshot(prediction, game, slate, now);
         const id = snapshot.forecastId, original = forecasts.get(id);
         if (lifecycle === 'delivered') {
-          if (original && slate.messageId && slate.channelId) transition(id, 'DELIVERED', {
+          if (matchesIssuedSnapshot(original, snapshot) && slate.messageId && slate.channelId) transition(id, 'DELIVERED', {
             messageId: String(slate.messageId), channelId: String(slate.channelId) });
           continue;
         }
@@ -242,6 +256,10 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
         finally { await handle.close(); }
       }
       return { appended: pending.length, forecastRecords: pending.filter(row => row.type === 'forecast').length,
+        verifiedIssuedGameIds: lifecycle === 'issued' ? (slate.predictions || []).filter(prediction => {
+          const snapshot = forecastSnapshot(prediction, gameMap.get(String(prediction.gameId)) || {}, slate, now);
+          return snapshot.recordEligibility === 'observed_pregame' && matchesIssuedSnapshot(forecasts.get(snapshot.forecastId), snapshot);
+        }).map(prediction => String(prediction.gameId)) : [],
         resultRecords: pending.filter(row => row.type === 'result').length,
         priceObservations: pending.filter(row => row.type === 'price_observation').length,
         unverifiableObservations: pending.filter(row => row.type === 'unverifiable_observation').length,
