@@ -124,3 +124,48 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
    'Provider observations were collected sequentially and can differ. This is not identical-input inference or a preregistered trial.',
    'Source outages, cold-start state, unresolved finals, team/day dependence and small samples limit conclusions.']};
 }
+
+
+/** Bounded cross-date work plan only; never turns an unavailable final into a loss. */
+export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookbackDays=7,maximumDatesPerRole=3,timezone='America/Chicago'}={}){
+ if(!Number.isFinite(asOf)||!Number.isInteger(lookbackDays)||lookbackDays<1||lookbackDays>30
+  ||!Number.isInteger(maximumDatesPerRole)||maximumDatesPerRole<1||maximumDatesPerRole>7)throw new Error('Invalid final-query limits');
+ const dateKey=ms=>{
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms)).map(row=>[row.type,row.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+ };
+ const today=dateKey(asOf),day=Date.parse(today+'T00:00:00Z'),pending=new Map(),resolved=new Set(),excluded={};
+ const reject=reason=>{excluded[reason]=(excluded[reason]||0)+1;};
+ for(const {receipt,capture} of entries){
+  const issued=epoch(receipt.recordedAt),began=epoch(capture.startedAt),completed=epoch(capture.completedAt);
+  if(capture.mode!=='live'||!['baseline','challenger'].includes(capture.role)||![issued,began,completed].every(Number.isFinite)
+   ||issued>asOf||began>completed||completed>issued)continue;
+  const games=new Map((capture.slate?.games||[]).map(row=>[String(row.id),row]));
+  for(const game of games.values())if(finalOutcomeSide(game)&&Number.isFinite(epoch(game.startTime))&&issued>=epoch(game.startTime))resolved.add(capture.role+':'+identity(game));
+  for(const prediction of capture.slate?.predictions||[]){
+   const game=games.get(String(prediction.gameId)),start=epoch(game?.startTime),generated=epoch(prediction.predictionGeneratedAt);
+   if(!game||game.statusKey!=='scheduled'||prediction.predictionMode!=='pregame'||!probabilityVector(prediction)
+    ||![start,generated].every(Number.isFinite)||generated<began||generated>completed||issued>=start)continue;
+   if(start>asOf){reject('not_started');continue;}
+   const date=dateKey(start),age=(day-Date.parse(date+'T00:00:00Z'))/86400000;
+   if(age<0||age>lookbackDays){reject('outside_lookback');continue;}
+   const key=capture.role+':'+identity(game),previous=pending.get(key);
+   if(!previous||issued<previous.issued)pending.set(key,{role:capture.role,dateKey:date,issued,game,prediction});
+  }
+ }
+ const grouped=new Map();
+ for(const [key,row] of pending){
+  if(resolved.has(key))continue;
+  const groupKey=row.role+':'+row.dateKey;
+  if(!grouped.has(groupKey))grouped.set(groupKey,{role:row.role,dateKey:row.dateKey,games:[],predictions:[]});
+  grouped.get(groupKey).games.push(row.game);grouped.get(groupKey).predictions.push(row.prediction);
+ }
+ const used={},tasks=[],deferred=[];
+ for(const task of [...grouped.values()].sort((a,b)=>a.dateKey.localeCompare(b.dateKey)||a.role.localeCompare(b.role))){
+  if((used[task.role]||0)>=maximumDatesPerRole){deferred.push({role:task.role,dateKey:task.dateKey,games:task.games.length});continue;}
+  used[task.role]=(used[task.role]||0)+1;
+  tasks.push({...task,slate:{guildId:'isolated-prospective',dateKey:task.dateKey,games:task.games,predictions:task.predictions,finalReplies:{}}});
+ }
+ return {asOf:new Date(asOf).toISOString(),today,lookbackDays,maximumDatesPerRole,tasks,deferred,excluded,
+  requestsPerformed:0,productionChanged:false};
+}

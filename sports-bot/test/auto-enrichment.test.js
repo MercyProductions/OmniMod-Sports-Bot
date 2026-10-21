@@ -15,7 +15,8 @@ const {
   buildAutomaticTeamProfiles,
   enrichGamesAutomatically,
   parseEspnHistoryEvents,
-  parseEspnSummary
+  parseEspnSummary,
+  espnSummaryEventId
 } = await import('../src/autoEnrichment.js');
 const { predictGame } = await import('../src/predictionEngine.js');
 const { buildDailySlate } = await import('../src/sportsData.js');
@@ -41,7 +42,7 @@ function event(id, date, awayScore, homeScore, completed = true) {
 
 function game(overrides = {}) {
   return {
-    id: 'future-game', league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball', matchup: 'AWY @ HOM',
+    id: '401000001', league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball', matchup: 'AWY @ HOM',
     startTime: '2099-02-01T19:00:00Z', dateKey: '2099-02-01', statusKey: 'scheduled', statusLabel: 'Upcoming',
     source: 'ESPN public scoreboard', sourceMeta: { provider: 'ESPN', cacheState: 'network', fetchedAt: new Date().toISOString() },
     away: { name: 'Away Team', abbr: 'AWY', record: '', score: 0 },
@@ -142,7 +143,7 @@ test('automatic enrichment stays inside league/game request caps and reuses its 
     urls.push(String(url));
     const payload = String(url).includes('/summary?')
       ? { injuries: [], rosters: [], pickcenter: [] }
-      : { events: [event('historical', '2099-01-20T20:00:00Z', 91, 109)] };
+      : { events: [event('401000002', '2099-01-20T20:00:00Z', 91, 109)] };
     return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
@@ -177,10 +178,10 @@ test('daily slate integrates automatic history and event injuries without paid o
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.searchParams.get('dates') === '20990201') {
-      const scheduled = event('slate-game', '2099-02-01T20:00:00Z', 0, 0, false);
+      const scheduled = event('401000003', '2099-02-01T20:00:00Z', 0, 0, false);
       return new Response(JSON.stringify({ events: [scheduled] }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    return new Response(JSON.stringify({ events: [event('historical', '2099-01-20T20:00:00Z', 91, 109)] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ events: [event('401000002', '2099-01-20T20:00:00Z', 91, 109)] }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   try {
     const slate = await buildDailySlate(new Date('2099-02-01T18:00:00Z'), {
@@ -196,4 +197,28 @@ test('daily slate integrates automatic history and event injuries without paid o
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test('ESPN summary routing preserves native provider identity boundaries',()=>{
+ assert.equal(espnSummaryEventId({id:'nhl-2026020149',sourceMeta:{provider:'NHL API'}}),null);
+ assert.equal(espnSummaryEventId({id:'2026020149',sourceMeta:{provider:'NHL API'}}),null);
+ assert.equal(espnSummaryEventId({id:'401000001',sourceMeta:{provider:'ESPN'}}),'401000001');
+ assert.equal(espnSummaryEventId({id:'espn:401000002',source:'ESPN automatic history'}),'401000002');
+ assert.equal(espnSummaryEventId({id:'nhl-2026020149',espnEventId:'401000003'}),'401000003');
+ assert.equal(espnSummaryEventId({id:'401000001',espnEventId:'invalid',sourceMeta:{provider:'ESPN'}}),null);
+});
+
+test('unmapped official game does not consume the ESPN summary cap or issue an invalid summary request',async()=>{
+ const saved=globalThis.fetch,urls=[];
+ globalThis.fetch=async raw=>{urls.push(String(raw));return new Response(JSON.stringify(String(raw).includes('/summary?')?{injuries:[],rosters:[]}:{events:[]}),{status:200});};
+ try{
+  const native=game({id:'nhl-2026020149',source:'NHL official scoreboard',sourceMeta:{provider:'NHL API'}});
+  const valid=game({id:'401123456'});
+  const result=await enrichGamesAutomatically([native,valid],new Date('2099-02-01T12:00:00Z'),{leagues:[league]});
+  assert.equal(result.summaryIdentitySkipped,1);assert.equal(result.summaryGames,1);
+  assert.equal(native.summaryIdentity.reason,'provider_event_mapping_not_verified');
+  assert.equal(urls.some(url=>url.includes('/summary?event=nhl-')),false);
+  assert.equal(urls.some(url=>url.includes('/summary?event=401123456')),true);
+ }finally{globalThis.fetch=saved;}
 });

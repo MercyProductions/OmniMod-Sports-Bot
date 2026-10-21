@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger} from '../src/prospectivePairs.js';
+import {evaluateProspectiveCaptures,recordCaptureReceipt,readCaptureLedger,pendingProspectiveFinalQueries} from '../src/prospectivePairs.js';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -67,4 +67,37 @@ test('missing or boolean baseline probabilities cannot be coerced to zero in com
   const result=evaluateProspectiveCaptures([baseline,entry('challenger',1000)],options);
   assert.equal(result.pairedForecasts,0);assert.equal(result.rejections.invalid_frozen_probability_vector,1);
  }
+});
+
+
+test('cross-midnight final work plans preserve original predictions and stop querying observed finals',()=>{
+ const rows=[entry('baseline'),entry('challenger',1000)],asOf=Date.parse('2026-10-21T15:00:00Z');
+ const plan=pendingProspectiveFinalQueries(rows,{asOf});
+ assert.equal(plan.tasks.length,2);assert.equal(plan.tasks[0].dateKey,'2026-10-20');
+ assert.equal(plan.tasks[0].predictions[0],rows[0].capture.slate.predictions[0]);
+ assert.equal(plan.requestsPerformed,0);
+ const resolved=pendingProspectiveFinalQueries([...rows,entry('baseline',0,{final:true})],{asOf});
+ assert.equal(resolved.tasks.length,1);assert.equal(resolved.tasks[0].role,'challenger');
+});
+
+test('cross-date work plans exclude future and old games without inventing completion times',()=>{
+ const future=pendingProspectiveFinalQueries([entry('baseline')],{asOf:base+10000});
+ assert.equal(future.tasks.length,0);assert.equal(future.excluded.not_started,1);
+ const old=pendingProspectiveFinalQueries([entry('baseline')],{asOf:base+10*86400000});
+ assert.equal(old.tasks.length,0);assert.equal(old.excluded.outside_lookback,1);
+ assert.throws(()=>pendingProspectiveFinalQueries([],{maximumDatesPerRole:100}),/Invalid final/);
+});
+
+test('final-query date limits defer excess dates explicitly and merge repeated horizons',()=>{
+ const rows=Array.from({length:4},(_,i)=>{
+  const row=entry('baseline');
+  for(const key of ['startedAt','completedAt'])row.capture[key]=new Date(Date.parse(row.capture[key])-i*86400000).toISOString();
+  row.receipt.recordedAt=new Date(Date.parse(row.receipt.recordedAt)-i*86400000).toISOString();
+  const game=row.capture.slate.games[0];game.id='date-'+i;game.startTime=new Date(Date.parse(game.startTime)-i*86400000).toISOString();
+  const prediction=row.capture.slate.predictions[0];prediction.gameId=game.id;prediction.predictionGeneratedAt=new Date(Date.parse(prediction.predictionGeneratedAt)-i*86400000).toISOString();
+  return row;
+ });
+ const plan=pendingProspectiveFinalQueries([...rows,rows[0]],{asOf:base+2*86400000,maximumDatesPerRole:2});
+ assert.equal(plan.tasks.length,2);assert.equal(plan.deferred.length,2);
+ assert.equal(plan.tasks.every(row=>row.games.length===1),true);
 });

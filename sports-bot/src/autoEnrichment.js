@@ -10,6 +10,15 @@ import { applyOfficialAndEnvironmentContext, buildOfficialProfiles, extractEvent
 import { sportProfile } from './sportProfiles.js';
 import { localDateKey } from './time.js';
 
+/** Official/native IDs are not ESPN event IDs; only explicit or ESPN-origin numeric identities route there. */
+export function espnSummaryEventId(row = {}) {
+  if(row.espnEventId !== undefined)return /^\d+$/.test(String(row.espnEventId)) ? String(row.espnEventId) : null;
+  const id=String(row.id || '');
+  const espnOrigin=row.sourceMeta?.provider==='ESPN'||/ESPN/i.test(row.source || '')||id.startsWith('espn:');
+  const candidate=id.replace(/^espn:/,'');
+  return espnOrigin&&/^\d+$/.test(candidate)?candidate:null;
+}
+
 const DAY_MS = 86_400_000;
 
 function compactEspnSummary(payload = {}) {
@@ -711,13 +720,17 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
   });
 
   const forcedSummaryIds = new Set((options.forceSummaryGameIds || []).map(String));
-  const summaryCandidates = games
-    .filter((game) => ['scheduled', 'live'].includes(game.statusKey) && leagueMap.has(game.leagueKey) && (!options.targetedPregame || forcedSummaryIds.has(String(game.id))))
+  const summaryEligible = games
+    .filter((game) => ['scheduled', 'live'].includes(game.statusKey) && leagueMap.has(game.leagueKey) && (!options.targetedPregame || forcedSummaryIds.has(String(game.id))));
+  const identitySkipped = summaryEligible.filter(game=>!espnSummaryEventId(game));
+  for(const game of identitySkipped)game.summaryIdentity={provider:'ESPN',status:'unavailable',reason:'provider_event_mapping_not_verified'};
+  if(identitySkipped.length)diagnostics.push(`ESPN summaries: ${identitySkipped.length} event(s) skipped; provider event mapping not verified.`);
+  const summaryCandidates = summaryEligible.filter(game=>espnSummaryEventId(game))
     .sort((a, b) => Number(forcedSummaryIds.has(String(b.id))) - Number(forcedSummaryIds.has(String(a.id))) || Number(b.statusKey === 'scheduled') - Number(a.statusKey === 'scheduled') || (leagueMap.get(b.leagueKey)?.priority || 0) - (leagueMap.get(a.leagueKey)?.priority || 0) || new Date(a.startTime) - new Date(b.startTime))
     .slice(0, Math.max(config.autoSummaryMaxGames, forcedSummaryIds.size));
   await mapWithConcurrency(summaryCandidates, 4, async (game) => {
     const league = leagueMap.get(game.leagueKey);
-    const url = `https://site.api.espn.com/apis/site/v2/sports/${encodeURIComponent(league.sport)}/${encodeURIComponent(league.league)}/summary?event=${encodeURIComponent(game.id)}`;
+    const url = `https://site.api.espn.com/apis/site/v2/sports/${encodeURIComponent(league.sport)}/${encodeURIComponent(league.league)}/summary?event=${encodeURIComponent(espnSummaryEventId(game))}`;
     const result = await cachedFetchJson(url, {
       namespace: `espn-summary-${league.key}`,
       ttlMs: config.autoSummaryCacheMinutes * 60_000,
@@ -755,13 +768,13 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
   const mergedHistory = new Map([...storedEvidence.results, ...historyResults].map((row) => [String(row.id || `${row.leagueKey}:${row.dateKey}:${row.awayTeam}:${row.homeTeam}`), row]));
   historyResults.length = 0;
   historyResults.push(...mergedHistory.values());
-  const historicalCandidates = selectHistoricalBoxscores(historyResults, games, config.autoBoxscoreMaxEvents);
+  const historicalCandidates = selectHistoricalBoxscores(historyResults.filter(row=>espnSummaryEventId(row)), games, config.autoBoxscoreMaxEvents);
   const historicalSamples = [];
   let historicalFailures = 0;
   await mapWithConcurrency(historicalCandidates, 3, async (history) => {
     const league = leagueMap.get(history.leagueKey);
     if (!league) return;
-    const eventId = String(history.id || '').replace(/^espn:/, '');
+    const eventId = espnSummaryEventId(history);
     const url = `https://site.api.espn.com/apis/site/v2/sports/${encodeURIComponent(league.sport)}/${encodeURIComponent(league.league)}/summary?event=${encodeURIComponent(eventId)}`;
     const result = await cachedFetchJson(url, {
       namespace: `espn-historical-box-${league.key}`,
@@ -811,6 +824,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     externalCalls,
     historyLeagues: activeLeagues.length,
     summaryGames: summaryCandidates.length,
+    summaryIdentitySkipped: identitySkipped.length,
     historicalBoxscores: historicalSamples.length,
     learnedInjuries: playerApplication.learnedInjuries,
     confirmedLineups: playerApplication.confirmedLineups,

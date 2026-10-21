@@ -1,4 +1,4 @@
-import {loadProspectiveCaptures,evaluateProspectiveCaptures} from '../src/prospectivePairs.js';
+import {loadProspectiveCaptures,evaluateProspectiveCaptures,pendingProspectiveFinalQueries} from '../src/prospectivePairs.js';
 import {prepareProspectiveIsolation,runProspectiveIsolation,inspectProspectiveIsolation} from '../src/prospectiveIsolation.js';
 const arg=name=>process.argv.slice(2).find(value=>value.startsWith(`--${name}=`))?.slice(name.length+3);
 try{
@@ -8,7 +8,9 @@ try{
  else if(action==='report'){
   await inspectProspectiveIsolation(directory);
   const loaded=await loadProspectiveCaptures(directory);
-  result={...evaluateProspectiveCaptures(loaded.captures),unindexedLegacyCapturesExcluded:loaded.unindexed};
+  const pending=pendingProspectiveFinalQueries(loaded.captures);
+  result={...evaluateProspectiveCaptures(loaded.captures),unindexedLegacyCapturesExcluded:loaded.unindexed,
+   finalQueryPlan:{...pending,tasks:pending.tasks.map(row=>({role:row.role,dateKey:row.dateKey,games:row.games.length}))}};
  }
  else if(action==='collect')result=await runProspectiveIsolation(directory,{live:arg('data')==='live'});
  else throw new Error('Explicit prepare, inspect, collect or report required');
