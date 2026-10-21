@@ -175,7 +175,7 @@ test('a slowly converging schedule cannot publish an unverified intermediate opp
 async function historicalPlayer(sportGroup,labels,values,starter=true){
  const {parseHistoricalEventSummary}=await import('../src/advancedMetrics.js');
  return parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:[{name:'players',labels,athletes:[{
-  starter,athlete:{id:'p',displayName:'Player',position:{displayName:'Player'}},stats:values
+  ...(starter === 'absent' ? {} : {starter}),athlete:{id:'p',displayName:'Player',position:{displayName:'Player'}},stats:values
  }]}]}]}},{id:'g',dateKey:'2099-01-01',sportGroup,leagueKey:'test',awayTeam:'Away',homeTeam:'Home',awayScore:0,homeScore:1});
 }
 
@@ -297,4 +297,68 @@ test('incomplete performances do not dilute complete zero or nonzero performance
  good.players[0].stats.plusminus=0;
  const zero=Object.values(buildAutomaticPlayerProfiles([good,missing]))[0];
  assert.equal(zero.performance,0);assert.equal(zero.performanceSamples,1);
+});
+
+
+test('unknown or nonboolean historical starter flags cannot become measured bench appearances',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ for(const flag of [null,'false','true',0,1,'absent']){
+  const sample=await historicalPlayer('Basketball',['MIN'],['10'],flag);
+  assert.equal(sample.players[0].starter,null);
+  const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+  assert.equal(profile.starterRate,null);assert.equal(profile.starterSamples,0);assert.equal(profile.starter,null);
+ }
+});
+
+test('observed reserve flags remain real zero starter rates and missing flags do not dilute starts',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const start=await historicalPlayer('Basketball',['MIN'],['10'],true),unknown=await historicalPlayer('Basketball',['MIN'],['10'],null);
+ const mixed=Object.values(buildAutomaticPlayerProfiles([start,unknown]))[0];
+ assert.equal(mixed.starterRate,1);assert.equal(mixed.starterSamples,1);
+ const reserve=await historicalPlayer('Basketball',['MIN'],['10'],false);
+ const bench=Object.values(buildAutomaticPlayerProfiles([reserve]))[0];assert.equal(bench.starterRate,0);assert.equal(bench.starterSamples,1);
+});
+
+test('contradictory historical starter observations remain conflicting in either input order',async()=>{
+ const {parseHistoricalEventSummary,buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const group=starter=>({name:'players',labels:['MIN'],athletes:[{starter,athlete:{id:'p',displayName:'Player'},stats:['10']}]});
+ for(const flags of [[true,false],[false,true]]){
+  const sample=parseHistoricalEventSummary({boxscore:{players:[{team:{displayName:'Away'},statistics:flags.map(group)}]}},{id:'g',leagueKey:'nba',sportGroup:'Basketball'});
+  assert.equal(sample.players[0].starter,null);assert.equal(sample.players[0].starterEvidenceConflict,true);
+  const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];assert.equal(profile.starterSamples,0);
+ }
+});
+
+test('legacy coerced starter values without observation provenance cannot certify a starter rate',async()=>{
+ const {buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ const sample=await historicalPlayer('Basketball',['MIN'],['10'],true);
+ delete sample.players[0].starterContract;
+ const profile=Object.values(buildAutomaticPlayerProfiles([sample]))[0];
+ assert.equal(profile.starterRate,null);assert.equal(profile.starterSamples,0);
+});
+
+
+test('historical starter pair learning excludes conflicts while retaining observed pair controls',async()=>{
+ const {parseHistoricalEventSummary,buildAutomaticPlayerProfiles}=await import('../src/advancedMetrics.js');
+ for(const flags of [[true,false],[true,true]]){
+  const summary={boxscore:{players:[{team:{displayName:'Away'},statistics:flags.map(flag=>({name:'players',labels:['MIN'],athletes:[
+   {starter:flag,athlete:{id:'p',displayName:'Player'},stats:['10']},
+   {starter:true,athlete:{id:'q',displayName:'Partner'},stats:['10']}
+  ]}))}]}};
+  const sample=parseHistoricalEventSummary(summary,{id:'g',leagueKey:'nba',sportGroup:'Basketball',awayTeam:'Away',homeTeam:'Home',awayScore:1,homeScore:0});
+  const profile=Object.values(buildAutomaticPlayerProfiles([sample])).find(row=>row.athleteId==='p');
+  assert.equal(Boolean(profile.teammateInteractions?.q),flags[1]===true);
+ }
+});
+
+test('public profile caller freezes historical starter uncertainty without denying a current confirmed starter',async()=>{
+ const {buildAutomaticPlayerProfiles,applyPlayerProfilesAndLineups}=await import('../src/advancedMetrics.js');
+ const sample=await historicalPlayer('Basketball',['MIN'],['10'],'absent');
+ const profiles=buildAutomaticPlayerProfiles([sample]);
+ const game={id:'current',sportGroup:'Basketball',leagueKey:'test',away:{name:'Away'},home:{name:'Home'},
+  autoPlayers:[{name:'Player',sourceAthleteId:'p',team:'Away',starter:true,availability:100}]};
+ applyPlayerProfilesAndLineups([game],profiles);
+ const player=buildEvidenceCoverage(game).sides.away.modelInputs.players[0];
+ assert.equal(player.historicalStarterSamples,0);assert.equal(player.historicalStarterEvidence,'role_prior');
+ assert.equal(game.autoPlayers[0].participationProjection.startProbability,1);
 });

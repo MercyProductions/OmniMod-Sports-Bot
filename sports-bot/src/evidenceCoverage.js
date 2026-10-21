@@ -69,6 +69,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
         players: players.map(row => ({ playerId: String(row.sourceAthleteId || row.id || ''), source: row.source || 'manual_or_unknown',
           updatedAt: timestamp(row.updatedAt), historicalParticipationSamples: finiteNumber(row.stats?.historicalParticipationSamples),
           historicalPerformanceSamples: finiteNumber(row.stats?.historicalPerformanceSamples),
+          historicalStarterSamples: finiteNumber(row.stats?.historicalStarterSamples), historicalStarterConflicts: finiteNumber(row.stats?.historicalStarterConflicts),
+          historicalStarterEvidence: row.participationProjection?.historicalStarterEvidence || 'unknown',
           historicalStatConflicts: row.historicalStatConflicts || [], historicalFormEvidence: row.historicalFormEvidence || 'unknown',
           historicalParticipationEvidence: row.participationProjection?.historicalParticipationEvidence || 'unknown', availabilityObserved: finiteNumber(row.availability) !== null && row.availabilityEvidence !== 'role_prior_not_injury_clearance',
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',

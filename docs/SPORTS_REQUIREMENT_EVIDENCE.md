@@ -104,3 +104,7 @@ Development v6.0.16 separates observed workload proxies from role priors and unv
 ## Player performance and group integrity continuation
 
 Development v6.0.17 repairs statistic-key loss/collisions, malformed numeric input, missing-as-zero performance and order-dependent group overwrites. [Reproductions, source references, tests and limits](SPORTS_PLAYER_PERFORMANCE_INTEGRITY.md); complete suite 310 passing. Complete-performance counts and fallback evidence are frozen per game; original historical source loss and valid forward predictive improvement remain unresolved.
+
+## Historical starter evidence continuation
+
+Development v6.0.18 preserves unknown/conflicting historical starter assertions and separates measured rate denominators from boxscore appearances. [Reproductions, pair-learning controls and frozen coverage](SPORTS_HISTORICAL_STARTER_EVIDENCE.md); complete suite 316 passing. Current confirmed starter handling is preserved. Native assertion verification and adequate forward predictive improvement remain incomplete.

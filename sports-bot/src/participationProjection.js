@@ -46,14 +46,19 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
   const candidateShare = finite(learned?.participation, finite(player.stats?.historicalParticipation));
   const measuredShare = candidateShare !== null && candidateShare >= 0 && candidateShare <= 1 ? candidateShare : null;
   const historicalShare = clamp(measuredShare ?? roleParticipationPrior(profileKey, player.role), 0, 1);
-  const starterRate = clamp(finite(learned?.starterRate, player.starter ? 0.82 : 0.22), 0, 1);
+  const currentStarter = player.starter === true;
+  const candidateStarterRate = finite(learned?.starterRate, finite(player.stats?.historicalStarterRate));
+  const observedStarterRate = candidateStarterRate !== null && candidateStarterRate >= 0 && candidateStarterRate <= 1 ? candidateStarterRate : null;
+  const starterRate = observedStarterRate ?? (currentStarter ? 0.82 : 0.22);
+  const historicalStarterSamples = Math.max(0, finite(learned?.starterSamples, finite(player.stats?.historicalStarterSamples, 0)));
+  const historicalStarterEvidence = observedStarterRate === null ? 'role_prior' : historicalStarterSamples > 0 ? 'observed_historical_flags' : 'legacy_rate_unknown_provenance';
   const confirmedStarter = Boolean(lineup.confirmedStarter ?? isConfirmedStarter(player));
   const confirmedActive = lineup.active !== false && player.active !== false;
   const availabilityProbability = confirmedActive ? statusAvailability(player) : 0;
   // Distinguish starting conditional on participation from unconditional start probability.
   // Availability belongs once in expected workload, not both inside and outside the mixture.
   const conditionalStartProbability = confirmedStarter
-    ? 1 : clamp(starterRate * 0.76 + (player.starter ? 0.2 : 0), 0.03, 0.9);
+    ? 1 : clamp(starterRate * 0.76 + (currentStarter ? 0.2 : 0), 0.03, 0.9);
   const startProbability = conditionalStartProbability * availabilityProbability;
   const reserveShare = Math.min(historicalShare, profileKey === 'basketball' || profileKey === 'hockey' || profileKey === 'soccer' ? 0.34 : 0.2);
   const conditionalShare = clamp(conditionalStartProbability * historicalShare + (1 - conditionalStartProbability) * reserveShare, 0, 1);
@@ -70,6 +75,7 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
     availabilityProbability,
     startProbability,
     conditionalStartProbability,
+    historicalStarterSamples: observedStarterRate === null ? 0 : historicalStarterSamples, historicalStarterEvidence,
     expectedShare,
     historicalShare,
     historicalParticipationEvidence: measuredShare === null ? 'role_prior' : verifiedSamples === null ? 'legacy_workload_unknown_provenance' : 'boxscore_workload_proxy',

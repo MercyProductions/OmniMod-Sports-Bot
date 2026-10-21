@@ -195,9 +195,10 @@ function mergePlayerRow(map, row) {
   const key = `${normalizeEntityName(row.team)}__${row.athleteId || normalizeEntityName(row.name)}`;
   const existing = map.get(key);
   if (!existing) {
-    map.set(key, { ...row, statConflicts: [], statGroups: [{ name: row.groupName || row.role || '', stats: { ...row.stats } }] });
+    map.set(key, { ...row, starterObservations: typeof row.starter === 'boolean' ? [row.starter] : [], starterEvidenceConflict: false, statConflicts: [], statGroups: [{ name: row.groupName || row.role || '', stats: { ...row.stats } }] });
     return;
   }
+  const starterObservations = [...new Set([...(existing.starterObservations || []), ...(typeof row.starter === 'boolean' ? [row.starter] : [])])].sort();
   const statConflicts = new Set(existing.statConflicts || []);
   const combinedStats = { ...existing.stats, ...row.stats };
   const groupFamily = name => String(name || '').toLowerCase().match(/passing|rushing|receiving|pitching|batting/)?.[0];
@@ -210,7 +211,8 @@ function mergePlayerRow(map, row) {
   map.set(key, {
     ...existing,
     ...row,
-    starter: existing.starter || row.starter,
+    starter: starterObservations.length === 1 ? starterObservations[0] : null,
+    starterObservations, starterEvidenceConflict: starterObservations.length > 1,
     active: existing.active !== false && row.active !== false,
     appeared: existing.appeared || row.appeared,
     stats: combinedStats, statConflicts: [...statConflicts].sort(),
@@ -239,8 +241,8 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
         const role = athlete.position?.displayName || athlete.position?.name || athlete.position?.abbreviation || group.displayName || group.name || '';
         mergePlayerRow(playerMap, {
           athleteId: String(athlete.id || ''), name, team, role,
-          starter: Boolean(athleteRow.starter), active: athleteRow.active !== false,
-          appeared: Boolean(athleteRow.starter || Object.keys(stats).length),
+          starter: typeof athleteRow.starter === 'boolean' ? athleteRow.starter : null, starterContract: 'historical-starter-v1', active: athleteRow.active !== false,
+          appeared: Boolean(athleteRow.starter === true || Object.keys(stats).length),
           stats, groupName: group.name || group.displayName || role
         });
       }
@@ -259,8 +261,8 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
       mergePlayerRow(playerMap, {
         athleteId: String(athlete.id || ''), name, team,
         role: rosterRow.position?.displayName || rosterRow.position?.name || rosterRow.position?.abbreviation || athlete.position?.displayName || '',
-        starter: Boolean(rosterRow.starter), active: rosterRow.active !== false,
-        appeared: Boolean(rosterRow.starter || Object.keys(stats).length),
+        starter: typeof rosterRow.starter === 'boolean' ? rosterRow.starter : null, starterContract: 'historical-starter-v1', active: rosterRow.active !== false,
+        appeared: Boolean(rosterRow.starter === true || Object.keys(stats).length),
         stats, groupName: rosterRow.position?.displayName || ''
       });
     }
@@ -334,11 +336,13 @@ export function buildAutomaticPlayerProfiles(samples = []) {
     const recentValues = recent.map(observedPerformance).filter(Number.isFinite);
     const performance = performanceValues.length ? mean(performanceValues) : null;
     const recentPerformance = recentValues.length ? mean(recentValues) : null;
-    const starterRate = mean(rows.map((row) => row.starter ? 1 : 0));
+    const starterValues = rows.filter(row => row.starterContract === 'historical-starter-v1'
+      && typeof row.starter === 'boolean' && !row.starterEvidenceConflict).map(row => row.starter ? 1 : 0);
+    const starterRate = starterValues.length ? mean(starterValues) : null;
     const reliability = participationRows.length / (participationRows.length + 3);
     const profile = sportProfile(latest);
     const participationPrior = roleParticipationPrior(profile.key, latest.role);
-    const rawImpact = 0.8 + (participation ?? participationPrior) * 3.7 + starterRate * 1.1 + clamp(performance ?? 0, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
+    const rawImpact = 0.8 + (participation ?? participationPrior) * 3.7 + (starterRate ?? 0.5) * 1.1 + clamp(performance ?? 0, -1, 5) * 0.3 + criticalRoleBonus(profile, latest.role);
     const impact = clamp(1.1 + (rawImpact - 1.1) * (0.4 + reliability * 0.6), 0.6, 8.5);
     profiles[key] = {
       id: `auto-player__${key}`,
@@ -351,8 +355,9 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       impact,
       form: performance !== null && recentPerformance !== null ? clamp(50 + (recentPerformance - performance) * 6, 28, 76) : 50,
       formEvidence: performance !== null && recentPerformance !== null ? 'complete_performance_proxy' : 'neutral_prior',
-      starter: starterRate >= 0.5,
-      starterRate,
+      starter: starterRate === null ? null : starterRate >= 0.5,
+      starterRate, starterSamples: starterValues.length,
+      starterConflictSamples: rows.filter(row => row.starterEvidenceConflict).length,
       participation, participationSamples: participationRows.length,
       participationEvidence: participationRows.length ? 'boxscore_workload_proxy' : 'unknown',
       impactEvidence: participationRows.length ? 'heuristic_with_workload_proxy' : 'heuristic_with_role_prior',
@@ -384,7 +389,7 @@ export function buildAutomaticPlayerProfiles(samples = []) {
       if (!teamGames.has(teamId)) teamGames.set(teamId, []);
       teamGames.get(teamId).push(resultValue);
       const starters = (sample.players || [])
-        .filter((row) => normalizeEntityName(row.team) === normalizeEntityName(team) && row.starter && row.active !== false)
+        .filter((row) => normalizeEntityName(row.team) === normalizeEntityName(team) && row.starter === true && row.starterContract === 'historical-starter-v1' && !row.starterEvidenceConflict && row.active !== false)
         .map((row) => playerKey(row.leagueKey || row.league, row.team, row.athleteId, row.name))
         .filter((key) => profiles[key]);
       for (let left = 0; left < starters.length; left += 1) {
@@ -694,7 +699,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       if (!learned) continue;
       player.impact = learned.impact;
       player.form = learned.form;
-      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null, historicalPerformanceSamples: learned.performanceSamples ?? null };
+      player.stats = { ...(player.stats || {}), historicalBoxscoreGames: learned.sampleSize, historicalParticipation: learned.participation, historicalParticipationSamples: learned.participationSamples ?? null, historicalPerformanceSamples: learned.performanceSamples ?? null, historicalStarterRate: learned.starterRate, historicalStarterSamples: learned.starterSamples ?? null, historicalStarterConflicts: learned.starterConflictSamples ?? null };
       player.valueSource = learned.source;
       player.historicalStatConflicts = learned.statConflicts || [];
       player.historicalFormEvidence = learned.formEvidence || 'unknown';
@@ -718,7 +723,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       const starters = lineupRows.filter(isConfirmedStarter);
       const teamProfiles = Object.values(playerProfiles)
         .filter((row) => normalizeEntityName(row.leagueKey || row.league) === normalizeEntityName(game.leagueKey || game.league) && normalizeEntityName(row.team) === normalizeEntityName(team.name))
-        .sort((a, b) => b.impact * (0.6 + b.starterRate * 0.4) - a.impact * (0.6 + a.starterRate * 0.4));
+        .sort((a, b) => b.impact * (0.6 + (finite(b.starterRate) ?? 0.5) * 0.4) - a.impact * (0.6 + (finite(a.starterRate) ?? 0.5) * 0.4));
       const expected = teamProfiles.slice(0, required);
       const matched = starters.map((row) => ({ row, profile: findPlayerProfile(playerProfiles, game, team, row) })).filter((row) => row.profile);
       const activeRoster = lineupRows.filter((row) => row.active !== false);
@@ -732,7 +737,8 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       const currentValue = matched.reduce((total, row) => total + row.profile.impact * (0.85 + row.profile.form / 330), 0);
       const coverage = clamp(starters.length / required, 0, 1);
       const learnedCoverage = starters.length ? matched.length / starters.length : 0;
-      const continuity = matched.length ? mean(matched.map((row) => row.profile.starterRate)) : null;
+      const continuityRates = matched.map(row => finite(row.profile.starterRate)).filter(value => value !== null);
+      const continuity = continuityRates.length ? mean(continuityRates) : null;
       const pairScores = [];
       const possiblePairs = matched.length * (matched.length - 1) / 2;
       for (let left = 0; left < matched.length; left += 1) {
