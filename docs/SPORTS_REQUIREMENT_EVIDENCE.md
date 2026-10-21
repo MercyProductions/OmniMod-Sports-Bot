@@ -92,3 +92,7 @@ Development v6.0.13 validates usable adapter payloads before replacement and bin
 ## NFL season-summary continuation
 
 Development v6.0.14 verifies declared NFL season/type, forbids weekly grain and duplicate normalized teams before replacement, and versions the source contract. [Real-file observation, regression and remaining limits](SPORTS_NFL_SUMMARY_CONTRACT.md). Complete suite 291 passing; actual 2024 public payload accepted 32 rows. No invented aggregation or demonstrated predictive improvement.
+
+## Venue and opponent-rating continuation
+
+Development v6.0.15 excludes invalid score observations, separates neutral/unknown venues from measured home advantage and requires numerical convergence before new opponent ratings. [Reproductions, controls, source references and limits](SPORTS_VENUE_AND_RATING_INTEGRITY.md); complete suite 297 passing. Actual prospective games remain unstarted; no demonstrated accuracy or after-cost improvement.

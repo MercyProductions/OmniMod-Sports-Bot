@@ -4,7 +4,7 @@ import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
-import { finiteNumber } from './dataValidation.js';
+import { finiteNumber, validScore } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
 
 function clamp(value, min, max) {
@@ -393,32 +393,47 @@ function resultTeamRows(results) {
   return byLeague;
 }
 
-function opponentAdjustedRatings(results) {
+function measuredHistoricalGame(row) {
+  return validScore(row?.awayScore) !== null && validScore(row?.homeScore) !== null
+    && Boolean(normalizeEntityName(row?.awayTeam)) && Boolean(normalizeEntityName(row?.homeTeam))
+    && normalizeEntityName(row.awayTeam) !== normalizeEntityName(row.homeTeam);
+}
+
+export function opponentAdjustedRatings(results) {
   const output = new Map();
-  for (const [league, rows] of resultTeamRows(results)) {
+  for (const [league, rows] of resultTeamRows(results.filter(measuredHistoricalGame))) {
     const gamesByTeam = new Map();
     const ensure = (name) => {
       const key = normalizeEntityName(name);
       if (!gamesByTeam.has(key)) gamesByTeam.set(key, []);
       return key;
     };
-    const homeMargins = rows.map((row) => Number(row.homeScore) - Number(row.awayScore)).filter(Number.isFinite);
-    const observedHomeEdge = mean(homeMargins);
+    const homeMargins = rows.filter(row => row.neutralSite === false).map(row => validScore(row.homeScore) - validScore(row.awayScore));
+    const observedHomeEdge = homeMargins.length ? mean(homeMargins) : null;
     for (const row of rows) {
       const away = ensure(row.awayTeam);
       const home = ensure(row.homeTeam);
-      const margin = Number(row.homeScore) - Number(row.awayScore);
-      if (!Number.isFinite(margin)) continue;
-      gamesByTeam.get(home).push({ opponent: away, margin: margin - (row.neutralSite ? 0 : observedHomeEdge) });
-      gamesByTeam.get(away).push({ opponent: home, margin: -margin + (row.neutralSite ? 0 : observedHomeEdge) });
+      const margin = validScore(row.homeScore) - validScore(row.awayScore);
+      const homeCorrection = row.neutralSite === false ? observedHomeEdge ?? 0 : 0;
+      gamesByTeam.get(home).push({ opponent: away, margin: margin - homeCorrection });
+      gamesByTeam.get(away).push({ opponent: home, margin: -margin + homeCorrection });
     }
     let ratings = new Map([...gamesByTeam.keys()].map((key) => [key, 0]));
-    for (let iteration = 0; iteration < 10; iteration += 1) {
+    let solverConverged = false, solverIterations = 0;
+    // Damping prevents the sign-flip mode of an undamped bipartite schedule graph.
+    // Centering fixes the arbitrary additive offset; residuals verify the equations.
+    const residual = values => Math.max(...[...gamesByTeam].map(([team, games]) =>
+      Math.abs(values.get(team) - mean(games.map(game => game.margin + values.get(game.opponent))))));
+    for (let iteration = 0; iteration < 1000; iteration += 1) {
       const next = new Map();
-      for (const [team, games] of gamesByTeam) next.set(team, mean(games.map((game) => game.margin + (ratings.get(game.opponent) || 0))));
+      for (const [team, games] of gamesByTeam) next.set(team,
+        0.5 * ratings.get(team) + 0.5 * mean(games.map(game => game.margin + ratings.get(game.opponent))));
       const center = mean([...next.values()]);
       ratings = new Map([...next].map(([team, value]) => [team, value - center]));
+      solverIterations = iteration + 1;
+      if (residual(ratings) <= 1e-7) { solverConverged = true; break; }
     }
+    if (!solverConverged) continue;
     const ratingValues = [...ratings.values()];
     const ratingSd = standardDeviation(ratingValues);
     const schedules = new Map([...gamesByTeam].map(([team, games]) => [team, mean(games.map((game) => ratings.get(game.opponent) || 0))]));
@@ -428,6 +443,7 @@ function opponentAdjustedRatings(results) {
         rating: clamp(50 + (ratings.get(team) / ratingSd) * 10, 22, 78),
         scheduleStrength: clamp(50 + ((schedules.get(team) || 0) / scheduleSd) * 10, 22, 78),
         rawRating: ratings.get(team),
+        observedHomeEdge, homeEdgeSampleSize: homeMargins.length, solverConverged, solverIterations,
         sampleSize: gamesByTeam.get(team).length
       });
     }
@@ -530,7 +546,7 @@ function specializedTeamMetrics(profileKey, stats, score, opponentScore, playByP
 
 function advancedTeamRatings(samples) {
   const rows = [];
-  for (const sample of samples) {
+  for (const sample of samples.filter(measuredHistoricalGame)) {
     const awayStats = sample.teams?.[normalizeEntityName(sample.awayTeam)]?.stats || {};
     const homeStats = sample.teams?.[normalizeEntityName(sample.homeTeam)]?.stats || {};
     const profile = sportProfile(sample);
@@ -598,7 +614,9 @@ export function enhanceTeamProfiles(teamProfiles = {}, results = [], samples = [
       profile.opponentAdjustedRating = opponent.rating;
       profile.scheduleStrength = opponent.scheduleStrength;
       profile.powerRating = clamp(profile.powerRating * 0.74 + opponent.rating * 0.26, 20, 80);
-      profile.stats = { ...profile.stats, opponentAdjustedSample: opponent.sampleSize, scheduleStrength: opponent.scheduleStrength };
+      profile.stats = { ...profile.stats, opponentAdjustedSample: opponent.sampleSize, scheduleStrength: opponent.scheduleStrength,
+        observedHomeEdge: opponent.observedHomeEdge, homeEdgeSampleSize: opponent.homeEdgeSampleSize,
+        opponentAdjustedSolverConverged: opponent.solverConverged, opponentAdjustedSolverIterations: opponent.solverIterations };
     }
     if (advanced) {
       profile.advancedOffense = advanced.offense;

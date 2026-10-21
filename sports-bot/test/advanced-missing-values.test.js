@@ -95,3 +95,78 @@ test('known external values preserve the existing units, difference signs and tr
 });
 
 const nflCsv=(text,url)=>text.split('\n').map((line,index)=>!line?'':index===0?'season,season_type,'+line:String(url.match(/reg_(\d{4})/)[1])+',REG,'+line).join('\n');
+
+
+test('opponent ratings exclude unknown or invalid scores rather than inventing zero-score games',async()=>{
+ const {opponentAdjustedRatings}=await import('../src/advancedMetrics.js');
+ const good={leagueKey:'nba',awayTeam:'Away',homeTeam:'Home',awayScore:0,homeScore:10,neutralSite:false};
+ const baseline=opponentAdjustedRatings([good]);
+ for(const value of [null,undefined,'',true,{},NaN,-1]){
+  assert.deepEqual(opponentAdjustedRatings([good,{...good,awayScore:value}]),baseline);
+  assert.deepEqual(opponentAdjustedRatings([good,{...good,homeScore:value}]),baseline);
+ }
+ assert.equal(baseline.get('nba__home').sampleSize,1);
+ assert.equal(opponentAdjustedRatings([{...good,awayScore:'0',homeScore:'10'}]).get('nba__home').sampleSize,1);
+});
+
+test('neutral fixtures never enter observed home advantage, but remain rating evidence',async()=>{
+ const {opponentAdjustedRatings}=await import('../src/advancedMetrics.js');
+ const rows=opponentAdjustedRatings([
+  {leagueKey:'nba',awayTeam:'A',homeTeam:'B',awayScore:90,homeScore:100,neutralSite:false},
+  {leagueKey:'nba',awayTeam:'C',homeTeam:'D',awayScore:0,homeScore:90,neutralSite:true}
+ ]);
+ assert.equal(rows.get('nba__b').observedHomeEdge,10);
+ assert.equal(rows.get('nba__d').observedHomeEdge,10);
+ assert.equal(rows.get('nba__d').sampleSize,1);
+ const neutral=opponentAdjustedRatings([{leagueKey:'nba',awayTeam:'A',homeTeam:'B',awayScore:0,homeScore:10,neutralSite:true}]);
+ assert.equal(neutral.get('nba__b').observedHomeEdge,null);
+ assert.equal(neutral.get('nba__b').homeEdgeSampleSize,0);
+});
+
+
+test('unknown venues do not certify home advantage and incomplete boxscore scores cannot train advanced ratings',async()=>{
+ const {opponentAdjustedRatings,enhanceTeamProfiles}=await import('../src/advancedMetrics.js');
+ const row={leagueKey:'nba',league:'NBA',sportGroup:'Basketball',awayTeam:'Away',homeTeam:'Home',awayScore:0,homeScore:10};
+ assert.equal(opponentAdjustedRatings([row]).get('nba__home').homeEdgeSampleSize,0);
+ const profiles=()=>({a:{name:'Away',leagueKey:'nba',powerRating:50,offense:50,defense:50},h:{name:'Home',leagueKey:'nba',powerRating:50,offense:50,defense:50}});
+ const baseline=enhanceTeamProfiles(profiles(),[row],[row]);
+ for(const value of [null,undefined,'',false,{},NaN,-1]){
+  const bad={...row,homeScore:value};
+  assert.deepEqual(enhanceTeamProfiles(profiles(),[row,bad],[row,bad]),baseline);
+ }
+ assert.equal(baseline.a.stats.advancedBoxscoreSample,1);
+});
+
+
+test('opponent adjustment converges for a two-team neutral matchup instead of oscillating back to zero',async()=>{
+ const {opponentAdjustedRatings}=await import('../src/advancedMetrics.js');
+ const rows=opponentAdjustedRatings([{leagueKey:'nba',awayTeam:'Away',homeTeam:'Home',awayScore:0,homeScore:10,neutralSite:true}]);
+ assert.ok(Math.abs(rows.get('nba__home').rawRating-5)<1e-7);
+ assert.ok(Math.abs(rows.get('nba__away').rawRating+5)<1e-7);
+ assert.equal(rows.get('nba__home').solverConverged,true);
+});
+
+
+test('converged opponent ratings satisfy multi-team equations and reverse with score direction',async()=>{
+ const {opponentAdjustedRatings}=await import('../src/advancedMetrics.js');
+ const margins=[['A','B',10],['A','C',4],['B','C',-2],['B','C',6]];
+ const games=margins.map(([awayTeam,homeTeam,margin])=>({leagueKey:'nba',awayTeam,homeTeam,awayScore:100,homeScore:100+margin,neutralSite:true}));
+ const ratings=opponentAdjustedRatings(games),reversed=opponentAdjustedRatings(games.map(row=>({...row,awayScore:row.homeScore,homeScore:row.awayScore})));
+ for(const team of ['A','B','C']){
+  const key='nba__'+team.toLowerCase(),value=ratings.get(key).rawRating;
+  const terms=games.filter(row=>row.homeTeam===team||row.awayTeam===team).map(row=>{
+   const home=row.homeTeam===team,opponent=home?row.awayTeam:row.homeTeam;
+   return (home?row.homeScore-row.awayScore:row.awayScore-row.homeScore)+ratings.get('nba__'+opponent.toLowerCase()).rawRating;
+  });
+  assert.ok(Math.abs(value-terms.reduce((a,b)=>a+b,0)/terms.length)<=1e-7);
+  assert.ok(Math.abs(value+reversed.get(key).rawRating)<=1e-7);
+ }
+});
+
+
+test('a slowly converging schedule cannot publish an unverified intermediate opponent rating',async()=>{
+ const {opponentAdjustedRatings}=await import('../src/advancedMetrics.js');
+ const games=Array.from({length:63},(_,index)=>({leagueKey:'nba',awayTeam:'T'+index,homeTeam:'T'+(index+1),
+  awayScore:0,homeScore:index===0?10:0,neutralSite:true}));
+ assert.equal(opponentAdjustedRatings(games).size,0);
+});
