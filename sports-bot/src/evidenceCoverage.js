@@ -48,7 +48,9 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       retryAfter: available ? timestamp(row.retryAfter) : null, providerRetryAfter: available ? timestamp(row.providerRetryAfter) : null };
   });
   if (advancedRefreshes.some(row => row.state === 'failed')) missing.push('advanced_dataset:refresh_failed');
-  const measurementMetadata = new Set(['provider','provenancePolicy','sourceReceiptTimes','sourceRefreshStatuses','publicationTimeVerified','sourceRequestKeys','requestedSourceKey',
+  const sourcePeriodEvidence = game.advancedDataset?.sourcePeriodEvidence || null;
+  if (sourcePeriodEvidence && sourcePeriodEvidence.state !== 'matched') missing.push(`advanced_dataset:${sourcePeriodEvidence.state}`);
+  const measurementMetadata = new Set(['provider','provenancePolicy','sourceReceiptTimes','sourceRefreshStatuses','publicationTimeVerified','sourceRequestKeys','requestedSourceKey','sourcePeriodEvidence',
     'updatedAt','fetchedAt','sourceFetchedAt','observedAt','sourceObservationAt']);
   const missingMeasurements = Object.entries(game.advancedDataset || {}).filter(([key, value]) => !measurementMetadata.has(key)
     && (value === null || value === undefined || (typeof value === 'number' && !Number.isFinite(value)))).map(([key]) => key);
@@ -106,7 +108,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     advancedDatasetProvenance: { provider: game.advancedDataset?.provider || null,
       receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
       sourceRequestKeys: game.advancedDataset?.sourceRequestKeys || [], requestedSourceKey: game.advancedDataset?.requestedSourceKey || null,
-      sourceRefreshStatuses: advancedRefreshes,
+      sourceRefreshStatuses: advancedRefreshes, sourcePeriodEvidence,
       missingMeasurements, measurementCoverageScope: 'Enumerated missing fields only; not a league completeness attestation.',
       missingOrInvalidReceipts: advancedReceipts.filter(value => value === null).length,
       nativePublicationVerified: false },

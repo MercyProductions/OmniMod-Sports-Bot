@@ -54,3 +54,27 @@ export function checkedNflSeasonRows(rows,seasonStart){
  }
  return parsed;
 }
+
+
+/** Compare NFL season-year assertions without guessing other leagues' start/end-year conventions. */
+export function nflGameSeasonEvidence(game={},rows=[]){
+ const year=value=>{const number=finiteNumber(value);return Number.isInteger(number)&&number>=1000&&number<=9999?number:null;};
+ const present=value=>value!==undefined&&value!==null&&value!=='';
+ let sourceConflict=false;
+ const sourceEvidence=rows.map(row=>{
+  let requested=null;
+  try{
+   const key=JSON.parse(row?.sourceRequestKey||'null');
+   if(key?.source==='nflverse-team-stats'&&key.recordContract==='regular-season-team-summary-v1')requested=year(key.seasonStart);
+  }catch{}
+  const native=year(row?.season);
+  if(present(row?.season)&&(native===null||requested!==null&&native!==requested))sourceConflict=true;
+  return {season:native??requested,basis:native!==null?'native_row_assertion':requested!==null?'validated_request_contract':'unknown'};
+ });
+ const gameSeason=year(game.seasonYear),sourceSeasons=sourceEvidence.map(row=>row.season);
+ const state=sourceConflict?'source_season_conflict':present(game.seasonYear)&&gameSeason===null?'game_season_invalid':gameSeason===null?'game_season_unknown'
+  :sourceSeasons.length!==2||sourceSeasons.some(value=>value===null)?'source_season_unknown':sourceSeasons.some(value=>value!==gameSeason)?'season_mismatch':'matched';
+ return {sourceId:'nflverse-team-stats',gameSeason,sourceSeasons,sourceEvidence,state,
+  blocked:['source_season_conflict','game_season_invalid','source_season_unknown','season_mismatch'].includes(state),
+  nativePublicationVerified:false};
+}

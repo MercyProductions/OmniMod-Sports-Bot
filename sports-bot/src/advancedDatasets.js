@@ -4,7 +4,7 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
 import { finiteNumber, measuredCalculation } from './dataValidation.js';
-import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nonemptyText } from './advancedDatasetContracts.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedNflSeasonRows, nflGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
 export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
@@ -244,7 +244,7 @@ export async function syncAdvancedDatasets(options = {}) {
         const parsed = checkedNflSeasonRows(parseCsv(await sourceText(nflUrl)), footballSeason);
         const rows = parsed.rows;
         snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
-          team: String(row.team || '').trim().toUpperCase(), games: finite(row.games),
+          team: String(row.team || '').trim().toUpperCase(), season: finite(row.season), seasonType: row.season_type, games: finite(row.games),
           epaPerGame: perGame(measuredCalculation([row.passing_epa, row.rushing_epa], (passing, rushing) => passing + rushing), row.games),
           passingEpaPerGame: perGame(row.passing_epa, row.games),
           rushingEpaPerGame: perGame(row.rushing_epa, row.games),
@@ -390,6 +390,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
   const eligibleRow = (row, sourceId) => !row ? null : row.sourceRequestKey
     ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod ? null : row;
   let matched = 0;
+  const periodRejections = [];
   const provenance = (previous, rows, sourceId) => {
     const status = (sync.snapshot.sources || []).find(row => row.id === sourceId);
     return { ...receiptProvenance(previous, rows), requestedSourceKey: sync.requestIdentities[sourceId], sourceRefreshStatuses: [...(previous?.sourceRefreshStatuses || []), {
@@ -437,9 +438,17 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     if (leagueKey === 'nfl') {
       const away = eligibleRow(sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()], 'nflverse-team-stats');
       const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
-      if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'), provider: 'nflverse team stats', epaDifference: difference(home.epaPerGame, away.epaPerGame, 60), passingEpaDifference: difference(home.passingEpaPerGame, away.passingEpaPerGame, 38), rushingEpaDifference: difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24), cpoeDifference: difference(home.cpoe, away.cpoe) };
-        matched += 1;
+      if (away || home) {
+        const sourcePeriodEvidence = nflGameSeasonEvidence(game, [away, home]);
+        const usable = away && home && !sourcePeriodEvidence.blocked;
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'),
+          provider: 'nflverse team stats', sourcePeriodEvidence,
+          epaDifference: usable ? difference(home.epaPerGame, away.epaPerGame, 60) : null,
+          passingEpaDifference: usable ? difference(home.passingEpaPerGame, away.passingEpaPerGame, 38) : null,
+          rushingEpaDifference: usable ? difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24) : null,
+          cpoeDifference: usable ? difference(home.cpoe, away.cpoe) : null };
+        if (usable) matched += 1;
+        if (sourcePeriodEvidence.blocked) periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }
@@ -484,7 +493,7 @@ export async function attachAdvancedDatasetContext(games = [], options = {}) {
     };
     matched += 1;
   }
-  return { ...sync, matched, sourceCorroborations };
+  return { ...sync, matched, sourceCorroborations, periodRejections };
 }
 
 export { snapshotFile as advancedDatasetSnapshotFile };

@@ -116,3 +116,7 @@ Development v6.0.19 repairs NBA 40-versus-48-minute normalization and projection
 ## Team feature measurement continuation
 
 Development v6.0.20 repairs missing-as-zero team features, fabricated drive/opportunity denominators, actual-score substitutions and unsupported bullpen/GSAx labels. [Mechanisms, valid-zero controls, cohort normalization and frozen counts](SPORTS_TEAM_FEATURE_MEASUREMENTS.md); complete suite 331 passing. Remaining proxies are explicitly heuristic and require forward validation; no deployment or performance-improvement claim.
+
+## NFL game-season binding continuation
+
+Development v6.0.21 compares declared game seasons with native or validated-contract NFL source periods, freezes alignment evidence and reports rejected attachments. [Reproductions, migration/cutoff controls and limits](SPORTS_GAME_SEASON_BINDING.md); complete suite 337 passing. Existing default calendar and unknown-game compatibility remain explicit limitations. No deployment or demonstrated predictive improvement.
