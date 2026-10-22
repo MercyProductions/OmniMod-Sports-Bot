@@ -17,7 +17,7 @@ const score=result=>result.matched.byVersion.challenger.evidence;
 test('receipt-linked emitted binary classes produce a scored paired forecast without rewriting captures',()=>{
  const rows=inputs(),before=JSON.stringify(rows),result=report(rows);
  assert.equal(result.pairedForecasts,1);assert.equal(score(result).primary.games,1);assert.equal(score(result).reference.games,1);
- assert.equal(result.schema,'sports-isolated-paired-report-v3');assert.equal(result.captureAdapter,'receipt-linked-raw-emitted-outcomes-v1');
+ assert.equal(result.schema,'sports-isolated-paired-report-v4');assert.equal(result.captureAdapter,'receipt-linked-raw-emitted-outcomes-v1');
  assert.ok(Math.abs(score(result).primary.brier-.09)<1e-12);assert.equal(JSON.stringify(rows),before);
 });
 test('a tied archived baseline uses its actual frozen home pick instead of an inferred away tie break',()=>{

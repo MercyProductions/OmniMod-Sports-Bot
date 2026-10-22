@@ -6,7 +6,7 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 21, 2026
 
-Forecast model identity remains **v6.0.45**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v3`; it does not rewrite or relabel forecast captures. Current full suite: **799 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 790 passing tests. Test counts establish exercised code behavior, not forecasting quality.
+Forecast model identity remains **v6.0.45**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v4`; it does not rewrite or relabel forecast captures. Current full suite: **809 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 799 passing tests. Test counts establish exercised code behavior, not forecasting quality.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |
@@ -30,6 +30,8 @@ Forecast model identity remains **v6.0.45**. The read-only prospective evaluator
 | Ordered expanded goal | Sports → full queued Crypto specification → full queued Stocks specification. | Sports remains in progress. Crypto/Stocks implementation has not been started ahead of Sports verification. |
 
 See [current prospective study and association repair](SPORTS_CURRENT_PROSPECTIVE_VALIDATION.md) for source pins, actual observations, test scope and remaining limits. The preserved original study still uses the older v6.0.7 challenger. The current collector/evaluator does not alter those original captures or turn a saved collection plan into a statistically powered model-selection trial.
+
+Latest receipt-order and actual final evidence: [capture receipt selection](SPORTS_CAPTURE_RECEIPT_SELECTION.md). Two real resolved NHL games scored identically for baseline/challenger (1/2 correct, Brier 0.250961, log loss 0.695072884138028). Earlier unresolved statements below are historical checkpoints. The next-day 13 pairs remain unresolved; no improvement or economic edge is established.
 
 ## Historical requirement matrix — original v6.0.7 checkpoint
 

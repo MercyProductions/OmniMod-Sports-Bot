@@ -1,6 +1,7 @@
+import {selectCaptureObservation} from './captureObservationSelection.js';
 import {capturedEventTime} from './capturedEventTime.js';
 import {quoteTimeEpoch as epoch} from './oddsPricing.js';
-import {journalGameIndex} from './journalEventMatch.js';
+import {journalGameIndex,eventObservationHash} from './journalEventMatch.js';
 import {eventReference,scopedEventKey,resolveSlateGame,scopedSlatePredictions} from './slateEventIdentity.js';
 import {validCandidateVector} from './candidateCohorts.js';
 import {createHash} from 'node:crypto';
@@ -123,12 +124,12 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
   if(capture.mode!=='live'){reject('not_live_market_capture');continue;}
   if(!['baseline','challenger'].includes(capture.role)||![issued,completed,began].every(Number.isFinite)||began>completed||completed>issued){reject('capture_chronology_invalid');continue;}
   const state=captureAssociations(capture.slate);
-  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const key=identity(game),versions=finals.get(key)||{};versions[capture.role]={conflict:true,observedAt:receipt.recordedAt};finals.set(key,versions);}
+  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const key=identity(game),versions=finals.get(key)||{};versions[capture.role]=selectCaptureObservation(versions[capture.role],{issued,signature:'source-conflict',tieKey:receipt.eventHash,conflict:true,observedAt:receipt.recordedAt});finals.set(key,versions);}
   for(const game of state.games){
    const actualSide=finalOutcomeSide(game),start=capturedEventTime(game.startTime);
    if(actualSide&&Number.isFinite(start)&&issued>=start){
     const key=identity(game),versions=finals.get(key)||{};
-    versions[capture.role]={actualSide,awayScore:game.away?.score,homeScore:game.home?.score,observedAt:receipt.recordedAt};finals.set(key,versions);
+    versions[capture.role]=selectCaptureObservation(versions[capture.role],{issued,signature:JSON.stringify([actualSide,game.away?.score,game.home?.score]),tieKey:receipt.eventHash,actualSide,awayScore:game.away?.score,homeScore:game.home?.score,observedAt:receipt.recordedAt});finals.set(key,versions);
    }
   }
   if(capture.purpose==='final_reconciliation')continue;
@@ -142,13 +143,16 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
    const horizon=predictionHorizon({...prediction,minutesToStart:(start-generated)/60000}),eventKey=identity(game),key=JSON.stringify([eventKey,horizon]);
    if(!first.has(key))first.set(key,{});
    const pair=first.get(key);
-   if(pair[capture.role]){reject('later_same_horizon_not_selected');continue;}
-   pair[capture.role]={prediction,game,issued,receipt,horizon,eventKey};
+   const previous=pair[capture.role];
+   if(previous&&issued>previous.issued)reject('later_same_horizon_not_selected');
+   pair[capture.role]=selectCaptureObservation(previous,{prediction,game,issued,receipt,horizon,eventKey,tieKey:receipt.eventHash,
+    signature:eventObservationHash({prediction,game,sourceCommit:receipt.payload.sourceCommit})},{earliest:true});
   }
  }
  const rows=[],pairs=[];
  for(const pair of first.values()){
   const a=pair.baseline,b=pair.challenger;
+  if(a?.conflict||b?.conflict){reject('ambiguous_first_capture');continue;}
   if(!a||!b){reject('missing_counterpart');continue;}
   if(Math.abs(a.issued-b.issued)>maximumPairGapMs){reject('counterpart_time_gap_exceeded');continue;}
   const id=digest([a.receipt.eventHash,b.receipt.eventHash,b.eventKey,b.horizon]);
@@ -171,8 +175,9 @@ export function evaluateProspectiveCaptures(entries=[],{asOf=Date.now(),maximumP
   const final=observed.sort((x,y)=>epoch(y.observedAt)-epoch(x.observedAt))[0];
   rows.push({type:'result',recordedAt:final.observedAt,payload:{forecastId:id,actualSide:final.actualSide,observedAt:final.observedAt,scheduleChanged:false}});
  }
- return {schema:'sports-isolated-paired-report-v3',asOf:new Date(asOf).toISOString(),maximumPairGapMs,captureAdapter:'receipt-linked-raw-emitted-outcomes-v1',visibleCaptures:ordered.length,pairedForecasts:pairs.length,pairs,rejections,
+ return {schema:'sports-isolated-paired-report-v4',asOf:new Date(asOf).toISOString(),maximumPairGapMs,captureAdapter:'receipt-linked-raw-emitted-outcomes-v1',visibleCaptures:ordered.length,pairedForecasts:pairs.length,pairs,rejections,
   matched:evaluateMatchedJournal(rows,{asOf}),performanceEstablished:false,promotionAllowed:false,
+  receiptSelectionPolicy:'First validated forecast per role/event/horizon and latest final per role/event use parsed receipt instants. Conflicting equal-time observations remain ambiguous; equivalent ties use receipt-hash ordering. Only a strictly preferred time replaces a tie conflict.',
   methodology:'Scoped unique source/forecast observations; first receipted pregame forecast per role/event/horizon, bounded sequential issuance gap, original frozen probabilities; latest agreeing observed finals.',
   limitations:['The evidence comparator is the archived baseline executable, not a same-issuance simple model.',
    'Paired rows are derived read-only from pregame capture receipts, not reconstructed production Discord forecasts.',
@@ -197,10 +202,10 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
   if(capture.mode!=='live'||!['baseline','challenger'].includes(capture.role)||![issued,began,completed].every(Number.isFinite)
    ||issued>asOf||began>completed||completed>issued)continue;
   const state=captureAssociations(capture.slate);
-  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,conflict:true});}
+  for(const game of state.conflicts)if(Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);resolved.set(key,selectCaptureObservation(prior,{eventKey,issued,signature:'source-conflict',tieKey:receipt.eventHash,conflict:true}));}
   for(const game of state.games)if(finalOutcomeSide(game)&&Number.isFinite(capturedEventTime(game.startTime))&&issued>=capturedEventTime(game.startTime)){
    const eventKey=identity(game),key=capture.role+':'+eventKey,prior=resolved.get(key);
-   if(!prior||issued>=prior.issued)resolved.set(key,{eventKey,issued,signature:JSON.stringify([finalOutcomeSide(game),game.away?.score,game.home?.score])});
+   resolved.set(key,selectCaptureObservation(prior,{eventKey,issued,tieKey:receipt.eventHash,signature:JSON.stringify([finalOutcomeSide(game),game.away?.score,game.home?.score])}));
   }
   if(capture.purpose==='final_reconciliation')continue;
   for(const {game,prediction} of captureForecasts(capture.slate,state,reject)){
@@ -211,7 +216,8 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
    const date=dateKey(start),age=(day-Date.parse(date+'T00:00:00Z'))/86400000;
    if(age<0||age>lookbackDays){reject('outside_lookback');continue;}
    const key=capture.role+':'+identity(game),previous=pending.get(key);
-   if(!previous||issued<previous.issued)pending.set(key,{role:capture.role,dateKey:date,issued,game,prediction});
+   pending.set(key,selectCaptureObservation(previous,{role:capture.role,dateKey:date,issued,game,prediction,tieKey:receipt.eventHash,
+    signature:eventObservationHash({prediction,game,sourceCommit:receipt.payload.sourceCommit})},{earliest:true}));
   }
  }
  const signatures=new Map();
@@ -220,6 +226,7 @@ export function pendingProspectiveFinalQueries(entries=[],{asOf=Date.now(),lookb
  for(const row of resolved.values())if(row.conflict)conflicts.add(row.eventKey);
  const grouped=new Map();
  for(const [key,row] of pending){
+  if(row.conflict){reject('ambiguous_first_capture');continue;}
   if(resolved.has(key)&&!resolved.get(key).conflict&&!conflicts.has(identity(row.game)))continue;
   const groupKey=row.role+':'+row.dateKey;
   if(!grouped.has(groupKey))grouped.set(groupKey,{role:row.role,dateKey:row.dateKey,games:[],predictions:[]});
