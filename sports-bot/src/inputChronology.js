@@ -1,7 +1,12 @@
-const time=value=>Date.parse(value||'');
+import {quoteTimeEpoch} from './oddsPricing.js';
+
+const time=quoteTimeEpoch;
+const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
+const observationTime=value=>dayOnly(value)?time(value+'T00:00:00Z'):time(value);
 
 /** Known observation times only; absence remains explicitly unknown, never a publication-time attestation. */
 export function observedInputState(row,cutoff){
+ if(!Number.isFinite(cutoff))throw new Error('Valid observation information cutoff required');
  const values=[row?.updatedAt,row?.fetchedAt,row?.sourceFetchedAt,row?.recordedAt,row?.observedAt,row?.sourceObservationAt,
   row?.sourceMeta?.fetchedAt,row?.sourceMeta?.sourceObservationAt,...Object.values(row?.fetchedAtBySide||{}),
   ...(Array.isArray(row?.sourceReceiptTimes)?row.sourceReceiptTimes:[]),
@@ -10,11 +15,12 @@ export function observedInputState(row,cutoff){
   row?.environment?.fetchedAt,row?.environment?.sourceFetchedAt,row?.environment?.sourceObservationAt]
   .filter(value=>value!==undefined&&value!==null&&value!=='');
  if(!values.length)return 'unknown';
- const timestamps=values.map(time);
+ const timestamps=values.map(observationTime);
  if(timestamps.some(value=>!Number.isFinite(value)))return 'invalid_observation_time';
  if(timestamps.some(value=>value>cutoff))return 'after_information_cutoff';
  const missing=value=>value===undefined||value===null||value==='';
- if((Array.isArray(row?.sourceReceiptTimes)&&row.sourceReceiptTimes.some(missing))
+ if(values.some(dayOnly)
+  ||(Array.isArray(row?.sourceReceiptTimes)&&row.sourceReceiptTimes.some(missing))
   ||(Array.isArray(row?.sourceContributions)&&row.sourceContributions.some(entry=>!Array.isArray(entry?.sourceReceiptTimes)||!entry.sourceReceiptTimes.length||entry.sourceReceiptTimes.some(missing)))
   ||Object.values(row?.fetchedAtBySide||{}).some(missing)
   ||(Array.isArray(row?.matches)&&row.matches.some(match=>missing(match?.fetchedAt)&&missing(match?.sourceObservationAt))))return 'unknown';
@@ -80,18 +86,20 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   const selected=retain(row,'head_to_head_result');
   if(!selected)return false;
   if(observedInputState(row,cutoff)==='unknown'){excluded['head_to_head_result:availability_unknown']=(excluded['head_to_head_result:availability_unknown']||0)+1;return false;}
-  const start=time(row.startTime||row.dateKey);
+  const start=observationTime(row.startTime||row.dateKey);
   if(!Number.isFinite(start)||start>=cutoff){excluded['head_to_head_result:event_not_before_cutoff']=(excluded['head_to_head_result:event_not_before_cutoff']||0)+1;return false;}
   return true;
  })};
  const learnedAt=time(context.learningInputAudit?.cutoffAt);
- if(Number.isFinite(learnedAt)&&learnedAt>cutoff){
+ const learningState=context.learningInputAudit?(!Number.isFinite(learnedAt)?'invalid_observation_time':learnedAt>cutoff?'after_information_cutoff':'observed_by_cutoff'):'unknown';
+ if(learningState==='unknown')unknown.learning_context=1;
+ if(['after_information_cutoff','invalid_observation_time'].includes(learningState)){
   for(const field of ['eloRatings','calibration','outcomeValidation','featureLearning','drift'])next[field]={};
-  next.history={overall:{sampleSize:0}};excluded['learning_context:after_information_cutoff']=1;
+  next.history={overall:{sampleSize:0}};excluded['learning_context:'+learningState]=1;
  }
- return {game:safe,context:next,audit:{schema:'sports-input-cutoff-v1',cutoffAt:new Date(cutoff).toISOString(),excluded,unknownAvailability:unknown,
+ return {game:safe,context:next,audit:{schema:'sports-input-cutoff-v2',cutoffAt:new Date(cutoff).toISOString(),excluded,unknownAvailability:unknown,
   scope:'Provided context collections, selected nested receipts and dependent automatic aggregates; evidence coverage is reported separately.',
   pointInTimeComplete:false,limitations:['Declared receipt/update times are not independently verified publication times.',
-   'Untimestamped legacy profiles remain explicitly unknown; older revisions are not reconstructed.',
+   'Untimestamped or date-only legacy profiles and unaudited learned state remain explicitly unknown; older revisions are not reconstructed.',
    'Untimestamped derived aggregates and manually supplied learned state require further provenance review.']}};
 }
