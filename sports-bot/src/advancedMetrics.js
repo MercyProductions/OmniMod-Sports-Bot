@@ -4,7 +4,7 @@ import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior, basketballWorkloadBasis } from './participationProjection.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
-import { finiteNumber, validScore, measuredCalculation } from './dataValidation.js';
+import { finiteNumber, hasAvailabilityObservation, validScore, measuredCalculation } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
 
 function clamp(value, min, max) {
@@ -696,7 +696,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       player.valueSource = learned.source;
       player.historicalStatConflicts = learned.statConflicts || [];
       player.historicalFormEvidence = learned.formEvidence || 'unknown';
-      learnedInjuries += player.availability < 100 ? 1 : 0;
+      learnedInjuries += finiteNumber(player.availability) !== null && finiteNumber(player.availability) < 100 ? 1 : 0;
     }
 
     const profile = sportProfile(game);
@@ -751,6 +751,13 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
       const criticalPlayers = reconcilePlayerEvidence(game.autoPlayers || [], game.autoLineups || [])
         .filter((row) => matchesTeam(team, row.team) && row.active !== false && row.starter && row.availability >= 80);
       const criticalForm = criticalPlayers.length ? mean(criticalPlayers.map((row) => finite(row.form, 50))) : 50;
+      const criticalRole={hockey:/goalie|goaltender|\bg\b/i,football:/quarterback|\bqb\b/i,baseball:/starting pitcher|\bsp\b/i}[profile.key];
+      const roleRows=criticalRole?reconcilePlayerEvidence([...(game.autoPlayers||[]),...(game.autoLineups||[])])
+        .filter(row=>matchesTeam(team,row.team)&&criticalRole.test(row.role||'')&&row.active!==false):[];
+      const criticalRoleEvidence={confirmed:roleRows.filter(isConfirmedStarter).length,
+        projected:roleRows.filter(row=>row.starter&&!isConfirmedStarter(row)).length,
+        healthUnknown:roleRows.filter(row=>!hasAvailabilityObservation(row)).length,
+        policy:'Role evidence only; unknown health cannot qualify a usable critical-player input.'};
       sides[side] = {
         confirmed,
         starterCount: starters.length,
@@ -764,6 +771,7 @@ export function applyPlayerProfilesAndLineups(games = [], playerProfiles = {}) {
         pairCoverage: possiblePairs ? pairScores.length / possiblePairs : 0,
         interactionRating,
         lineupRating,
+        criticalRoleEvidence,
         criticalStarterCount: criticalPlayers.length,
         criticalConfirmedStarterCount: criticalPlayers.filter(isConfirmedStarter).length,
         criticalProjectedStarterCount: criticalPlayers.filter(row => !isConfirmedStarter(row)).length,
