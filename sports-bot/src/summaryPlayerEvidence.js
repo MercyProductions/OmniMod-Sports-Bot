@@ -29,19 +29,19 @@ function roleDescriptor(role,profile){
 
 /** Derive one player view while retaining independent original summary observations. */
 export function applySummaryPlayerEvidence(view,inputs){
- const summary=inputs.filter(row=>row.summaryObservationType);if(!summary.length)return;
+ const summary=inputs.filter(row=>row.summaryObservationType);if(!summary.length&&!inputs.some(row=>row.availabilityProvider))return;
  const profile=sportProfile(view).key,roles=inputs.map(row=>({row,role:roleDescriptor(row.role,profile)})).filter(item=>item.role);
  const critical=[...new Set(roles.map(item=>item.role.key).filter(Boolean))],selected=critical.length===1?roles.find(item=>item.role.key===critical[0]):null;
  const conflict=critical.length>1||Boolean(selected&&roles.some(item=>item.role.family!==selected.role.family));
  const priority={injury:0,probable:1,roster:2};
  const ordered=[...inputs].sort((a,b)=>(priority[a.summaryObservationType]??3)-(priority[b.summaryObservationType]??3)||String(a.role||'').localeCompare(String(b.role||'')));
  view.role=conflict?'':selected?.role.canonical||ordered.map(row=>roleDescriptor(row.role,profile)?.canonical).find(Boolean)||'';
- view.starter=summary.some(row=>row.starter===true)||view.starter===true;
+ view.starter=inputs.some(row=>row.starter===true)||view.starter===true;
  if(conflict){view.confirmedStarter=false;view.starterEvidenceConflict=true;}
- view.confirmationStatus=view.confirmedStarter?'provider_roster_starter':conflict?'conflicting_role_reports':view.starter?'projected':'not_confirmed';
+ if(summary.length||conflict)view.confirmationStatus=view.confirmedStarter?'provider_roster_starter':conflict?'conflicting_role_reports':view.starter?'projected':'not_confirmed';
  view.summaryRoleEvidence={status:conflict?'conflict':view.role?'reported':'unknown',selectedRole:view.role||null,
   observations:roles.map(({row})=>({kind:row.summaryObservationType||(row.availabilityProvider?'provider':'independent'),role:row.role,source:row.source||null,updatedAt:row.updatedAt||null})),publicationVerified:false};
- view.impact=automaticPlayerImpact(view,view.role,view.starter);
+ if(summary.length)view.impact=automaticPlayerImpact(view,view.role,view.starter);
  const stats={},conflicts=new Set();
  for(const row of inputs)for(const [key,value]of Object.entries(row.stats||{})){
   if(Object.hasOwn(stats,key)&&stats[key]!==value)conflicts.add(key);else if(!Object.hasOwn(stats,key))stats[key]=value;
@@ -49,7 +49,7 @@ export function applySummaryPlayerEvidence(view,inputs){
  for(const key of conflicts)stats[key]=null;
  view.stats=stats;view.summaryStatEvidence={conflicts:[...conflicts].sort(),sourceKinds:[...new Set(inputs.filter(row=>Object.keys(row.stats||{}).length).map(row=>row.summaryObservationType||(row.availabilityProvider?'provider':'independent')))],samplePeriodVerified:false};
  // Injury rows previously used neutral form; retaining metadata must not add a performance bonus to them.
- if(summary.some(row=>row.summaryObservationType==='injury')||conflicts.size)view.form=50;
+ if(inputs.some(row=>row.summaryObservationType==='injury'||row.availabilityObservationType==='injury')||conflicts.size)view.form=50;
  const health=inputs.filter(hasAvailabilityObservation).map(row=>({row,value:availabilityFraction(row)})).filter(item=>item.value!==null);
  if(health.length){
   const minimum=Math.min(...health.map(item=>item.value));view.availability=minimum*100;
