@@ -10,7 +10,7 @@ function rows(){
   const quote=price=>({priceAmerican:price,originalPrice:price,originalFormat:'american',bookmaker:'A',bookmakerKey:'a',quotedAt:issue,timestampSource:'provider_update'});
   const chosen={...quote(150),price:150,decimalOdds:2.5};
   const row={forecastId:'f',gameId:'g',guildId:'guild',league:'nba',modelVersion:'fixture',horizon:'T-90',
-    lifecycleState:'ISSUED',recordEligibility:'observed_pregame',predictionGeneratedAt:issue,startTime:start,
+    modeledOutcomes:['away','home'],lifecycleState:'ISSUED',recordEligibility:'observed_pregame',predictionGeneratedAt:issue,startTime:start,
     outcomePercentages:{away:45,home:55,draw:0},modelUsesMarket:true,
     valueDecision:{side:'home',status:'research_opportunity',evaluatedAt:issue,quote:chosen},
     odds:{rules:'full_game_2way',cacheState:'network',identity:{localGameId:'g',league:'nba',providerEventId:'provider-g',providerStartTime:start,matchStatus:'matched'},
@@ -66,7 +66,7 @@ test('missing results and two-way ties remain unresolved or censored instead of 
 test('later prices cannot replace an earlier selected decision or improve its reported outcome',()=>{
   const data=rows(),snapshot=data[0].payload;
   data.splice(1,0,{type:'price_observation',recordedAt:'2026-10-20T18:05:00Z',payload:{sourceForecastId:'f',
-    gameId:'g',guildId:'guild',league:'nba',odds:structuredClone(snapshot.odds),valueDecision:structuredClone(snapshot.valueDecision)}});
+    gameId:'g',guildId:'guild',league:'nba',modelVersion:'fixture',originalForecastGeneratedAt:issue,linkage:'exact_frozen_model_issue',odds:structuredClone(snapshot.odds),valueDecision:structuredClone(snapshot.valueDecision)}});
   const result=evaluatePriceResearch(data,options);
   assert.equal(result.scenarios.length,1);assert.equal(result.rejections.later_game_price_decision_not_selected,1);
   assert.equal(result.scenarios[0].decisionAt,issue);
@@ -75,7 +75,7 @@ test('later prices cannot replace an earlier selected decision or improve its re
 
 test('complete three-way markets grade draws and reject asynchronous same-book outcomes',()=>{
   const data=rows(),row=data[0].payload;
-  row.odds.rules='regulation_3way';row.outcomePercentages={away:30,home:45,draw:25};
+  row.odds.rules='regulation_3way';row.modeledOutcomes=['away','home','draw'];row.outcomePercentages={away:30,home:45,draw:25};
   const draw={...row.odds.outcomes.home.offeredQuotes[0],priceAmerican:250,originalPrice:250};
   row.odds.outcomes.draw={offeredQuotes:[draw]};
   row.valueDecision.side='draw';row.valueDecision.quote={...draw,decimalOdds:3.5};

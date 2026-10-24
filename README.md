@@ -222,3 +222,5 @@ Journal/operation clocks: [strict issuance, qualified result/delivery timing and
 Forward evidence: [capture receipts, provider versions and first real run](docs/SPORTS_FORWARD_EVIDENCE_RECEIPTS.md). Full 945 tests pass. All 12 evidence reports remain incomplete; zero actionable opportunities or confirmed goalie starters. This verifies collection, not predictive improvement.
 
 Availability integrity: [source-preserving reconciliation and primary health scoring](docs/SPORTS_AVAILABILITY_RECONCILIATION.md), development v6.0.55. Fifteen reproduced failure scenarios; twenty-one added tests/full966 pass. Unknown health no longer receives full observed coverage. Missing external injury/confirmed-goalie inputs and independent current-version performance remain unresolved.
+
+Price cohort integrity: [canonical issues, original quotes, outcome conflicts and historical scopes](docs/SPORTS_PRICE_COHORT_INTEGRITY.md), report v2. Twelve old-reporter failures reproduced;20 tests added/full986 pass. Both inspected real journals have no qualified price scenarios; no profitability estimate is supported. Forecast modelv6.0.55 and the frozenv52 trial are unchanged.

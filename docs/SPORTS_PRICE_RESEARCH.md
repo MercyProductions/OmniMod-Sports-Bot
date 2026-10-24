@@ -38,3 +38,7 @@ Sports remains in progress: actual operational inspection, isolated prospective 
 ## Provider references
 
 [The Odds API v4](https://the-odds-api.com/liveapi/guides/v4/) documents explicit decimal/American format selection. [Market definitions](https://the-odds-api.com/sports-odds-data/betting-markets.html) distinguish head-to-head and three-way markets. These references do not verify an individual bookmaker's settlement, entitlement or execution terms. The shipped adapters still request American odds; explicit decimal support is a parsing capability, not a changed provider plan.
+
+## Later report-v2 continuation
+
+[Price cohort integrity](SPORTS_PRICE_COHORT_INTEGRITY.md) supersedes the original report eligibility/CLI description where they differ: canonical forecast IDs, strict clocks/class metadata, exact model linkage, conflicting quote/result quarantine and optional historical/cohort scopes. Full986 tests pass. Real audits of the13-forecast older journal and12-forecast frozen trial have no supported price scenarios; original bytes remain unchanged and no profitability conclusion follows.
