@@ -3,6 +3,7 @@ import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityRe
 import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 import {scoreboardStarterInputState} from './scoreboardStarters.js';
+import {availabilityProviderInputState} from './availabilityProviderScope.js';
 
 const time=quoteTimeEpoch;
 const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -38,6 +39,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const retain=(row,path)=>{
   if(!row)return row;
   if(path==='autoEnrichment'&&row.sourceIdentity?.status==='conflict'){excluded['autoEnrichment:source_identity_conflict']=1;return null;}
+  if(row.availabilityProvider){const reason=availabilityProviderInputState(row,game,cutoff);if(reason){const key=path+':provider_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.scoreboardProjection){const reason=scoreboardStarterInputState(row,game,cutoff);if(reason){const key=path+':scoreboard_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.availabilityExpiresAt!==undefined){
    const expiry=time(row.availabilityExpiresAt);
@@ -57,7 +59,17 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  }
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
  const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
- const playerInputs=rawPlayers.filter(row=>retain(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retain(row,'auto_lineup_player'));
+ const summaryUnavailable=Boolean(game.autoEnrichment&&!safe.autoEnrichment);
+ const retainPlayer=(row,path)=>{
+  if(!retain(row,path))return false;
+  // A bad summary cannot erase independently scoped provider/scoreboard observations.
+  // Unclassified legacy automatic rows remain inseparable from that rejected parent.
+  if(summaryUnavailable&&(row.summaryObservationType||!row.availabilityProvider&&!row.scoreboardProjection)){
+   const key=path+':summary_parent_unavailable';excluded[key]=(excluded[key]||0)+1;return false;
+  }
+  return true;
+ };
+ const playerInputs=rawPlayers.filter(row=>retainPlayer(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retainPlayer(row,'auto_lineup_player'));
  const availabilityChanged=playerInputs.length!==rawPlayers.length||lineupInputs.length!==rawLineups.length;
  safe.autoPlayers=availabilityChanged?reconcileAvailabilityRows(playerInputs,lineupInputs):(game.autoPlayers||[]).filter(row=>retain(row,'auto_player_view'));
  safe.autoLineups=availabilityChanged?reconcileAvailabilityRows(lineupInputs,playerInputs):(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_view'));
@@ -83,7 +95,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   safe.advancedDataset=null;excluded['advancedDataset:excluded_team_dependency']=1;
  }
  if(game.autoEnrichment&&!safe.autoEnrichment){
-  safe.autoPlayers=[];safe.autoLineups=[];safe.autoLineup=null;safe.autoContext=null;safe.eventEnvironment=null;safe.advancedDataset=null;
+  safe.autoLineup=null;safe.autoContext=null;safe.eventEnvironment=null;safe.advancedDataset=null;
   clearParticipation('summary_unavailable');
   excluded['summary_derived_inputs:parent_unavailable']=1;
  }

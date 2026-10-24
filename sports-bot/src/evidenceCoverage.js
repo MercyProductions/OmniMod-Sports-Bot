@@ -7,6 +7,7 @@ import { observedInputState } from './inputChronology.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 import {scoreboardStarterCoverage} from './scoreboardStarters.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
+import {availabilityProviderInputState} from './availabilityProviderScope.js';
 export { isConfirmedStarter } from './playerEvidence.js';
 
 const timestamp = value => { const at=quoteTimeEpoch(value); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
@@ -119,6 +120,14 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           workloadBasis: row.participationProjection?.workloadBasis || null, workloadUnitMismatch: row.participationProjection?.workloadUnitMismatch || false, availabilityObserved: hasAvailabilityObservation(row),
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           summaryRoleEvidence:row.summaryRoleEvidence||null,summaryStatEvidence:row.summaryStatEvidence||null,
+          availabilityProvider:row.availabilityProvider||null,availabilitySnapshotHash:row.availabilitySnapshotHash||null,
+          availabilityEventIdentity:row.availabilityEventIdentity?structuredClone(row.availabilityEventIdentity):null,
+          availabilityProviderSources:(row.availabilitySourceRows||[row]).filter(input=>input.availabilityProvider).map(input=>({
+            provider:input.availabilityProvider,snapshotHash:input.availabilitySnapshotHash||null,
+            eventIdentity:input.availabilityEventIdentity?structuredClone(input.availabilityEventIdentity):null,
+            sourceObservationAt:timestamp(input.sourceObservationAt),receivedAt:timestamp(input.updatedAt),expiresAt:timestamp(input.availabilityExpiresAt),
+            inputState:availabilityProviderInputState(input,game,now)||'current_bound_assertion',
+            availabilityObserved:hasAvailabilityObservation(input),status:input.status||'unknown',sourceReference:input.sourceReference||null})),
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },
       injuryCoverage: summary.injuryCoveredSides.includes(side) ? 'team_report_received_not_a_clean_bill_of_health' : 'unknown',
       confirmedStarters: lineup.filter(isConfirmedStarter).length,
