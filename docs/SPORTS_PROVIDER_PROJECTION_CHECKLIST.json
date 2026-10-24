@@ -1,0 +1,22 @@
+{
+  "phase": "preferred_provider_goalie_projection",
+  "status": "in_progress",
+  "modelVersion": "v6.0.64",
+  "implementationCommit": "2102a079bc776755edc6db210b258a3882ccf306",
+  "items": [
+    {"id":"baseline_and_capability_gap","status":"verified_complete","evidence":"1114 baseline passes; old source rejects explicit projection type"},
+    {"id":"projection_contract_and_conflicts","status":"verified_complete","evidence":"explicit non-confirmed role with unknown health; contradictory projections quarantined; confirmations retain priority and conflict rules"},
+    {"id":"injury_role_expiry_and_local_exporter","status":"verified_complete","evidence":"positionless injury preserves known goalie role; Out remains restrictive; JSON expiry and local-only input tests pass"},
+    {"id":"safe_setup_example_and_counts","status":"verified_complete","evidence":"additive schema/config; unusable placeholder template; assertion counts distinct from confirmation or forecast counts"},
+    {"id":"verification","status":"verified_complete","evidence":"12 new tests; focused88/full1126/postcommit63/syntax222; zero failures/skips"},
+    {"id":"original_trial_and_schedules","status":"verified_complete","evidence":"original frozen study and all three automation hashes unchanged; no provider polling for this code phase"},
+    {"id":"actual_injury_and_confirmed_goalie_feed","status":"pending","evidence":"no connected preferred provider or permitted new website collector; existing free summary failures remain"},
+    {"id":"independent_current_model_validation","status":"in_progress","evidence":"no v64 actual forward capture or adequate prediction-quality evidence; broader Sports requirements remain"}
+  ],
+  "botProviderRequests": 0,
+  "realForecastsIssued": 0,
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}

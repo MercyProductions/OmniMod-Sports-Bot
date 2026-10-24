@@ -26,7 +26,7 @@ A working provider-neutral **local JSON snapshot adapter** is available. It is n
 2. Have the provider's client/exporter replace every placeholder and refresh the file atomically. Set real explicit-zone `observedAt` and `expiresAt`; the maximum window is 30 minutes. The example's future timestamps/identities deliberately cannot be used unchanged.
 3. Set `AVAILABILITY_PROVIDER_SNAPSHOT_FILE` in the local `.env` to that file's absolute path. Leave it blank to disable. The adapter also works in local-only enrichment without network calls.
 4. Convert provider identifiers to verified native NHL game/player identities. `playerIdNamespace` must be `nhl`; raw ESPN or vendor IDs are not guessed into another namespace. The current adapter targets NHL availability.
-5. Use `kind:goalie_starter` only for an explicit event starter assertion from the provider. Do not convert season leaders, depth charts or projected goalies into confirmed records.
+5. Use `kind:goalie_starter` only for an explicit event starter assertion from the provider. Use `kind:goalie_projection` for an explicit event projection ([projection template](../examples/availability-provider.projection.example.json)); it keeps confirmation false and health unknown. Do not convert season leaders or depth charts into event starter records.
 6. Use `kind:injury` with one of `out`, `injured_reserve`, `doubtful`, `questionable`, `day_to_day`, `probable`, `available`. An explicit provider status is an assertion, not independent medical verification. These statuses use the existing heuristic availability scale; they are not calibrated clinical probabilities.
 
 The source reference must be public HTTPS without embedded credentials, query parameters or fragments. The root schema is `sports-player-availability-v1`; payloads are bounded to 5,000 records and files to 2 MiB. Event start, team side, namespace, pregame eligibility and observation/expiration clocks are checked. Malformed files yield a sanitized unavailable result without echoing private contents.
@@ -60,3 +60,7 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 ## Specialist consumption
 
 [Development v6.0.58](SPORTS_SPECIALIST_HEALTH_EVIDENCE.md) repairs the direct sport-model health path as well as primary scoring: selected current restrictions cap stored workload, unknown role priors do not provide medical evidence, and per-role missingness is frozen in the journal. This does not add an unavailable injury feed or convert goalie season candidates into event starters. Full1,031 tests pass; current-version predictive improvement remains unverified.
+
+## Explicit provider projections
+
+[Development v6.0.64](SPORTS_PROVIDER_GOALIE_PROJECTIONS.md) adds a separate projection assertion, conflict diagnostics and accepted-observation counts, and preserves same-player goalie role metadata during injury reconciliation. Existing identity/chronology/expiry/uncertainty policies remain. Twelve new cases/full1,126 pass; actual preferred-provider data remains unconnected and missing injury/confirmation coverage is not solved by an adapter.
