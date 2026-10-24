@@ -13,7 +13,7 @@
     {"item": "Update existing future Sports schedule while preserving other schedules", "status": "verified_complete", "evidence": "Only future schedule name/prompt/update timestamp changed; cadence/status/destination and three other automation files unchanged"},
     {"item": "Run full software and secret checks", "status": "verified_complete", "evidence": "1292 full / 79 focused and postcommit / 243 syntax; zero failed/skipped; configured secrets and Gitleaks clean"},
     {"item": "Complete 75-game/eight-date/14-day exact-candidate forward evidence", "status": "pending", "evidence": "Window November 8–22; zero new trial forecasts/outcomes at installation; no promotion"},
-    {"item": "Recover genuine permitted injury and confirmed-goalie coverage", "status": "pending", "evidence": "Existing source/access/mapping gaps persist; optional provider unconnected"},
+    {"item": "Recover genuine permitted injury and confirmed-goalie coverage", "status": "blocked", "evidence": "17:59UTC audit:72 pregame landing responses/seven events, including PRE, no explicit injury/starter assertion; existing source/access/mapping gaps persist and optional provider unconnected. No access-control bypass or invented data"},
     {"item": "Complete all-league accuracy/calibration, original-price/cost and operational requirements", "status": "pending", "evidence": "This single research registration does not complete the full Sports assignment"},
     {"item": "Complete full Sports before queued full Crypto and Stocks", "status": "pending", "evidence": "Original expanded scope preserved"}
   ],

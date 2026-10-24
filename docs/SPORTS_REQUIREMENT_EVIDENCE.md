@@ -6,6 +6,8 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current-candidate trial registration - October 24, 2026
 
+A subsequent [17:59 UTC source-capability inspection](SPORTS_VALIDATION_READINESS.md) verified all 115 original provider blobs and the installed 121-file current-candidate family without provider requests. Seventy-two pregame landing responses span seven distinct events, including `PRE`, but contain no explicit injury/starter assertion. All four saved automation files remain active/unchanged in this follow-up. Actual independent outcomes and permitted medical/starter observations remain external requirements; they are not replaced by more tests, repeated captures or another strategy edit. Full Sports completion and the Crypto→Stocks queue remain pending.
+
 [Guarded pre-start supersession](SPORTS_PRETRIAL_SUPERSESSION.md) now preregisters exact source 4b2736b/v69 for November 8-22. The unused v67 plan/artifact/archive remain retained as superseded; original v52 continues. Active periods, 75-game/eight-date/14-day and approval requirements remain unchanged. Twenty new cases pass; 79 focused/postcommit, 1,292 full and 243 syntax files. Actual 121-file family/prestart/frozen-worker checks pass with zero provider calls, after a private installer schema-label error was preserved and repaired without re-registration. Only the future Sports schedule name/prompt/update time changed; original Sports, final-only and Stocks schedule files stayed identical. This closes the current-candidate registration gap, while trial outcomes, medical inputs, broad model/calibration/value and operational evidence remain unfinished.
 
 ## Actual readiness follow-up - October 24, 2026

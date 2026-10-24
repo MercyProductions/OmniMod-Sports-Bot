@@ -1,5 +1,7 @@
 # Goalie context, injury missingness and optional provider input
 
+**Current source-capability check, October 24, 17:59 UTC:** the original frozen trial now contains 72 successful pregame landing responses across seven distinct native events, including one event's `PRE` response. None has an explicit injury, scratch or event-starter assertion. All 115 archived provider blobs passed content-address checks. This extends the initial sample below; repeated season rows are not independent observations or confirmations. The optional exporter remains unconnected. See the [current readiness evidence](SPORTS_VALIDATION_READINESS.md) for exact collection, source-budget and forward-validation limits. No new provider request or recovered clinical input occurred in this follow-up.
+
 ## Source facts and what is working
 
 The existing free official NHL pregame landing feed provides goalie season leaders and samples, not an event starting-goalie confirmation. A live sample for native event `2026020168`, fetched at **2026-10-24T03:55:12.465Z**, contained two goalie candidates per side. The pregame boxscore had no player-by-game goalie entries. The existing ESPN NHL injury endpoint returned **HTTP 403** through the normal bot client.
