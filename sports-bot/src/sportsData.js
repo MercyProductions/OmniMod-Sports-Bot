@@ -892,7 +892,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         playByPlayGames: automatic.playByPlayGames || 0,
         officialProfileMatches: automatic.officialProfileMatches || 0,
         historyLeagues: automatic.historyLeagues,
-        summaryGames: automatic.summaryGames
+        summaryGames: automatic.summaryGames,
+        summaryCoverage:automatic.summaryCoverage||null
       },
       externalCalls: scoreboard.externalCalls + automatic.externalCalls + odds.externalCalls + advancedDatasets.externalCalls
     },

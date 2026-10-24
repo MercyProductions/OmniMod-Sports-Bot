@@ -66,7 +66,8 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
     const issuable = forecastIssuanceEvidence(prediction||{}, game||{}, rebuilt, ended).recordEligibility === 'observed_pregame';
     const journalBlocked = blockedGameIds.includes(String(row.gameId))||blockedEventKeys.includes(key);
     const cacheBlocked = cacheBlockedEventKeys.includes(key);
-    const valid = !cacheBlocked && !journalBlocked && game?.statusKey === 'scheduled' && start !== null && ended < start
+    const summaryConflict=game?.autoEnrichment?.sourceIdentity?.status==='conflict'||game?.summaryIdentity?.sourceIdentity?.status==='conflict';
+    const valid = !summaryConflict&&!cacheBlocked && !journalBlocked && game?.statusKey === 'scheduled' && start !== null && ended < start
       && ['network', 'revalidated'].includes(game?.autoEnrichment?.cacheState)
       && fetched !== null && fetched >= began && fetched <= ended
       && prediction?.predictionMode === 'pregame' && generated !== null && generated >= fetched && generated <= ended && issuable;
@@ -81,7 +82,8 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
       ...(prediction?.predictionMode !== 'pregame' || generated === null || fetched === null || generated < fetched || generated > ended ? ['pregame_forecast_not_verified'] : []),
       ...(!issuable ? ['forecast_issuance_not_verified'] : []),
       ...(journalBlocked ? ['journal_issuance_not_verified'] : []),
-      ...(cacheBlocked ? ['cache_event_changed_during_refresh'] : [])
+      ...(cacheBlocked ? ['cache_event_changed_during_refresh'] : []),
+      ...(summaryConflict?['summary_source_identity_conflict']:[])
     ] });
   }
   const previousGameKeys=new Set((previous.games||[]).map(game=>scopedEventKey(eventReference(game))));

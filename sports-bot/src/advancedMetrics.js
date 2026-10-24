@@ -3,6 +3,7 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { buildPlayByPlayEvidence } from './playByPlay.js';
 import { attachParticipationProjections, samePlayerIdentity, summarizeTeamParticipation, roleParticipationPrior, basketballWorkloadBasis } from './participationProjection.js';
+import {inspectSummarySourceIdentity,summaryTeamBinding} from './summarySourceIdentity.js';
 import { extractEventEnvironment } from './sourceIntelligence.js';
 import { finiteNumber, hasAvailabilityObservation, validScore, measuredCalculation } from './dataValidation.js';
 import { reconcilePlayerEvidence } from './playerEvidence.js';
@@ -218,18 +219,26 @@ function mergePlayerRow(map, row) {
 }
 
 export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
+  const sourceIdentity=inspectSummarySourceIdentity(summary,result,{leagueRoute:sourceMeta.requestedLeagueRoute});
+  if(sourceIdentity.status==='conflict')return null;
   const profile = sportProfile(result);
   const teams = {};
-  for (const row of summary?.boxscore?.teams || []) {
-    const name = row.team?.displayName || row.team?.name || '';
+  for (const row of Array.isArray(summary?.boxscore?.teams)?summary.boxscore.teams:[]) {
+    if(!row||typeof row!=='object')continue;
+    const binding=summaryTeamBinding(row.team,result);if(binding.reason)continue;
+    const name = binding.teamName || '';
     if (name) teams[normalizeEntityName(name)] = { name, stats: statMap(row.statistics || []) };
   }
 
   const playerMap = new Map();
-  for (const teamGroup of summary?.boxscore?.players || []) {
-    const team = teamGroup.team?.displayName || teamGroup.team?.name || '';
-    for (const group of teamGroup.statistics || []) {
-      for (const athleteRow of group.athletes || []) {
+  for (const teamGroup of Array.isArray(summary?.boxscore?.players)?summary.boxscore.players:[]) {
+    if(!teamGroup||typeof teamGroup!=='object')continue;
+    const binding=summaryTeamBinding(teamGroup.team,result);if(binding.reason)continue;
+    const team = binding.teamName || '';
+    for (const group of Array.isArray(teamGroup.statistics)?teamGroup.statistics:[]) {
+      if(!group||typeof group!=='object')continue;
+      for (const athleteRow of Array.isArray(group.athletes)?group.athletes:[]) {
+        if(!athleteRow||typeof athleteRow!=='object')continue;
         const athlete = athleteRow.athlete || {};
         const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
         if (!team || !name) continue;
@@ -247,9 +256,12 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
 
   // Soccer and baseball commonly expose the authoritative lineup in rosters
   // rather than boxscore.players. Merge it without duplicating athletes.
-  for (const group of summary?.rosters || []) {
-    const team = group.team?.displayName || group.team?.name || '';
-    for (const rosterRow of group.roster || []) {
+  for (const group of Array.isArray(summary?.rosters)?summary.rosters:[]) {
+    if(!group||typeof group!=='object')continue;
+    const binding=summaryTeamBinding(group.team,result);if(binding.reason)continue;
+    const team = binding.teamName || '';
+    for (const rosterRow of Array.isArray(group.roster)?group.roster:[]) {
+      if(!rosterRow||typeof rosterRow!=='object')continue;
       const athlete = rosterRow.athlete || {};
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (!team || !name) continue;
@@ -298,7 +310,7 @@ export function parseHistoricalEventSummary(summary, result, sourceMeta = {}) {
     playByPlay,
     officials: environment.officials,
     environment,
-    sourceMeta: { fetchedAt: sourceMeta.fetchedAt || '', cacheState: sourceMeta.cacheState || 'unknown' }
+    sourceMeta: { fetchedAt: sourceMeta.fetchedAt || '', cacheState: sourceMeta.cacheState || 'unknown',sourceIdentity }
   };
 }
 

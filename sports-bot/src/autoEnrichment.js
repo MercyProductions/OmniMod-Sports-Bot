@@ -13,21 +13,15 @@ import {enrichNhlGoalieResearch} from './nhlGoalieResearch.js';
 import {collectNativeNhlHistory,mergeNativeNhlHistory} from './nativeNhlHistory.js';
 import { localDateKey } from './time.js';
 import {applyScoreboardStarters} from './scoreboardStarters.js';
-
-/** Official/native IDs are not ESPN event IDs; only explicit or ESPN-origin numeric identities route there. */
-export function espnSummaryEventId(row = {}) {
-  if(row.espnEventId !== undefined)return /^\d+$/.test(String(row.espnEventId)) ? String(row.espnEventId) : null;
-  const id=String(row.id || '');
-  const espnOrigin=row.sourceMeta?.provider==='ESPN'||/ESPN/i.test(row.source || '')||id.startsWith('espn:');
-  const candidate=id.replace(/^espn:/,'');
-  return espnOrigin&&/^\d+$/.test(candidate)?candidate:null;
-}
+import {espnSummaryEventId,inspectSummarySourceIdentity,summaryTeamBinding} from './summarySourceIdentity.js';
+export {espnSummaryEventId} from './summarySourceIdentity.js';
 
 const DAY_MS = 86_400_000;
 
 function compactEspnSummary(payload = {}) {
   return {
-    header: payload.header ? { competitions: payload.header.competitions || [] } : undefined,
+    header: payload.header&&typeof payload.header==='object'&&!Array.isArray(payload.header)
+      ? {id:payload.header.id,date:payload.header.date,league:payload.header.league,season:payload.header.season,competitions:payload.header.competitions}:payload.header,
     boxscore: payload.boxscore ? { teams: payload.boxscore.teams || [], players: payload.boxscore.players || [] } : undefined,
     rosters: payload.rosters || [],
     injuries: payload.injuries || [],
@@ -458,13 +452,22 @@ function probableForm(game, role, stats) {
 
 export function parseEspnSummary(summary, game, sourceMeta = {}) {
   const fetchedAt = sourceMeta.fetchedAt || new Date().toISOString();
+  const sourceIdentity=inspectSummarySourceIdentity(summary,game,{leagueRoute:sourceMeta.requestedLeagueRoute});
+  if(sourceIdentity.status==='conflict')return {players:[],lineups:[],context:null,environment:null,odds:null,
+    meta:{fetchedAt,cacheState:sourceMeta.cacheState||'unknown',sourceIdentity,injuryGroupsPresent:false,injuryTeams:[],injuryCount:0,rosterGroups:0,lineupPlayers:0,probableStarters:0}};
+  const rejectedGroups={},bind=team=>{const binding=summaryTeamBinding(team,game);if(binding.reason)rejectedGroups[binding.reason]=(rejectedGroups[binding.reason]||0)+1;return binding;};
+  const injuryTeams=[];let rosterGroups=0;
   const starters = new Map();
   const lineups = [];
-  for (const group of summary?.rosters || []) {
+  for (const group of Array.isArray(summary?.rosters)?summary.rosters:[]) {
+    if(!group||typeof group!=='object'||!Array.isArray(group.roster)){rejectedGroups.invalid_roster_group=(rejectedGroups.invalid_roster_group||0)+1;continue;}
+    const binding=bind(group.team);if(binding.reason)continue;
+    if(binding.teamName)rosterGroups++;
     for (const row of group.roster || []) {
+      if(!row||typeof row!=='object')continue;
       const athleteId = String(row.athlete?.id || '');
       const athlete = row.athlete || {};
-      const team = group.team?.displayName || group.team?.name || '';
+      const team = binding.teamName || '';
       if (athleteId && team) starters.set(`${normalizeEntityName(team)}__${athleteId}`, row.starter === true);
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (team && name) lineups.push({
@@ -486,8 +489,11 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
   const playerMap = new Map();
   const competition = summary?.header?.competitions?.[0];
   for (const competitor of competition?.competitors || []) {
-    const teamName = competitor.team?.displayName || competitor.team?.name || '';
-    for (const probable of competitor.probables || []) {
+    if(!competitor||typeof competitor!=='object')continue;
+    const binding=bind(competitor.team);if(binding.reason)continue;
+    const teamName = binding.teamName || '';
+    for (const probable of Array.isArray(competitor.probables)?competitor.probables:[]) {
+      if(!probable||typeof probable!=='object')continue;
       const athlete = probable.athlete || {};
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (!teamName || !name) continue;
@@ -521,9 +527,13 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
     }
   }
 
-  for (const group of summary?.injuries || []) {
-    const teamName = group.team?.displayName || group.team?.name || '';
+  for (const group of Array.isArray(summary?.injuries)?summary.injuries:[]) {
+    if(!group||typeof group!=='object'||!Array.isArray(group.injuries)){rejectedGroups.invalid_injury_group=(rejectedGroups.invalid_injury_group||0)+1;continue;}
+    const binding=bind(group.team);if(binding.reason)continue;
+    const teamName = binding.teamName || '';
+    if(Array.isArray(group.injuries)&&teamName)injuryTeams.push(teamName);
     for (const injury of group.injuries || []) {
+      if(!injury||typeof injury!=='object')continue;
       const athlete = injury.athlete || {};
       const name = athlete.displayName || athlete.fullName || athlete.shortName || '';
       if (!name || !teamName) continue;
@@ -566,12 +576,12 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
     odds: parseFreeMarket(summary, game, fetchedAt),
     meta: {
       fetchedAt,
+      sourceIdentity,rejectedGroups,
       cacheState: sourceMeta.cacheState || 'unknown',
       injuryGroupsPresent: Array.isArray(summary?.injuries),
-      injuryTeams: (summary?.injuries || []).filter(group => Array.isArray(group.injuries))
-        .map(group => group.team?.displayName || group.team?.name || '').filter(Boolean),
+      injuryTeams:[...new Set(injuryTeams)],
       injuryCount: players.filter((row) => /injury report/i.test(row.source)).length,
-      rosterGroups: summary?.rosters?.length || 0,
+      rosterGroups,reportedRosterGroups:Array.isArray(summary?.rosters)?summary.rosters.length:null,
       lineupPlayers: lineups.length,
       probableStarters: players.filter((row) => /probable starter/i.test(row.source)).length,
       pickcenterPresent: Array.isArray(summary?.pickcenter) && summary.pickcenter.length > 0,
@@ -679,6 +689,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       externalCalls: 0,
       historyLeagues: 0,
       summaryGames: 0,
+      summaryCoverage:{mode:'network_skipped',gamesConsidered:games.length,eligible:null,mappable:null,selected:0,attempted:0,accepted:0,providerCalls:0,providerFailures:0,identityConflicts:0,identitySkipped:null,capOmissions:null,cacheStates:{},rejectedPlayerGroups:{}},
       historicalBoxscores: stored.boxscores.length,
       learnedInjuries: playerApplication.learnedInjuries,
       confirmedLineups: playerApplication.confirmedLineups,
@@ -747,11 +758,17 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
   const summaryCandidates = summaryEligible.filter(game=>espnSummaryEventId(game))
     .sort((a, b) => Number(forcedSummaryIds.has(String(b.id))) - Number(forcedSummaryIds.has(String(a.id))) || Number(b.statusKey === 'scheduled') - Number(a.statusKey === 'scheduled') || (leagueMap.get(b.leagueKey)?.priority || 0) - (leagueMap.get(a.leagueKey)?.priority || 0) || new Date(a.startTime) - new Date(b.startTime))
     .slice(0, Math.max(config.autoSummaryMaxGames, forcedSummaryIds.size));
+  const summaryCoverage={mode:'enabled',gamesConsidered:games.length,eligible:summaryEligible.length,mappable:summaryEligible.length-identitySkipped.length,
+    selected:summaryCandidates.length,attempted:0,accepted:0,providerCalls:0,providerFailures:0,identityConflicts:0,identitySkipped:identitySkipped.length,
+    capOmissions:summaryEligible.length-identitySkipped.length-summaryCandidates.length,cacheStates:{},rejectedPlayerGroups:{}};
+  const selectedSummaryGames=new Set(summaryCandidates);
+  for(const game of summaryEligible.filter(game=>espnSummaryEventId(game)&&!selectedSummaryGames.has(game)))game.summaryIdentity={provider:'ESPN',status:'not_selected',reason:'request_cap_omission',recordedAt:new Date().toISOString()};
   await mapWithConcurrency(summaryCandidates, 4, async (game) => {
+    summaryCoverage.attempted++;
     const league = leagueMap.get(game.leagueKey);
     const url = `https://site.api.espn.com/apis/site/v2/sports/${encodeURIComponent(league.sport)}/${encodeURIComponent(league.league)}/summary?event=${encodeURIComponent(espnSummaryEventId(game))}`;
     const result = await cachedFetchJson(url, {
-      namespace: `espn-summary-${league.key}`,
+      namespace: `espn-summary-v2-${league.key}`,
       ttlMs: config.autoSummaryCacheMinutes * 60_000,
       staleMs: 24 * 60 * 60_000,
       timeoutMs: 15_000,
@@ -759,11 +776,19 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       force: forcedSummaryIds.has(String(game.id))
     });
     if (result.cacheState === 'network' || result.cacheState === 'revalidated') externalCalls += 1;
+    if(['network','revalidated'].includes(result.cacheState))summaryCoverage.providerCalls++;
+    const cacheState=result.cacheState||'unknown';summaryCoverage.cacheStates[cacheState]=(summaryCoverage.cacheStates[cacheState]||0)+1;
     if (!result.ok || !result.json) {
+      summaryCoverage.providerFailures++;
+      game.summaryIdentity={provider:'ESPN',status:'unavailable',reason:'provider_request_failed',recordedAt:new Date().toISOString(),httpStatus:result.status??null,cacheState};
       diagnostics.push(`${league.label} summary ${game.id}: unavailable (${result.error || 'no data'}).`);
       return;
     }
-    const parsed = parseEspnSummary(result.json, game, result);
+    const parsed = parseEspnSummary(result.json, game, {...result,requestedLeagueRoute:league.league});
+    game.summaryIdentity={provider:'ESPN',status:parsed.meta.sourceIdentity.status==='conflict'?'rejected':parsed.meta.sourceIdentity.status,sourceIdentity:parsed.meta.sourceIdentity,fetchedAt:result.fetchedAt};
+    if(parsed.meta.sourceIdentity.status==='conflict'){summaryCoverage.identityConflicts++;diagnostics.push(`${league.label} summary ${game.id}: source identity conflict (${parsed.meta.sourceIdentity.reasons.join(', ')}); no summary inputs selected.`);return;}
+    summaryCoverage.accepted++;
+    for(const [reason,count]of Object.entries(parsed.meta.rejectedGroups||{}))summaryCoverage.rejectedPlayerGroups[reason]=(summaryCoverage.rejectedPlayerGroups[reason]||0)+count;
     game.autoPlayers = parsed.players;
     game.autoLineups = parsed.lineups;
     game.autoContext = parsed.context;
@@ -774,6 +799,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       else if (forcedSummaryIds.has(String(game.id))) game.lateFreeOdds = parsed.odds;
     }
   });
+  if(summaryCoverage.eligible)diagnostics.push(`Summary coverage: ${summaryCoverage.accepted}/${summaryCoverage.selected} selected response(s) accepted; ${summaryCoverage.providerFailures} provider failure(s), ${summaryCoverage.identityConflicts} identity conflict(s), ${summaryCoverage.capOmissions} omitted by cap, ${summaryCoverage.identitySkipped} mapping(s) unverified. Accepted response does not certify complete injury/lineup coverage.`);
 
   const scoreboardStarters=applyScoreboardStarters(games);
   if(scoreboardStarters.games||Object.keys(scoreboardStarters.rejections).length)diagnostics.push(`Scoreboard starter projections: ${scoreboardStarters.projected} retained, ${scoreboardStarters.skipped} superseded; rejections ${JSON.stringify(scoreboardStarters.rejections)}. Projected only; health and confirmation unknown.`);
@@ -804,7 +830,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     const eventId = espnSummaryEventId(history);
     const url = `https://site.api.espn.com/apis/site/v2/sports/${encodeURIComponent(league.sport)}/${encodeURIComponent(league.league)}/summary?event=${encodeURIComponent(eventId)}`;
     const result = await cachedFetchJson(url, {
-      namespace: `espn-historical-box-${league.key}`,
+      namespace: `espn-historical-box-v2-${league.key}`,
       ttlMs: config.autoBoxscoreCacheDays * DAY_MS,
       staleMs: 365 * DAY_MS,
       timeoutMs: 18_000,
@@ -816,7 +842,8 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       historicalFailures += 1;
       return;
     }
-    historicalSamples.push(parseHistoricalEventSummary(result.json, history, result));
+    const sample=parseHistoricalEventSummary(result.json,history,{...result,requestedLeagueRoute:league.league});
+    if(sample)historicalSamples.push(sample);else{historicalFailures++;diagnostics.push(`${league.label} historical summary ${history.id}: source identity conflict; no training sample selected.`);}
   });
   if (historicalCandidates.length) diagnostics.push(`Historical box scores: parsed ${historicalSamples.length}/${historicalCandidates.length} selected final(s)${historicalFailures ? `, ${historicalFailures} unavailable` : ''}.`);
 
@@ -851,6 +878,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     externalCalls,
     historyLeagues: activeLeagues.length,
     summaryGames: summaryCandidates.length,
+    summaryCoverage,
     summaryIdentitySkipped: identitySkipped.length,
     historicalBoxscores: historicalSamples.length,
     learnedInjuries: playerApplication.learnedInjuries,

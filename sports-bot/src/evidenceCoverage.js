@@ -23,10 +23,12 @@ export function summaryEvidence(game = {}, now = Date.now()) {
   const ageMinutes = fetchedAt ? (now - Date.parse(fetchedAt)) / 60000 : null;
   const receiptFresh = ageMinutes !== null && ageMinutes >= 0 && ageMinutes <= 15
     && ['network', 'revalidated', 'fresh'].includes(meta.cacheState);
-  const usable = !['invalid_observation_time','after_information_cutoff'].includes(clocks.observationState);
+  const identityObservationState=observedInputState(game.summaryIdentity,now);
+  const sourceIdentity=meta.sourceIdentity||(!['invalid_observation_time','after_information_cutoff'].includes(identityObservationState)?game.summaryIdentity?.sourceIdentity:null)||null;
+  const usable = sourceIdentity?.status!=='conflict'&&!['invalid_observation_time','after_information_cutoff'].includes(clocks.observationState);
   const reportedInjurySides=['away','home'].filter(side=>(meta.injuryTeams||[]).some(team=>matches(game[side],team)));
   const coveredSides = usable&&receiptFresh?reportedInjurySides:[];
-  return { fetchedAt, ageMinutes, receiptFresh, ...clocks, cacheState: meta.cacheState || 'unknown',
+  return { fetchedAt, ageMinutes, receiptFresh,usableForInference:usable,sourceIdentity,identityObservationState, ...clocks, cacheState: meta.cacheState || 'unknown',
     injuryCoveredSides: coveredSides,
     reportedInjurySides,
     injuryReceiptStatus:usable&&receiptFresh?'current_receipt_not_publication_verification':'unusable_or_stale_receipt',
@@ -57,8 +59,12 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     if (clocks.nativeObservationState !== 'observed_by_cutoff') missing.push(`${key}:native_observation_${clocks.nativeObservationState}`);
   }
   if (!summary.receiptFresh) missing.push('summary:fresh_receipt_not_verified');
-  if (!game.autoEnrichment && summary.providerMapping.status === 'unavailable') missing.push(summary.providerMapping.reason === 'provider_event_mapping_not_verified'
-    ? 'summary:provider_event_mapping_not_verified' : 'summary:provider_mapping_unavailable');
+  if(summary.sourceIdentity?.status==='conflict')missing.push('summary:source_identity_conflict');
+  if(!game.autoEnrichment){
+    const reasons={provider_event_mapping_not_verified:'summary:provider_event_mapping_not_verified',provider_request_failed:'summary:provider_request_failed',request_cap_omission:'summary:request_cap_omission'};
+    if(reasons[summary.providerMapping.reason])missing.push(reasons[summary.providerMapping.reason]);
+    else if(summary.providerMapping.status==='unavailable')missing.push('summary:provider_mapping_unavailable');
+  }
   const advancedObservationState = observedInputState(game.advancedDataset,now);
   if (game.advancedDataset && advancedObservationState !== 'observed_by_cutoff') missing.push(`advanced_dataset:observation_${advancedObservationState}`);
   const advancedReceipts = Array.isArray(game.advancedDataset?.sourceReceiptTimes) ? game.advancedDataset.sourceReceiptTimes.map(timestamp) : [];

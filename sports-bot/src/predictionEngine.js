@@ -396,10 +396,10 @@ function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
   if (game.autoHistory?.truncated) score -= 10;
   if (game.autoEnrichment) {
     const summary = summaryEvidence(game, now);
-    if (summary.receiptFresh) score += 5;
+    if (summary.receiptFresh&&summary.usableForInference) score += 5;
     if (summary.receiptFresh && summary.injuryCoveredSides.length === 2) score += 5;
     else if (summary.receiptFresh && summary.injuryCoveredSides.length === 1) score += 2;
-    if (game.autoEnrichment.rosterGroups > 0) score += 3;
+    if (summary.usableForInference&&game.autoEnrichment.rosterGroups > 0) score += 3;
     if (game.autoEnrichment.cacheState === 'stale') score -= 5;
   }
   const officialProviders = game.sourceCorroboration?.providers?.length || 0;
