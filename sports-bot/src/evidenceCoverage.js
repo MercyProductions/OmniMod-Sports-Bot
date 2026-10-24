@@ -2,20 +2,28 @@ import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { ADVANCED_PROVENANCE_METADATA_FIELDS } from './advancedProvenance.js';
 import { finiteNumber } from './dataValidation.js';
+import { quoteTimeEpoch } from './oddsPricing.js';
+import { observedInputState } from './inputChronology.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
 export { isConfirmedStarter } from './playerEvidence.js';
 
-const timestamp = value => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
+const timestamp = value => { const at=quoteTimeEpoch(value); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
+const observationClocks = (meta, now) => ({
+  observationState: observedInputState(meta,now),
+  nativeObservationState: observedInputState({sourceObservationAt:meta?.sourceObservationAt},now)
+});
 const matches = (team, name) => [team?.name, team?.abbr, ...(team?.aliases || [])]
   .filter(Boolean).some(value => normalizeEntityName(value) === normalizeEntityName(name));
 
 export function summaryEvidence(game = {}, now = Date.now()) {
-  const meta = game.autoEnrichment || {}, fetchedAt = timestamp(meta.fetchedAt);
+  if (!Number.isFinite(now)) throw new Error('Summary evidence needs a valid information cutoff');
+  const meta = game.autoEnrichment || {}, fetchedAt = timestamp(meta.fetchedAt), clocks = observationClocks(meta,now);
   const ageMinutes = fetchedAt ? (now - Date.parse(fetchedAt)) / 60000 : null;
   const receiptFresh = ageMinutes !== null && ageMinutes >= 0 && ageMinutes <= 15
     && ['network', 'revalidated', 'fresh'].includes(meta.cacheState);
-  const coveredSides = ['away', 'home'].filter(side => (meta.injuryTeams || []).some(team => matches(game[side], team)));
-  return { fetchedAt, ageMinutes, receiptFresh, cacheState: meta.cacheState || 'unknown',
+  const usable = !['invalid_observation_time','after_information_cutoff'].includes(clocks.observationState);
+  const coveredSides = (usable ? ['away', 'home'] : []).filter(side => (meta.injuryTeams || []).some(team => matches(game[side], team)));
+  return { fetchedAt, ageMinutes, receiptFresh, ...clocks, cacheState: meta.cacheState || 'unknown',
     injuryCoveredSides: coveredSides,
     injuryCoverage: coveredSides.length === 2 ? 'reported_both_sides' : coveredSides.length ? 'reported_one_side' : 'unknown',
     sourceObservationAt: timestamp(meta.sourceObservationAt),
@@ -32,11 +40,16 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     const fetchedAt = timestamp(meta?.fetchedAt), at = fetchedAt ? Date.parse(fetchedAt) : null;
     const state = !meta ? 'missing' : at === null ? 'timestamp_unknown' : at > now ? 'future_receipt'
       : meta.cacheState === 'stale' ? 'stale_cache' : 'receipt_available';
-    sources[key] = { fetchedAt, state, cacheState: meta?.cacheState || 'unknown',
+    const clocks = observationClocks(meta,now);
+    sources[key] = { fetchedAt, state, ...clocks, cacheState: meta?.cacheState || 'unknown',
       sourceObservationAt: timestamp(meta?.sourceObservationAt), underlyingFreshnessVerified: false };
     if (state !== 'receipt_available') missing.push(`${key}:${state}`);
+    if (clocks.observationState !== 'observed_by_cutoff') missing.push(`${key}:observation_${clocks.observationState}`);
+    if (clocks.nativeObservationState !== 'observed_by_cutoff') missing.push(`${key}:native_observation_${clocks.nativeObservationState}`);
   }
   if (!summary.receiptFresh) missing.push('summary:fresh_receipt_not_verified');
+  const advancedObservationState = observedInputState(game.advancedDataset,now);
+  if (game.advancedDataset && advancedObservationState !== 'observed_by_cutoff') missing.push(`advanced_dataset:observation_${advancedObservationState}`);
   const advancedReceipts = Array.isArray(game.advancedDataset?.sourceReceiptTimes) ? game.advancedDataset.sourceReceiptTimes.map(timestamp) : [];
   if (game.advancedDataset && (!advancedReceipts.length || advancedReceipts.some(value => value === null))) missing.push('advanced_dataset:receipt_times_unknown');
   const advancedRefreshes = (game.advancedDataset?.sourceRefreshStatuses || []).map(row => {
@@ -105,14 +118,14 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     if (historyGames === null || historyGames < 8) missing.push(`${side}:thin_or_unknown_team_history`);
     if (criticalRole && sides[side].criticalStarterStatus !== 'confirmed_record_present') missing.push(`${side}:critical_starter_unconfirmed`);
   }
-  return { schema: 'sports-evidence-coverage-v1', gameId: String(game.id || ''), league: game.leagueKey || '',
+  return { schema: 'sports-evidence-coverage-v2', gameId: String(game.id || ''), league: game.leagueKey || '',
     cutoffAt: new Date(now).toISOString(), summary, sources, sides,
     sourceConflicts: (game.sourceCorroboration?.conflicts || []).length,
     sourceProviders: game.sourceCorroboration?.providers || [],
     venue: { neutral: typeof game.neutralSite === 'boolean' ? game.neutralSite : null,
       verification: 'provider_or_manual_assertion_not_independently_attested' },
     rosterTransitionRisk: finiteNumber(game.autoLineup?.rosterTransitionRisk),
-    advancedDatasetProvenance: { provider: game.advancedDataset?.provider || null,
+    advancedDatasetProvenance: { observationState: advancedObservationState, provider: game.advancedDataset?.provider || null,
       receiptPolicy: game.advancedDataset?.provenancePolicy || 'unknown_legacy', sourceReceiptTimes: advancedReceipts,
       sourceRequestKeys: game.advancedDataset?.sourceRequestKeys || [], requestedSourceKey: game.advancedDataset?.requestedSourceKey || null,
       sourceRefreshStatuses: advancedRefreshes, sourcePeriodEvidence,
