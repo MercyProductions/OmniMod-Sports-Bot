@@ -4,6 +4,10 @@ This is a current-state index for the Sports reliability assignment, not a compl
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
 
+## Current-candidate trial registration - October 24, 2026
+
+[Guarded pre-start supersession](SPORTS_PRETRIAL_SUPERSESSION.md) now preregisters exact source 4b2736b/v69 for November 8-22. The unused v67 plan/artifact/archive remain retained as superseded; original v52 continues. Active periods, 75-game/eight-date/14-day and approval requirements remain unchanged. Twenty new cases pass; 79 focused/postcommit, 1,292 full and 243 syntax files. Actual 121-file family/prestart/frozen-worker checks pass with zero provider calls, after a private installer schema-label error was preserved and repaired without re-registration. Only the future Sports schedule name/prompt/update time changed; original Sports, final-only and Stocks schedule files stayed identical. This closes the current-candidate registration gap, while trial outcomes, medical inputs, broad model/calibration/value and operational evidence remain unfinished.
+
 ## Actual readiness follow-up - October 24, 2026
 
 [Measured validation readiness](SPORTS_VALIDATION_READINESS.md) separates actual input failures from software checks: the frozen v69 capture has 12 NHL event-mapping gaps, six NBA/MLB summary-request failures, three cap omissions and no confirmed critical-role/current injury coverage. The eleventh checked original v52 run at 16:36UTC retains 12 games/one date/zero finals, 11 receipts/106 blobs and 117 cumulative requests. Current v69 diagnostics are not registered selection proof; neither frozen v52 nor future v67 silently approves newer source. Exact current-candidate registration, sufficient independent outcomes, real clinical/price inputs and operational verification remain required. No inference source changed in this audit; all four automation files remain unchanged.

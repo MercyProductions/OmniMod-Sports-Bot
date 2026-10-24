@@ -2,6 +2,8 @@
 
 The software checks are passing, but the complete Sports reliability objective is **not achieved**. The remaining gaps are measured input coverage, sufficient independent forward outcomes, exact candidate-selection evidence, realistic original-price research and operational verification. This checkpoint does not reduce those requirements to a test count or a small historical score comparison.
 
+**Later same-day update:** [Current-candidate registration](SPORTS_PRETRIAL_SUPERSESSION.md) retained the unused v67 plan as superseded and registered the exact v69 source for the same November window. The earlier counts and registration gap below describe their recorded checkpoint. Independent trial results, genuine medical inputs, realistic price research and operational proof are still pending.
+
 ## What the frozen input evidence actually contains
 
 A read-only audit verified the SHA256 of the v69 engineering capture from 15:27:31.152–15:27:33.330Z, source `746fc0c903999a85cf6bdffda3946590cebf6f45`. These observations are not forecasts issued by a later source bundle. The audit used the existing saved-capture CLI and made no provider request or new forecast.

@@ -1,0 +1,25 @@
+{
+  "phase": "current-candidate-pretrial-registration",
+  "status": "in_progress",
+  "sourceCommit": "4b2736be0cb96b2dc3239b33f2f02fdd727d53b0",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.69",
+  "planId": "nhl-hybrid-daily-v6069-20261108",
+  "planHash": "1d25128c9dfc752d5c032cca0d8dc0b77d32818fba592e871499a57129c0e735",
+  "items": [
+    {"item": "Guard pre-start replacement using real store evidence and existing owner/selection locks", "status": "verified_complete", "evidence": "Twenty new cases, including real process contention and partial commit preservation"},
+    {"item": "Preserve original v52 and retained v67 plans, artifacts, archives and original forecasts", "status": "verified_complete", "evidence": "Actual before/after hashes and original journal prefix retained"},
+    {"item": "Freeze and preregister the exact current fixed candidate", "status": "verified_complete", "evidence": "One real transition at 2026-10-24T17:19:25.589Z; 121-file source/worker/family inspection"},
+    {"item": "Verify pre-start dispatch and frozen worker without provider calls", "status": "verified_complete", "evidence": "Family, awaiting-start and worker preflight pass after retained installer metadata repair; zero requests/orders/Discord"},
+    {"item": "Update existing future Sports schedule while preserving other schedules", "status": "verified_complete", "evidence": "Only future schedule name/prompt/update timestamp changed; cadence/status/destination and three other automation files unchanged"},
+    {"item": "Run full software and secret checks", "status": "verified_complete", "evidence": "1292 full / 79 focused and postcommit / 243 syntax; zero failed/skipped; configured secrets and Gitleaks clean"},
+    {"item": "Complete 75-game/eight-date/14-day exact-candidate forward evidence", "status": "pending", "evidence": "Window November 8–22; zero new trial forecasts/outcomes at installation; no promotion"},
+    {"item": "Recover genuine permitted injury and confirmed-goalie coverage", "status": "pending", "evidence": "Existing source/access/mapping gaps persist; optional provider unconnected"},
+    {"item": "Complete all-league accuracy/calibration, original-price/cost and operational requirements", "status": "pending", "evidence": "This single research registration does not complete the full Sports assignment"},
+    {"item": "Complete full Sports before queued full Crypto and Stocks", "status": "pending", "evidence": "Original expanded scope preserved"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "predictiveImprovementEstablished": false
+}
