@@ -1,5 +1,6 @@
 import {nativeNhlRecordEvidence} from './teamRecordEvidence.js';
 import {capturedEventTime} from './capturedEventTime.js';
+import {parseScoreboardStarterEvidence} from './scoreboardStarters.js';
 import {cdnWindowEvidence,scoreboardCoverage} from './scoreboardWindow.js';
 import {selectLineMarkets} from './lineMarketIntegrity.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
@@ -158,7 +159,7 @@ export function parseEspnEvent(event, league, sourceMeta = {}) {
   const status = parseStatus(event.status ?? competition.status);
   const away = parseTeam(competition.competitors, 'away');
   const home = parseTeam(competition.competitors, 'home');
-  return {
+  const game = {
     id: String(event.id || competition.id || `${league.key}-${away.abbr}-${home.abbr}-${startTime}`),
     league: league.label,
     leagueKey: league.key,
@@ -190,6 +191,9 @@ export function parseEspnEvent(event, league, sourceMeta = {}) {
     source: 'ESPN public scoreboard',
     sourceMeta: { provider: 'ESPN', ...sourceMeta }
   };
+  const starters=parseScoreboardStarterEvidence(event,game);
+  if(starters)game.scoreboardStarterEvidence=starters;
+  return game;
 }
 
 export function scoreboardEventsFromCdn(payload, league = null) {

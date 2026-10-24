@@ -5,6 +5,7 @@ import { finiteNumber,hasAvailabilityObservation } from './dataValidation.js';
 import { quoteTimeEpoch } from './oddsPricing.js';
 import { observedInputState } from './inputChronology.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
+import {scoreboardStarterCoverage} from './scoreboardStarters.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
 export { isConfirmedStarter } from './playerEvidence.js';
 
@@ -159,7 +160,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       missingOrInvalidReceipts: advancedReceipts.filter(value => value === null).length,
       nativePublicationVerified: false },
     advancedStatsAvailability: 'enumerated_player_stats_only_not_a_league_completeness_attestation',
-    missing, completenessVerified: false };
+    scoreboardStarters:scoreboardStarterCoverage(game,now),missing, completenessVerified: false };
 }
 
 /** Read-only report over frozen issued inputs; no provider fetching or reconstruction. */

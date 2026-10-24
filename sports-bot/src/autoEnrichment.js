@@ -12,6 +12,7 @@ import {applyAvailabilitySnapshotFile} from './availabilityProvider.js';
 import {enrichNhlGoalieResearch} from './nhlGoalieResearch.js';
 import {collectNativeNhlHistory,mergeNativeNhlHistory} from './nativeNhlHistory.js';
 import { localDateKey } from './time.js';
+import {applyScoreboardStarters} from './scoreboardStarters.js';
 
 /** Official/native IDs are not ESPN event IDs; only explicit or ESPN-origin numeric identities route there. */
 export function espnSummaryEventId(row = {}) {
@@ -774,6 +775,8 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     }
   });
 
+  const scoreboardStarters=applyScoreboardStarters(games);
+  if(scoreboardStarters.games||Object.keys(scoreboardStarters.rejections).length)diagnostics.push(`Scoreboard starter projections: ${scoreboardStarters.projected} retained, ${scoreboardStarters.skipped} superseded; rejections ${JSON.stringify(scoreboardStarters.rejections)}. Projected only; health and confirmation unknown.`);
   const goalieContext=await enrichNhlGoalieResearch(games,{maxGames:config.nhlGoalieContextMaxGames,forcedIds:options.targetedPregame?forcedSummaryIds:null});
   externalCalls+=goalieContext.externalCalls;
   if(goalieContext.eligible)diagnostics.push(`NHL goalie season context: ${goalieContext.available}/${goalieContext.attempted} available, ${goalieContext.capOmissions} omitted by cap, ${goalieContext.deferred} deferred; 0 confirmed starters; injuries unknown.`);

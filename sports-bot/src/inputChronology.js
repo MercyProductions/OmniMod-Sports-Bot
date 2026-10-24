@@ -2,6 +2,7 @@ import {quoteTimeEpoch} from './oddsPricing.js';
 import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
 import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
+import {scoreboardStarterInputState} from './scoreboardStarters.js';
 
 const time=quoteTimeEpoch;
 const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -36,6 +37,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const excluded={},unknown={};
  const retain=(row,path)=>{
   if(!row)return row;
+  if(row.scoreboardProjection){const reason=scoreboardStarterInputState(row,game,cutoff);if(reason){const key=path+':scoreboard_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.availabilityExpiresAt!==undefined){
    const expiry=time(row.availabilityExpiresAt);
    if(!Number.isFinite(expiry)||expiry<=cutoff){const reason=path+':availability_report_expired_or_invalid';excluded[reason]=(excluded[reason]||0)+1;return null;}
@@ -47,7 +49,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  };
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence'])safe[field]=retain(game[field],field);
  if(safe.goalieResearch&&safe.goalieResearch.status!=='unavailable'){
   const reason=retainedGoalieContextState(safe.goalieResearch,game,cutoff);
   if(reason){safe.goalieResearch=null;excluded['goalieResearch:'+reason]=1;}
