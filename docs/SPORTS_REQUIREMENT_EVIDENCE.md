@@ -4,6 +4,10 @@ This is a current-state index for the Sports reliability assignment, not a compl
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
 
+## Actual readiness follow-up - October 24, 2026
+
+[Measured validation readiness](SPORTS_VALIDATION_READINESS.md) separates actual input failures from software checks: the frozen v69 capture has 12 NHL event-mapping gaps, six NBA/MLB summary-request failures, three cap omissions and no confirmed critical-role/current injury coverage. The eleventh checked original v52 run at 16:36UTC retains 12 games/one date/zero finals, 11 receipts/106 blobs and 117 cumulative requests. Current v69 diagnostics are not registered selection proof; neither frozen v52 nor future v67 silently approves newer source. Exact current-candidate registration, sufficient independent outcomes, real clinical/price inputs and operational verification remain required. No inference source changed in this audit; all four automation files remain unchanged.
+
 ## Replay chronology follow-up - October 24, 2026
 
 [Historical replay date ordering](SPORTS_REPLAY_DATE_ORDER.md) closes a reproduced future-label leak caused by sorting timestamp text across date batches. Report version2 validates calendars/clocks, preserves unknown starts and exposes exclusions/caps; predictive identity remains v6.0.69, with prospective gates unchanged. Eight new cases pass; 61 focused/1,272 full tests and 239 syntax files pass. The47 saved native NHL finals yield11 numerically unchanged replay predictions/scores before and after; no predictive improvement is demonstrated. The [checklist](SPORTS_REPLAY_DATE_CHECKLIST.json) preserves missing clinical inputs, sufficient independent forward validation, original-price/cost and operational requirements. Registered archives and all Sports/Stocks schedules are unchanged.

@@ -249,6 +249,7 @@ Independent availability inputs: [summary-parent isolation and original provider
 
 Official schedules: [exact event identity, fresh pitcher inputs and independent-source accounting](docs/SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md), development v6.0.66. Doubleheaders and player namespaces stay separate; expired projections cannot block current observations. Full1,170 tests pass. The one real-response diagnostic recovered projected inputs at its original receipt time; it was not a forecast or accuracy result.
 
+- [Actual validation readiness and measured data blockers](docs/SPORTS_VALIDATION_READINESS.md): mapping, access and cap omissions; exact trial/source limits and unfinished model validation.
 - [Historical replay date ordering and verification](docs/SPORTS_REPLAY_DATE_ORDER.md): 1,272 tests; future-label isolation, explicit unknown clocks and unchanged real-history scores.
 - [Local price-receipt chronology and report v3](docs/SPORTS_PRICE_RECEIPT_CHRONOLOGY.md): 1,264 tests; original fetch clocks, unchanged legacy records and unfinished value validation.
 Model scope: [v6.0.69 decision-horizon binding and real pregame verification](docs/SPORTS_DECISION_HORIZON_BINDING.md), with a [phase checklist](docs/SPORTS_DECISION_HORIZON_CHECKLIST.json). Model selection and permanent forecasts now share the chosen information-time horizon. Full 1,256 tests and 237 syntax checks pass. A separately pinned real-data study has 21 matched pairs and no finals; predictive improvement remains unverified.
