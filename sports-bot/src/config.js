@@ -83,6 +83,8 @@ export const config = {
   featureWarehouseEnabled: boolEnv('FEATURE_WAREHOUSE_ENABLED', true),
   historicalReplayEnabled: boolEnv('HISTORICAL_REPLAY_ENABLED', true),
   historicalReplayMaxRows: intEnv('HISTORICAL_REPLAY_MAX_ROWS', 8000, 100, 20000),
+  selectionEvidenceDirectory: String(process.env.MODEL_SELECTION_EVIDENCE_DIR || '').trim(),
+  selectionEvidenceJournal: String(process.env.MODEL_SELECTION_JOURNAL_FILE || '').trim(),
   challengerMinSamples: intEnv('CHALLENGER_MIN_SAMPLES', 75, 30, 1000),
   localMlEnabled: boolEnv('LOCAL_ML_ENABLED', true),
   localMlMinSamples: intEnv('LOCAL_ML_MIN_SAMPLES', 150, 60, 5000),

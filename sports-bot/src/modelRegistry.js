@@ -1,3 +1,5 @@
+import {selectionReviewVerified,readVerifiedSelectionReview} from './selectionProtocol.js';
+import {readPredictionJournal} from './predictionJournal.js';
 import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
 import {hybridArtifactId} from './hybridArtifact.js';
 import path from 'node:path';
@@ -88,7 +90,7 @@ export function evaluateCandidateModels(rows = []) {
 
 function reviewAvailable(review,cutoff){
   const finalized=instant(review?.finalizedAt);
-  return Number.isFinite(finalized)&&finalized<=cutoff;
+  return Number.isFinite(finalized)&&finalized<=cutoff&&selectionReviewVerified(review,cutoff);
 }
 function approvedReview(row = {}, sport = row.sport, cutoff = Date.now()) {
   const review = row.selectionReview, promoted=instant(row.promotedAt), evaluated=instant(row.evaluatedAt);
@@ -192,17 +194,26 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
   return { entry: existing, action };
 }
 
-export async function readModelRegistry() {
+export async function readModelRegistry({now=Date.now(),selectionDirectory=config.selectionEvidenceDirectory,journalFile=config.selectionEvidenceJournal}={}) {
   const stored = await readJson(registryFile, null, { throwOnError: true });
   if (stored && stored.version !== 1) throw new Error('Unsupported sports model registry version; existing state was preserved.');
-  return stored?.version === 1 ? { ...emptyRegistry(), ...stored } : emptyRegistry();
+  const registry=stored?.version === 1 ? { ...emptyRegistry(), ...stored } : emptyRegistry();
+  if(selectionDirectory&&journalFile){
+    let records;try{records=await readPredictionJournal(journalFile);}catch{}
+    for(const row of Object.values(registry.sports)){
+      if(!row.selectionReview)continue;
+      try{row.selectionReview=await readVerifiedSelectionReview(row.selectionReview,{directory:selectionDirectory,records,now});row.selectionEvidenceStatus='verified_local_research';}
+      catch{row.selectionEvidenceStatus='unverified_or_changed';}
+    }
+  }
+  return registry;
 }
 
-export function modelDecisionForSport(registry = {}, sport = 'default', {now=Date.now()} = {}) {
+export function modelDecisionForSport(registry = {}, sport = 'default', {now=Date.now(),league,horizon} = {}) {
   if(!Number.isFinite(now))throw new Error('Valid model inference information cutoff required');
   const updated=instant(registry.updatedAt), registryAvailable=Number.isFinite(updated)&&updated<=now;
   let row = registry.sports?.[sport] || defaultSportEntry(sport);
-  if (row.champion !== 'evidence' && (!registryAvailable || !approvedReview(row, sport, now) || !row.evaluation?.cohort?.prospectiveRecordsVerified
+  if (row.champion !== 'evidence' && (!registryAvailable || !approvedReview(row, sport, now) || row.selectionReview?.league!==league || row.selectionReview?.horizon!==horizon || !row.evaluation?.cohort?.prospectiveRecordsVerified
     || !String(row.evaluation.cohort.key || '').includes(`|${CURRENT_MODEL_VERSION}|`)))
     row = { ...defaultSportEntry(sport), status: 'provenance_revalidation_required' };
   return {

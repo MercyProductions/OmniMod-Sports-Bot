@@ -17,7 +17,7 @@ import { normalizeEntityName, readIntelligenceStore } from './intelligenceStore.
 import { loadModelContext } from './modelEvaluation.js';
 import { captureMarketSnapshots, readFeatureWarehouse, recordSlateSnapshot, warehouseCandidateRowsBefore, warehouseInventory } from './featureWarehouse.js';
 import { runHistoricalReplay } from './historicalReplay.js';
-import { evaluatePredictionHorizons } from './horizonEvaluation.js';
+import { evaluatePredictionHorizons, predictionHorizon } from './horizonEvaluation.js';
 import { readLocalMlModels, trainAndPersistLocalMlModels } from './localMl.js';
 import { readModelRegistry, refreshModelRegistry } from './modelRegistry.js';
 import { MODEL_VERSION, predictGame } from './predictionEngine.js';
@@ -771,7 +771,10 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   const refreshGameIds = options.refreshGameIds?.length ? new Set(options.refreshGameIds.map(String)) : null;
   const refreshEventKeys=options.refreshEvents?.length?new Set(options.refreshEvents.map(scopedEventKey)):null;
   const frozenPredictions=scopedSlatePredictions(options.cachedSlate||{});
-  const predictions = games.map((game, index) => frozenOrFreshPrediction(game, index, modelContext, options.cachedSlate, refreshGameIds,refreshEventKeys,frozenPredictions));
+  const predictions = games.map((game, index) => {
+    const stage=options.marketStages?.['event:'+scopedEventKey(eventReference(game))] || options.marketStages?.[String(game.id)] || options.marketStage || 'daily';
+    return frozenOrFreshPrediction(game,index,{...modelContext,forecastHorizon:predictionHorizon({snapshotStage:stage})},options.cachedSlate,refreshGameIds,refreshEventKeys,frozenPredictions);
+  });
   for (const prediction of predictions) {
     const refreshed = !options.cachedSlate || (refreshEventKeys?refreshEventKeys.has(scopedEventKey(prediction)):!refreshGameIds||refreshGameIds.has(String(prediction.gameId)));
     if (refreshed) prediction.snapshotStage = options.marketStages?.['event:'+scopedEventKey(prediction)] || options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';

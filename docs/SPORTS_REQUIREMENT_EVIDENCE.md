@@ -203,3 +203,5 @@ Development v6.0.31 adds explicit journal-bound warehouse adjudication, shared w
 Legacy final protection: [lost-ack recovery cannot invent a frozen historical forecast](SPORTS_LEGACY_FINAL_PROTECTION.md). Exact desired digests recover without editing; corrections verify their remote predecessor. Unverifiable legacy baseline adoption remains unfinished.
 
 Windows and research-clock continuation: [verified repairs and unresolved boundaries](SPORTS_WINDOWS_LOCK_SELECTION_VALIDATION.md), development v6.0.51. Bounded Windows exclusive-create retries, stored plan digest/chronology checks and unknown ESPN injury status are implemented. This is correctness evidence, not a completed prospective model comparison or recovery of unavailable injury/confirmed-goalie data.
+
+Model selection evidence continuation: [v2 review proof, decision-rule recomputation and inference scope](SPORTS_SELECTION_EVIDENCE_BINDING.md), development v6.0.52. Local approval consistency is verified with real workflow fixtures; this does not authenticate source publication or establish predictive improvement. Current-version forward trials and missing-source verification remain open.

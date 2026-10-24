@@ -664,7 +664,7 @@ export function predictGame(game, index, modelContext = {}) {
 
   const evidenceProbabilities = { ...probabilities };
   const specialist = buildSportModelPrediction(game, { modelLogit });
-  const modelDecision = modelDecisionForSport(modelContext.modelRegistry, profile.key, {now:evidenceNow});
+  const modelDecision = modelDecisionForSport(modelContext.modelRegistry, profile.key, {now:evidenceNow,league:game.leagueKey,horizon:modelContext.forecastHorizon || 'Daily'});
   const hybridProbabilities = specialist.available
     ? blendProbabilityVectors(evidenceProbabilities, specialist.probabilities, modelDecision.specialistWeight, profile.twoWay)
     : evidenceProbabilities;

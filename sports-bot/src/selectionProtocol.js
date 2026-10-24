@@ -11,6 +11,8 @@ import {localMlArtifactId} from './localMl.js';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const epoch=quoteTimeEpoch;
 const gameKey=row=>JSON.stringify([row.league,row.gameId,Number.isFinite(epoch(row.startTime))?new Date(row.startTime).toISOString():String(row.startTime)]);
+const verifiedReviews=new WeakMap();
+const parseEvidence=value=>{try{return JSON.parse(value);}catch{throw new Error('Selection evidence JSON is malformed; preserve it for review');}};
 const identifier=value=>typeof value==='string'&&/^[a-z0-9-]{1,80}$/i.test(value);
 
 async function transaction(directory,action){
@@ -33,6 +35,25 @@ async function transaction(directory,action){
     }catch(error){if(handle)await handle.close();throw error;}
     return result;
   });
+}
+
+
+function validatePlan(plan,id){
+ if(!plan||plan.schema!=='sports-selection-plan-v1'||plan.id!==id||!identifier(id)
+  ||!['ml','hybrid'].includes(plan.candidate)||plan.artifactFile!==id+'-model.json'
+  ||!Number.isInteger(plan.minimumGames)||plan.minimumGames<75
+  ||!Number.isInteger(plan.minimumDates)||plan.minimumDates<8)
+  throw new Error('Invalid selection plan contract');
+  const {planHash,...planBody}=plan;
+  if(planHash!==hash(planBody))throw new Error('Selection plan integrity failed; preserve existing records');
+  const registered=epoch(plan.registeredAt),start=epoch(plan.start),end=epoch(plan.end);
+  const artifactReady=plan.candidate==='ml'
+    ? [epoch(plan.lastTrainingOutcomeAt),epoch(plan.trainedAt)]
+    : [epoch(plan.recipeFrozenAt),epoch(plan.recipeFrozenAt)];
+  if(![registered,start,end,...artifactReady].every(Number.isFinite)||registered>=start
+    ||end-start<14*86400000||artifactReady[0]>artifactReady[1]||artifactReady[1]>registered)
+    throw new Error('Selection plan chronology is unverified; preserve existing records');
+
 }
 
 /** Predeclare one exact ML fit or fixed hybrid recipe before a disjoint prospective period. */
@@ -88,16 +109,7 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
   if(!identifier(id)||!Number.isFinite(now)||!Array.isArray(records))throw new Error('Invalid selection review request');
   return transaction(directory,async state=>{
     const plan=state.plans[id];if(!plan)throw new Error('Selection plan not found');
-    const {planHash,...planBody}=plan;
-    if(planHash!==hash(planBody))throw new Error('Selection plan integrity failed; preserve existing records');
-    const registered=epoch(plan.registeredAt),start=epoch(plan.start),end=epoch(plan.end);
-    const artifactReady=plan.candidate==='ml'
-      ? [epoch(plan.lastTrainingOutcomeAt),epoch(plan.trainedAt)]
-      : [epoch(plan.recipeFrozenAt),epoch(plan.recipeFrozenAt)];
-    if(![registered,start,end,...artifactReady].every(Number.isFinite)||registered>=start
-      ||end-start<14*86400000||artifactReady[0]>artifactReady[1]||artifactReady[1]>registered)
-      throw new Error('Selection plan chronology is unverified; preserve existing records');
-
+    validatePlan(plan,id);
     if(createHash('sha256').update(await readFile(join(directory,plan.artifactFile))).digest('hex')!==plan.artifactFileHash)
       throw new Error('Pinned artifact changed; preserve existing evidence');
     if(Object.hasOwn(state.reports,id))return {status:'already_finalized',report:state.reports[id],newEvidenceIgnored:true};
@@ -122,10 +134,10 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
     const sufficient=(comparison?.primary.games||0)>=plan.minimumGames&&independentDates>=plan.minimumDates;
     const better=sufficient&&candidateImprovement.brier95?.[0]>0
       &&candidateImprovement.brier>.0025&&candidateImprovement.logLoss95?.[0]>=-.003;
-    const report={schema:'sports-selection-review-v1',planId:id,planHash:plan.planHash,artifactId:plan.artifactId,
+    const report={schema:'sports-selection-review-v2',planId:id,planHash:plan.planHash,artifactId:plan.artifactId,
       modelVersion:plan.modelVersion,candidate:plan.candidate,sport:plan.sport,league:plan.league,horizon:plan.horizon,finalizedAt:new Date(now).toISOString(),inputHash:hash(subset),
       status:overlap?'blocked_reused_games':!sufficient?'insufficient_independent_games':better?'review_ready':'challenger_not_supported',
-      evaluation,independentDates,candidateImprovement,promotionAllowed:false,approvalRequired:true,
+      evaluation,independentDates,candidateImprovement,consumedGameKeys:[...new Set(forecasts.map(event=>gameKey(event.payload)))].sort(),promotionAllowed:false,approvalRequired:true,
       limitations:['Preregistered research review, not an activation instruction.',
         'Day/team dependence, league calibration and later result corrections still require review.']};
     report.reportHash=hash(report);
@@ -133,4 +145,76 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
     state.consumedGames=[...new Set([...used,...forecasts.map(event=>gameKey(event.payload))])].sort();
     return report;
   });
+}
+
+
+/** Verify local evidence, not source truth or reviewer identity. Never writes or activates. */
+export function verifySelectionReviewEvidence({state,artifactBytes,records,review,now=Date.now()}={}){
+ if(!Number.isFinite(now)||!Number.isFinite(new Date(now).getTime())||!Array.isArray(records)||!review)throw new Error('Invalid selection evidence request');
+ const {stateHash,...stateBody}=state||{};
+ if(state?.schema!=='sports-selection-state-v1'||stateHash!==hash(stateBody))throw new Error('Selection state integrity failed');
+ const {reportHash,...reportBody}=review;
+ if(review.schema!=='sports-selection-review-v2'||reportHash!==hash(reportBody)
+  ||review.status!=='review_ready'||review.promotionAllowed!==false||review.approvalRequired!==true||hash(state.reports?.[review.planId])!==hash(review))throw new Error('Selection review integrity or readiness unverified');
+ const plan=state.plans?.[review.planId];validatePlan(plan,review.planId);
+ if(review.planHash!==plan.planHash||['artifactId','modelVersion','candidate','sport','league','horizon'].some(key=>review[key]!==plan[key]))
+  throw new Error('Selection review plan binding failed');
+ const finalized=epoch(review.finalizedAt);
+ if(!Number.isFinite(finalized)||finalized<epoch(plan.end)||finalized>now)throw new Error('Selection review availability unverified');
+ if(typeof artifactBytes!=='string'||createHash('sha256').update(artifactBytes).digest('hex')!==plan.artifactFileHash)
+  throw new Error('Pinned selection artifact changed');
+ const artifact=parseEvidence(artifactBytes);
+ if(plan.candidate==='ml'){
+  if(artifact.artifactFormat!=='sports-local-ml-artifact-v2'||artifact.artifactId!==localMlArtifactId(artifact)
+   ||artifact.artifactId!==plan.artifactId||artifact.trainedAt!==plan.trainedAt||artifact.lastTrainingOutcomeAt!==plan.lastTrainingOutcomeAt)
+   throw new Error('Selection ML artifact binding failed');
+ }else if(JSON.stringify(artifact)!==JSON.stringify(hybridArtifact(plan.sport,plan.specialistWeight))||artifact.artifactId!==plan.artifactId)
+  throw new Error('Selection hybrid source binding failed');
+ const forecasts=records.filter(event=>event.type==='forecast'&&event.payload?.lifecycleState==='ISSUED'
+  &&event.payload.modelVersion===plan.modelVersion&&event.payload.league===plan.league&&event.payload.horizon===plan.horizon
+  &&event.payload.eventContext?.sport===plan.sport&&event.payload.candidateArtifactIds?.[plan.candidate]===plan.artifactId
+  &&epoch(event.recordedAt)>=epoch(plan.start)&&epoch(event.recordedAt)<epoch(plan.end));
+ const ids=new Set(forecasts.map(event=>event.payload.forecastId));
+ const subset=records.filter(event=>ids.has(event.payload?.forecastId)&&epoch(event.recordedAt)<=finalized);
+ if(records.some(event=>ids.has(event.payload?.forecastId)&&!Number.isFinite(epoch(event.recordedAt))))throw new Error('Selection input receipt unverified');
+ if(hash(subset)!==review.inputHash)throw new Error('Selection input binding failed');
+ // Later revisions/conflicts are new evidence, never silently reuse the old review.
+ if(records.some(event=>ids.has(event.payload?.forecastId)&&['forecast','result','result_conflict'].includes(event.type)
+  &&epoch(event.recordedAt)>finalized&&epoch(event.recordedAt)<=now))throw new Error('Selection evidence changed after review');
+ const outcomes=journalResultState(subset).eligible;
+ if(forecasts.some(event=>!outcomes.has(event.payload.forecastId)))throw new Error('Selection outcomes incomplete');
+ const keys=[...new Set(forecasts.map(event=>gameKey(event.payload)))].sort();
+ if(hash(keys)!==hash(review.consumedGameKeys)||!Array.isArray(state.consumedGames))throw new Error('Selection game consumption binding failed');
+ const all=[];
+ for(const report of Object.values(state.reports||{})){
+  const {reportHash:storedHash,...body}=report;
+  if(report.schema!=='sports-selection-review-v2'||storedHash!==hash(body)||!Array.isArray(report.consumedGameKeys))throw new Error('Selection report ledger unverified');
+  all.push(...report.consumedGameKeys);
+ }
+ if(new Set(all).size!==all.length||hash([...new Set(all)].sort())!==hash([...state.consumedGames].sort()))throw new Error('Selection games reused or ledger incomplete');
+ const evaluation=evaluateMatchedJournal(subset,{asOf:finalized});
+ if(hash(evaluation)!==hash(review.evaluation))throw new Error('Selection measurements cannot be reproduced');
+ const comparison=evaluation.byVersion[plan.modelVersion]?.[plan.candidate],interval=comparison?.pairedGameBootstrap95;
+ const improvement={brier:comparison?.differences.brierImprovement==null?null:-comparison.differences.brierImprovement,
+  brier95:interval?.brierImprovement?[-interval.brierImprovement[1],-interval.brierImprovement[0]]:null,
+  logLoss95:interval?.logLossImprovement?[-interval.logLossImprovement[1],-interval.logLossImprovement[0]]:null};
+ if(hash(improvement)!==hash(review.candidateImprovement)||review.independentDates!==comparison?.distinctEventDates
+  ||!(comparison?.primary.games>=plan.minimumGames&&comparison.distinctEventDates>=plan.minimumDates
+   &&improvement.brier95?.[0]>0&&improvement.brier>.0025&&improvement.logLoss95?.[0]>=-.003))
+  throw new Error('Selection decision rule not supported');
+ const verified=structuredClone(review);verifiedReviews.set(verified,{hash:hash(verified),verifiedAt:now});return verified;
+}
+
+/** Nonserializable verification proof: JSON flags or hash-shaped strings cannot grant approval. */
+export function selectionReviewVerified(review,cutoff=Date.now()){
+ const proof=review&&verifiedReviews.get(review);
+ return Boolean(proof&&Number.isFinite(cutoff)&&proof.verifiedAt<=cutoff&&proof.hash===hash(review));
+}
+
+export async function readVerifiedSelectionReview(review,{directory,records,now=Date.now()}={}){
+ if(!directory||!identifier(review?.planId))throw new Error('Explicit selection evidence directory and valid plan required');
+ const state=parseEvidence(await readFile(join(directory,'selection-state.json'),'utf8'));
+ const plan=state.plans?.[review.planId];validatePlan(plan,review.planId);
+ const artifactBytes=await readFile(join(directory,plan.artifactFile),'utf8');
+ return verifySelectionReviewEvidence({state,artifactBytes,records,review,now});
 }
