@@ -1,4 +1,5 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
+import {REFRESH_REASON_POLICY} from './refreshReasonCodes.js';
 import {capturedEventTime} from './capturedEventTime.js';
 import {auditJournalForecastIdentities} from './journalForecastIdentity.js';
 import {journalResultState} from './journalResults.js';
@@ -32,6 +33,8 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
     delivered.add(event.payload.forecastId);
   }
   const attempts=visible.filter(row=>row.type==='refresh_attempt'),statuses={},reasons={},coverage={},byLeague={};
+  const currentPolicyAttempts=attempts.filter(row=>row.payload?.reasonPolicy===REFRESH_REASON_POLICY).length;
+  const omittedCounts=attempts.filter(row=>row.payload?.reasonPolicy===REFRESH_REASON_POLICY).flatMap(row=>(row.payload.games||[]).map(game=>game.unrecognizedReasonCount));
   for(const {payload} of attempts)for(const game of payload.games||[]){increment(statuses,game.status);for(const reason of new Set(game.reasons||[]))increment(reasons,reason);}
   let unresolved=0,overdue=0,unknownStart=0,missingCoverage=0,unknownUnderlying=0;
   for(const {payload:row} of issued){
@@ -55,6 +58,9 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
   }).map(row=>row.payload.durationMs);
   return {schema:'sports-operational-audit-v3',asOf:new Date(asOf).toISOString(),runtimeVerified:false,
     refreshes:{terminalAttempts:attempts.length,gameOutcomes:statuses,rejectionReasons:reasons,
+      reasonEvidence:{policy:REFRESH_REASON_POLICY,currentPolicyAttempts,legacyOrUnknownPolicyAttempts:attempts.length-currentPolicyAttempts,
+        unrecognizedReasonsOmitted:omittedCounts.filter(value=>Number.isSafeInteger(value)&&value>=0).reduce((sum,value)=>sum+value,0),
+        invalidOmissionCounters:omittedCounts.filter(value=>!Number.isSafeInteger(value)||value<0).length,historicalCompletenessVerified:false},
       averageDurationMs:durations.length?durations.reduce((sum,value)=>sum+value,0)/durations.length:null,
       timedAttempts:durations.length,invalidDurationRecords:attempts.length-durations.length,
       coverage:attempts.length?'recorded_terminal_attempts_only':'unknown_no_attempt_records'},
@@ -68,6 +74,7 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
     evidence:{missingFrozenCoverage:missingCoverage,missingReasons:coverage,unknownUnderlyingFreshness:unknownUnderlying},
     byLeague,calibrationMonitoring,
     limitations:['Attempt counts cover only instrumented terminal attempts; process crashes and historical attempts may be absent.',
+      'Older terminal records may omit cache/source-identity causes. Zero recorded causes is not proof of zero events; unavailable reasons are not reconstructed.',
       'Missing delivery acknowledgements do not prove Discord rejected a message; journal and transport can fail independently.',
       'Overdue is an operational age threshold, not a claim a postponed or long-running game has finished.',
       'Canonical operational counts deduplicate identical forecast IDs and exclude identity conflicts, but still count repeated games across horizons and guilds; raw issued counts remain explicit.',

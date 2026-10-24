@@ -1,4 +1,5 @@
 import {capturedEventTime} from './capturedEventTime.js';
+import {REFRESH_REASON_POLICY,structuredRefreshReasons} from './refreshReasonCodes.js';
 import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
 import {journalResultState} from './journalResults.js';
 import {quotePrice,quoteTimeEpoch} from './oddsPricing.js';
@@ -161,16 +162,24 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           || !Array.isArray(games) || !games.length || games.some(row => !row.gameId || !['completed','rejected','build_failed'].includes(row.status))) {
           throw new Error('Invalid refresh attempt evidence');
         }
-        const payload = { guildId: String(slate.guildId || ''), attemptedAt: started, completedAt: ended,
+        const payload = { reasonPolicy:REFRESH_REASON_POLICY, guildId: String(slate.guildId || ''), attemptedAt: started, completedAt: ended,
           durationMs: Date.parse(ended) - Date.parse(started), games: games.map(row => ({
             gameId: String(row.gameId), leagueKey:String(row.leagueKey||''),startTime:eventIso(row.startTime), status: row.status,
-            reasons: (row.reasons || []).filter(value => ['build_failed','game_not_scheduled','start_or_completion_invalid',
-              'summary_not_revalidated','summary_receipt_outside_attempt','pregame_forecast_not_verified','forecast_issuance_not_verified','journal_issuance_not_verified','ambiguous_game_observations','game_identity_not_found','league_mismatch','scheduled_start_mismatch','unique_event_forecast_not_verified','game_identity_not_verified'].includes(value)),
+            ...structuredRefreshReasons(row.reasons || []),
             dueWindows: (row.dueWindows || []).filter(value => Number.isInteger(value) && value > 0 && value <= 720)
           })) };
         const attemptId = digest({ guildId: payload.guildId, attemptedAt: started, events: payload.games.map(row => [row.leagueKey,row.gameId,row.startTime]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))) });
         const prior = records.find(row => row.type === 'refresh_attempt' && row.payload.attemptId === attemptId);
-        if (prior && digest(prior.payload) !== digest({ attemptId, ...payload })) throw new Error('Refresh attempt identity already has different terminal evidence');
+        let comparison={attemptId,...payload};
+        // Identical legacy retries preserve their original bytes; never backfill missing causes.
+        if(prior&&!Object.hasOwn(prior.payload,'reasonPolicy')){
+          const {reasonPolicy,...legacy}=comparison;
+          comparison={...legacy,games:legacy.games.map(game=>{
+            if(game.unrecognizedReasonCount!==0)return game;
+            const {unrecognizedReasonCount,...original}=game;return original;
+          })};
+        }
+        if (prior && digest(prior.payload) !== digest(comparison)) throw new Error('Refresh attempt identity already has different terminal evidence');
         if (!prior) {
           const body = { schemaVersion: 1, sequence: records.length + 1, previousHash: records.at(-1)?.eventHash || null,
             recordedAt: new Date(now).toISOString(), type: 'refresh_attempt', payload: { attemptId, ...payload } };
