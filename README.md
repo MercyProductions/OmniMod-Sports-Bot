@@ -123,7 +123,7 @@ Runtime stores can contain private server settings and credentials saved by admi
 
 ## Sports audit and development status
 
-The source before this audit is preserved by the baseline tag below. The [technical audit](docs/SPORTS_ACCURACY_AUDIT.md), [prediction-record specification](docs/PREDICTION_RECORDS.md) and [implementation checklist](docs/AUDIT_CHECKLIST.md) describe the development branch, `docs/setup-and-prediction-audit-2026-10-20`. The initial v6.0.1 audit has subsequent repairs; current forecast identity is **v6.0.48**. These changes remain under review; this work has not deployed them, and the actual running Sports source is unverified. On the main branch, documentation does not itself enable the new journal or audit command. Switch to the review branch to inspect/test that implementation.
+The source before this audit is preserved by the baseline tag below. The [technical audit](docs/SPORTS_ACCURACY_AUDIT.md), [prediction-record specification](docs/PREDICTION_RECORDS.md) and [implementation checklist](docs/AUDIT_CHECKLIST.md) describe the development branch, `docs/setup-and-prediction-audit-2026-10-20`. The initial v6.0.1 audit has subsequent repairs; current forecast identity is **v6.0.49**. These changes remain under review; this work has not deployed them, and the actual running Sports source is unverified. On the main branch, documentation does not itself enable the new journal or audit command. Switch to the review branch to inspect/test that implementation.
 
 The repaired branch has 134 passing tests and adds immutable pregame probabilities, available odds/timestamps and linked final results, plus evaluation/provenance fixes. It does not prove improved prediction accuracy. Available local history is insufficient for a fair historical before/after comparison. `FINAL_LOOKBACK_DAYS` in the configuration reference is a development addition.
 
@@ -161,7 +161,7 @@ Sports research updates add immutable forecast lifecycle records, per-game evide
 
 References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
 
-Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 837 passing tests; no improved forecasting or wagering performance has been established.
+Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The current Sports suite has 850 passing tests; no improved forecasting or wagering performance has been established.
 
 Journal event-association repair: [scoped identities, conflict quarantine and eligibility](docs/SPORTS_JOURNAL_EVENT_INTEGRITY.md). Development v6.0.32; original forecasts remain immutable. These are source and synthetic-regression improvements, not proof of forecasting or wagering improvement.
 
@@ -204,3 +204,5 @@ Input observation clocks: [strict clocks and declared learning cutoffs](docs/SPO
 Coverage clock verification: [separate fetch/native clocks and completed frozen finals](docs/SPORTS_COVERAGE_OBSERVATION_CLOCKS.md), development v6.0.47. Full 826 tests pass. Frozen v6.0.45 next-day study resolved 13 games: both versions 10/13 correct with identical probability scores; no improvement or after-cost edge established.
 
 Model availability: [chronological champion/ML guards and missing-data causes](docs/SPORTS_MODEL_AVAILABILITY_VALIDATION.md), development v6.0.48. Full 837 tests pass. Invalid/future/missing approval clocks cannot activate a champion; native-ID mapping failures stay explicit. No current-version predictive improvement established.
+
+Missing NHL history: [bounded official recent-final fallback](docs/SPORTS_NATIVE_NHL_HISTORY.md), development v6.0.49. A real isolated seven-date run restored 47 finals and 32 thin team profiles (1-4 games each); full 850 tests pass. Injuries/goalies remain unverified and no predictive improvement is claimed.
