@@ -1,5 +1,5 @@
 import { sportProfile } from './sportProfiles.js';
-import {availabilityFraction,finiteNumber} from './dataValidation.js';
+import {availabilityFraction,finiteNumber,gameCountEvidence} from './dataValidation.js';
 import {normalizeEntityName} from './intelligenceStore.js';
 import {reconcilePlayerEvidence} from './playerEvidence.js';
 import {observedInputState} from './inputChronology.js';
@@ -10,9 +10,7 @@ function clamp(value, min, max) {
 }
 
 function finite(value, fallback = null) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  return finiteNumber(value,fallback);
 }
 
 function logistic(value) {
@@ -72,29 +70,50 @@ function normalize(vector, twoWay) {
   return Object.fromEntries(Object.entries(safe).map(([key, value]) => [key, value / total]));
 }
 
-function stat(profile, name, fallback = null) {
-  return finite(profile?.stats?.[name], fallback);
-}
-
 function scoringMeans(game, defaults) {
   const away = game.autoTeamMetrics?.away || {};
   const home = game.autoTeamMetrics?.home || {};
   const prior = defaults.average;
-  const awayFor = stat(away, 'averageScored', prior);
-  const homeFor = stat(home, 'averageScored', prior);
-  const awayAgainst = stat(away, 'averageAllowed', prior);
-  const homeAgainst = stat(home, 'averageAllowed', prior);
-  const awaySamples = finite(away.sampleSize, 0);
-  const homeSamples = finite(home.sampleSize, 0);
+  const evidence={schema:'sports-scoring-inputs-v1',priorPerTeam:prior,priorGames:defaults.priorGames,teams:{},samplePeriodVerified:false,publicationVerified:false,
+    scope:'Declared team-game counts and scoring-rate inputs; neither statistical adequacy nor source period is independently verified.'};
+  const rates={};
+  for(const [side,row] of [['away',away],['home',home]]){
+    const count=gameCountEvidence(row.sampleSize),measurements={};
+    for(const key of ['averageScored','averageAllowed']){const value=finite(row.stats?.[key]),observed=value!==null&&value>=0;measurements[key]={observed,value:observed?value:null,usedValue:observed?value:prior};}
+    evidence.teams[side]={declaredCount:count.games,positiveCount:count.positiveSample,effectiveCount:count.positiveSample?count.games:0,measurements};
+    rates[side]=measurements;
+  }
+  const awayFor = rates.away.averageScored.usedValue;
+  const homeFor = rates.home.averageScored.usedValue;
+  const awayAgainst = rates.away.averageAllowed.usedValue;
+  const homeAgainst = rates.home.averageAllowed.usedValue;
+  const awaySamples = evidence.teams.away.effectiveCount;
+  const homeSamples = evidence.teams.home.effectiveCount;
   const shrinkAway = awaySamples / (awaySamples + defaults.priorGames);
   const shrinkHome = homeSamples / (homeSamples + defaults.priorGames);
-  const rawAway = (awayFor + homeAgainst) / 2;
-  const rawHome = (homeFor + awayAgainst) / 2;
+  const rawAway = awayFor / 2 + homeAgainst / 2;
+  const rawHome = homeFor / 2 + awayAgainst / 2;
   return {
     away: prior + (rawAway - prior) * Math.min(shrinkAway, shrinkHome),
     home: prior + (rawHome - prior) * Math.min(shrinkAway, shrinkHome),
-    sampleSize: Math.min(awaySamples, homeSamples)
+    sampleSize: Math.min(awaySamples, homeSamples),evidence
   };
+}
+
+/** Approximate margin law, not a joint score distribution or a calibrated probability. */
+function normalPointForecast(means,requestedMargin,cap,standardDeviation){
+ const total=means.away+means.home,bounded=clamp(requestedMargin,-cap,cap);
+ const distribution={schema:'sports-normal-margin-v1',family:'normal_margin_approximation',standardDeviation,expectedTotalMean:Number.isFinite(total)?total:null,calibrated:false,
+  scope:'Normal approximation for margin only; nonnegative expected score means do not imply nonnegative joint-score support.'};
+ if(!Number.isFinite(total)||total<0||!Number.isFinite(requestedMargin)||!Number.isFinite(bounded))return {valid:false,distribution:{...distribution,status:'invalid_total_or_composite_margin',meanMargin:null},expectedScores:null};
+ const margin=clamp(bounded,-total,total);
+ return {valid:true,home:normalCdf(margin/standardDeviation),expectedScores:{away:(total-margin)/2,home:(total+margin)/2},
+  distribution:{...distribution,status:'heuristic',meanMargin:margin,existingCappedMargin:bounded,nonnegativeMeanConstraintApplied:margin!==bounded}};
+}
+function normalPointResult(sport,modelId,forecast,means,features,extraScores={}){
+ if(!forecast.valid)return {available:false,modelId,sport,probabilities:null,expectedScores:null,sampleSize:means.sampleSize,features,
+  notes:['Specialist abstained: nonfinite score total or composite margin. Evidence model fallback remains separate.'],scoreDistribution:forecast.distribution,scoringEvidence:means.evidence};
+ return {...baseResult(sport,modelId,{away:1-forecast.home,home:forecast.home,draw:0},{...forecast.expectedScores,...extraScores},means.sampleSize,features),scoreDistribution:forecast.distribution,scoringEvidence:means.evidence};
 }
 
 function contextFactor(game, ...keys) {
@@ -153,7 +172,7 @@ function baseResult(profileKey, modelId, probabilities, expectedScores, sampleSi
     sport: profileKey,
     probabilities: normalize(probabilities, profile.twoWay),
     expectedScores,
-    sampleSize: Number(sampleSize || 0),
+    sampleSize: gameCountEvidence(sampleSize).positiveSample ? Number(sampleSize) : 0,
     features,
     notes
   };
@@ -176,7 +195,7 @@ function baseball(game, evidence) {
   const homeRuns = clamp(homeBase * park * Math.exp(adjustment - awayStarter * 0.18 - awayBullpen * 0.08 + bullpenDifference * 0.015 + lineupXwobaDifference * 1.6 + playDelta * 0.18), 1.8, 8.2);
   const regulation = poissonOutcomes(awayRuns, homeRuns, 18);
   const tieSplit = regulation.draw / 2;
-  return baseResult('baseball', 'mlb-expected-runs-sp-bullpen-park-v1', { away: regulation.away + tieSplit, home: regulation.home + tieSplit, draw: 0 }, { away: awayRuns, home: homeRuns }, means.sampleSize, ['expected runs', 'starting pitcher', 'bullpen availability', 'park/run environment']);
+  return {...baseResult('baseball', 'mlb-expected-runs-sp-bullpen-park-v1', { away: regulation.away + tieSplit, home: regulation.home + tieSplit, draw: 0 }, { away: awayRuns, home: homeRuns }, means.sampleSize, ['expected runs', 'starting pitcher', 'bullpen availability', 'park/run environment']),scoringEvidence:means.evidence};
 }
 
 function basketball(game, evidence) {
@@ -187,10 +206,9 @@ function basketball(game, evidence) {
   const efficiency = finite(game.advancedDataset?.efficiencyDifference, 0);
   const turnover = finite(game.advancedDataset?.turnoverRateDifference, 0);
   const playDelta = finite(game.advancedDataset?.playValueDifference, 0) * 4 + finite(game.advancedDataset?.playSuccessDifference, 0) * 5 - finite(game.advancedDataset?.playTurnoverDifference, 0) * 8;
-  const margin = clamp((means.home - means.away) + evidence.modelLogit * 5.2 + lineup * 1.6 + efficiency * 0.11 - turnover * 18 + playDelta, -28, 28);
+  const margin = (means.home - means.away) + evidence.modelLogit * 5.2 + lineup * 1.6 + efficiency * 0.11 - turnover * 18 + playDelta;
   const standardDeviation = /wnba|ncaa/i.test(game.leagueKey) ? 11.5 : 12.8;
-  const home = normalCdf(margin / standardDeviation);
-  return baseResult('basketball', 'basketball-possessions-efficiency-lineup-v1', { away: 1 - home, home, draw: 0 }, { away: baseTotal / 2 - margin / 2, home: baseTotal / 2 + margin / 2, possessions: pace }, means.sampleSize, ['possessions/pace', 'offensive efficiency', 'defensive efficiency', 'lineup quality']);
+  return normalPointResult('basketball','basketball-possessions-efficiency-lineup-v2',normalPointForecast(means,margin,28,standardDeviation),means,['possessions/pace','offensive efficiency','defensive efficiency','lineup quality'],{possessions:pace});
 }
 
 function football(game, evidence) {
@@ -203,9 +221,8 @@ function football(game, evidence) {
   const epaDelta = finite(game.advancedDataset?.epaDifference, 0);
   const driveDelta = finite(game.advancedDataset?.driveEfficiencyDifference, 0);
   const playDelta = finite(game.advancedDataset?.playValueDifference, 0) * 5 + finite(game.advancedDataset?.playSuccessDifference, 0) * 6 - finite(game.advancedDataset?.playTurnoverDifference, 0) * 8;
-  const margin = clamp((means.home - means.away) + evidence.modelLogit * 4.6 + (homeQb - awayQb) * 6.5 + (homeOl - awayOl) * 2.4 + epaDelta * 6 + driveDelta * 3 + playDelta, -30, 30);
-  const home = normalCdf(margin / (college ? 16.5 : 13.6));
-  return baseResult('football', 'football-epa-drive-qb-ol-v1', { away: 1 - home, home, draw: 0 }, { away: means.away - margin / 2, home: means.home + margin / 2 }, means.sampleSize, ['EPA', 'drive efficiency', 'quarterback availability', 'offensive-line availability']);
+  const margin = (means.home - means.away) + evidence.modelLogit * 4.6 + (homeQb - awayQb) * 6.5 + (homeOl - awayOl) * 2.4 + epaDelta * 6 + driveDelta * 3 + playDelta;
+  return normalPointResult('football','football-epa-drive-qb-ol-v2',normalPointForecast(means,margin,30,college?16.5:13.6),means,['EPA','drive efficiency','quarterback availability','offensive-line availability']);
 }
 
 function hockey(game, evidence) {
@@ -220,7 +237,7 @@ function hockey(game, evidence) {
   const homeGoals = clamp(means.home * Math.exp(adjustment - awayGoalie * 0.18), 1.3, 5.4);
   const regulation = poissonOutcomes(awayGoals, homeGoals, 11);
   const tieSplit = regulation.draw / 2;
-  return baseResult('hockey', 'hockey-xg-shot-quality-gsax-v1', { away: regulation.away + tieSplit, home: regulation.home + tieSplit, draw: 0 }, { away: awayGoals, home: homeGoals }, means.sampleSize, ['expected goals', 'shot quality', 'goalie GSAx/availability']);
+  return {...baseResult('hockey', 'hockey-xg-shot-quality-gsax-v1', { away: regulation.away + tieSplit, home: regulation.home + tieSplit, draw: 0 }, { away: awayGoals, home: homeGoals }, means.sampleSize, ['expected goals', 'shot quality', 'goalie GSAx/availability']),scoringEvidence:means.evidence};
 }
 
 function soccer(game, evidence) {
@@ -232,7 +249,7 @@ function soccer(game, evidence) {
   const adjustment = clamp(evidence.modelLogit * 0.095 + goalkeeperDelta * 0.08 + playDelta, -0.32, 0.32);
   const awayGoals = clamp(xgAway * Math.exp(-adjustment), 0.35, 3.4);
   const homeGoals = clamp(xgHome * Math.exp(adjustment), 0.35, 3.4);
-  return baseResult('soccer', 'soccer-xg-poisson-v1', poissonOutcomes(awayGoals, homeGoals, 9), { away: awayGoals, home: homeGoals }, means.sampleSize, ['non-penalty xG', 'opponent xG allowed', 'Poisson score distribution', 'goalkeeper availability']);
+  return {...baseResult('soccer', 'soccer-xg-poisson-v1', poissonOutcomes(awayGoals, homeGoals, 9), { away: awayGoals, home: homeGoals }, means.sampleSize, ['non-penalty xG','opponent xG allowed','Poisson score distribution','goalkeeper availability']),scoringEvidence:means.evidence};
 }
 
 function tennis(game, evidence) {

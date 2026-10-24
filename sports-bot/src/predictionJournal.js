@@ -105,6 +105,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     } : null,
     candidateArtifactIds: prediction.candidateArtifactIds || null,
     candidateProbabilities: prediction.candidateProbabilities || null,
+    specialistForecast:prediction.sportModel?structuredClone(prediction.sportModel):null,
     candidateModeledOutcomes: Object.fromEntries(Object.entries(prediction.candidateProbabilities || {}).map(([name,vector]) => [name,Object.keys(vector || {}).sort()])),
     referenceModeledOutcomes: Object.fromEntries(Object.entries(prediction.referenceBaselines || {}).map(([name,reference]) => [name,Object.keys(reference?.probabilities || {}).sort()])),
     referenceBaselines: prediction.referenceBaselines || null,
