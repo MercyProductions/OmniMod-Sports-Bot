@@ -56,3 +56,7 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 ## Receipt and identity revalidation
 
 [Development v6.0.57](SPORTS_NATIVE_RECORD_AVAILABILITY.md) now rejects stale/unbound goalie context at parsing, inference and evidence reporting, and stops describing stale team injury reports as current coverage. Explicit unavailable-player restrictions remain. A receipt-correct retrospective review retained 47 season-candidate rows from 12 saved native responses but recovered zero confirmed goalies or injury assertions. Full 1,016 tests pass; this is neither a new forecast nor evidence of predictive improvement. The frozen v52 trial and optional provider adapter remain separate.
+
+## Specialist consumption
+
+[Development v6.0.58](SPORTS_SPECIALIST_HEALTH_EVIDENCE.md) repairs the direct sport-model health path as well as primary scoring: selected current restrictions cap stored workload, unknown role priors do not provide medical evidence, and per-role missingness is frozen in the journal. This does not add an unavailable injury feed or convert goalie season candidates into event starters. Full1,031 tests pass; current-version predictive improvement remains unverified.

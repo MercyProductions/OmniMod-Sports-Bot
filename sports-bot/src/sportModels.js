@@ -1,4 +1,9 @@
 import { sportProfile } from './sportProfiles.js';
+import {availabilityFraction,finiteNumber} from './dataValidation.js';
+import {normalizeEntityName} from './intelligenceStore.js';
+import {reconcilePlayerEvidence} from './playerEvidence.js';
+import {observedInputState} from './inputChronology.js';
+import {quoteTimeEpoch} from './oddsPricing.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -101,21 +106,43 @@ function contextFactor(game, ...keys) {
   return 0;
 }
 
-function playerRows(game, side) {
-  const team = String(game?.[side]?.name || '').toLowerCase();
-  return (game.autoPlayers || []).filter((row) => String(row.team || '').toLowerCase() === team || String(row.side || '').toLowerCase() === side);
-}
-
-function roleAvailability(game, side, pattern) {
-  const rows = playerRows(game, side).filter((row) => pattern.test(String(row.role || row.position || '')));
-  if (!rows.length) return 0;
-  return rows.reduce((sum, row) => {
-    const projection = row.participationProjection;
-    const participationAvailability = projection
-      ? clamp(finite(projection.expectedShare, 0) / Math.max(0.1, finite(projection.historicalShare, 1)), 0, 1)
-      : clamp(finite(row.availability, 55) / 100, 0, 1);
-    return sum + participationAvailability;
-  }, 0) / rows.length - 0.55;
+function roleAvailability(game,side,role,pattern,evidence){
+  const report={side,role,observedPlayers:0,unknownPlayers:0,unknownClockPlayers:0,invalidWorkloadPlayers:0,exclusions:{},value:0};
+  const exclude=reason=>{report.exclusions[reason]=(report.exclusions[reason]||0)+1;evidence.availabilityEvidence.exclusions[reason]=(evidence.availabilityEvidence.exclusions[reason]||0)+1;};
+  const names=key=>new Set([game[key]?.name,game[key]?.abbr,...(game[key]?.aliases||[])].map(normalizeEntityName).filter(Boolean));
+  const sides={away:names('away'),home:names('home')},rows=[];
+  for(const row of game.autoPlayers||[]){
+    if(!pattern.test(String(row.role||row.position||'')))continue;
+    const team=normalizeEntityName(row.team),matching=['away','home'].filter(key=>sides[key].has(team));
+    if(matching.length!==1){exclude('unbound_or_ambiguous_player_team');continue;}
+    if(matching[0]!==side)continue;
+    if(row.side&&String(row.side).toLowerCase()!==side){exclude('team_side_conflict');continue;}
+    const league=normalizeEntityName(row.leagueKey||row.league);
+    if(league&&![game.leagueKey,game.league].map(normalizeEntityName).includes(league)){exclude('player_league_mismatch');continue;}
+    const clock=observedInputState(row,evidence.now);
+    if(['invalid_observation_time','after_information_cutoff'].includes(clock)){exclude(clock);continue;}
+    if([row.availabilityExpiresAt,row.expiresAt].filter(value=>value!==undefined).some(value=>!Number.isFinite(quoteTimeEpoch(value))||quoteTimeEpoch(value)<=evidence.now)){exclude('player_assertion_expired_or_invalid');continue;}
+    rows.push({...row,team:game[side].name||game[side].abbr});
+  }
+  let total=0;
+  for(const row of reconcilePlayerEvidence(rows)){
+    const health=availabilityFraction(row);
+    if(health===null){report.unknownPlayers++;continue;}
+    report.observedPlayers++;if(observedInputState(row,evidence.now)==='unknown')report.unknownClockPlayers++;
+    let value=health;const projection=row.participationProjection;
+    const projectionClock=projection?observedInputState(projection,evidence.now):null;
+    if(projection&&['invalid_observation_time','after_information_cutoff'].includes(projectionClock))exclude('projection_'+projectionClock);
+    else if(projection){
+      const expected=finiteNumber(projection.expectedShare),historical=finiteNumber(projection.historicalShare);
+      if(expected!==null&&historical!==null&&historical>0&&historical<=1&&expected>=0&&expected<=historical)value=Math.min(health,expected/historical);
+      else report.invalidWorkloadPlayers++;
+    }
+    total+=value;
+  }
+  report.value=report.observedPlayers?total/report.observedPlayers-.55:0;
+  evidence.availabilityEvidence.roles.push(report);
+  if(!report.observedPlayers)evidence.availabilityEvidence.missingRoles.push(side+':'+role);
+  return report.value;
 }
 
 function baseResult(profileKey, modelId, probabilities, expectedScores, sampleSize, features, notes = []) {
@@ -135,10 +162,10 @@ function baseResult(profileKey, modelId, probabilities, expectedScores, sampleSi
 function baseball(game, evidence) {
   const means = scoringMeans(game, { average: 4.45, priorGames: 12 });
   const park = clamp(1 + contextFactor(game, 'parkFactor', 'runEnvironment') * 0.08, 0.8, 1.22);
-  const awayStarter = roleAvailability(game, 'away', /starting pitcher|\bsp\b/i);
-  const homeStarter = roleAvailability(game, 'home', /starting pitcher|\bsp\b/i);
-  const awayBullpen = roleAvailability(game, 'away', /relief|closer|bullpen|\brp\b/i);
-  const homeBullpen = roleAvailability(game, 'home', /relief|closer|bullpen|\brp\b/i);
+  const awayStarter = roleAvailability(game, 'away', 'starter', /starting pitcher|\bsp\b/i,evidence);
+  const homeStarter = roleAvailability(game, 'home', 'starter', /starting pitcher|\bsp\b/i,evidence);
+  const awayBullpen = roleAvailability(game, 'away', 'bullpen', /relief|closer|bullpen|\brp\b/i,evidence);
+  const homeBullpen = roleAvailability(game, 'home', 'bullpen', /relief|closer|bullpen|\brp\b/i,evidence);
   const adjustment = clamp(evidence.modelLogit, -2, 2) * 0.10;
   const awayBase = finite(game.advancedDataset?.awayExpectedRuns, means.away);
   const homeBase = finite(game.advancedDataset?.homeExpectedRuns, means.home);
@@ -169,10 +196,10 @@ function basketball(game, evidence) {
 function football(game, evidence) {
   const college = /ncaaf/i.test(game.leagueKey);
   const means = scoringMeans(game, { average: college ? 28 : 22.5, priorGames: 8 });
-  const homeQb = roleAvailability(game, 'home', /quarterback|\bqb\b/i);
-  const awayQb = roleAvailability(game, 'away', /quarterback|\bqb\b/i);
-  const homeOl = roleAvailability(game, 'home', /tackle|guard|center|offensive line|\bol\b/i);
-  const awayOl = roleAvailability(game, 'away', /tackle|guard|center|offensive line|\bol\b/i);
+  const homeQb = roleAvailability(game, 'home', 'quarterback', /quarterback|\bqb\b/i,evidence);
+  const awayQb = roleAvailability(game, 'away', 'quarterback', /quarterback|\bqb\b/i,evidence);
+  const homeOl = roleAvailability(game, 'home', 'offensive_line', /tackle|guard|center|offensive line|\bol\b/i,evidence);
+  const awayOl = roleAvailability(game, 'away', 'offensive_line', /tackle|guard|center|offensive line|\bol\b/i,evidence);
   const epaDelta = finite(game.advancedDataset?.epaDifference, 0);
   const driveDelta = finite(game.advancedDataset?.driveEfficiencyDifference, 0);
   const playDelta = finite(game.advancedDataset?.playValueDifference, 0) * 5 + finite(game.advancedDataset?.playSuccessDifference, 0) * 6 - finite(game.advancedDataset?.playTurnoverDifference, 0) * 8;
@@ -183,8 +210,8 @@ function football(game, evidence) {
 
 function hockey(game, evidence) {
   const means = scoringMeans(game, { average: 3.05, priorGames: 12 });
-  const awayGoalie = roleAvailability(game, 'away', /goalie|goaltender|\bg\b/i);
-  const homeGoalie = roleAvailability(game, 'home', /goalie|goaltender|\bg\b/i);
+  const awayGoalie = roleAvailability(game, 'away', 'goalie', /goalie|goaltender|\bg\b/i,evidence);
+  const homeGoalie = roleAvailability(game, 'home', 'goalie', /goalie|goaltender|\bg\b/i,evidence);
   const xgDelta = finite(game.advancedDataset?.xgDifference, 0);
   const gsaxDelta = finite(game.advancedDataset?.gsaxDifference, 0);
   const playDelta = finite(game.advancedDataset?.playValueDifference, 0) * 0.08 + finite(game.advancedDataset?.playShotQualityDifference, 0) * 0.12;
@@ -200,7 +227,7 @@ function soccer(game, evidence) {
   const means = scoringMeans(game, { average: 1.35, priorGames: 12 });
   const xgAway = finite(game.advancedDataset?.awayXg, means.away);
   const xgHome = finite(game.advancedDataset?.homeXg, means.home);
-  const goalkeeperDelta = roleAvailability(game, 'home', /goalkeeper|\bgk\b/i) - roleAvailability(game, 'away', /goalkeeper|\bgk\b/i);
+  const goalkeeperDelta = roleAvailability(game, 'home', 'goalkeeper', /goalkeeper|\bgk\b/i,evidence) - roleAvailability(game, 'away', 'goalkeeper', /goalkeeper|\bgk\b/i,evidence);
   const playDelta = finite(game.advancedDataset?.playValueDifference, 0) * 0.08 + finite(game.advancedDataset?.playShotQualityDifference, 0) * 0.1;
   const adjustment = clamp(evidence.modelLogit * 0.095 + goalkeeperDelta * 0.08 + playDelta, -0.32, 0.32);
   const awayGoals = clamp(xgAway * Math.exp(-adjustment), 0.35, 3.4);
@@ -231,7 +258,13 @@ export function buildSportModelPrediction(game, evidence = {}) {
   const key = sportProfile(game).key;
   const builder = BUILDERS[key];
   if (!builder) return { available: false, modelId: 'no-specialist', sport: key, probabilities: null, expectedScores: null, sampleSize: 0, features: [] };
-  return builder(game, { modelLogit: finite(evidence.modelLogit, 0), ...evidence });
+  const now=evidence.now??Date.now();if(!Number.isFinite(now))throw Error('Valid specialist information cutoff required');
+  const availabilityEvidence={schema:'sports-specialist-availability-v1',cutoffAt:new Date(now).toISOString(),roles:[],missingRoles:[],exclusions:{},
+    scope:'Selected role-player assertions only; not team injury completeness or event starter verification. Counts of exclusions are role checks, not distinct people.',
+    scale:'Existing centered heuristic health/workload adjustment, not a calibrated medical or winner probability.'};
+  const result=builder(game,{...evidence,modelLogit:finite(evidence.modelLogit,0),now,availabilityEvidence});
+  if(availabilityEvidence.missingRoles.length)result.notes.push('Missing or unobserved role availability: '+availabilityEvidence.missingRoles.join(', ')+'. No health adjustment was inferred for these roles.');
+  return {...result,availabilityEvidence};
 }
 
 export function blendProbabilityVectors(primary, specialist, weight = 0.35, twoWay = true) {

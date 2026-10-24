@@ -1,6 +1,6 @@
 import {parseTeamRecord as parseRecord} from './teamRecordEvidence.js';
 import {marketTimestampEvidence} from './quoteChronology.js';
-import {explicitlyUnavailable,hasAvailabilityObservation} from './dataValidation.js';
+import {availabilityFraction,hasAvailabilityObservation} from './dataValidation.js';
 import {predictionInputsAt,observedInputState} from './inputChronology.js';
 import { buildEvidenceCoverage, summaryEvidence } from './evidenceCoverage.js';
 import { calibrateSelectedProbability, lookupElo } from './modelEvaluation.js';
@@ -170,18 +170,6 @@ function derivePlayerImpact(player, profile) {
     impact += clamp((statValue(stats, 'strikingDifferential', 'strikingDiff') ?? 0) / 2, -2, 2);
   }
   return clamp(impact, -10, 10);
-}
-
-function availabilityFraction(player) {
-  const status = String(player.status || '').toLowerCase();
-  if (player.active===false||explicitlyUnavailable(player)) return 0;
-  if (!hasAvailabilityObservation(player)) return null;
-  if (/doubtful/.test(status)) return 0.25;
-  if (/questionable|game.?time/.test(status)) return 0.52;
-  if (/probable|limited/.test(status)) return 0.82;
-  const availability = finite(player.availability);
-  if(availability===null)return /\bavailable\b|\bhealthy\b|\bactive\b/.test(status)?1:null;
-  return clamp(availability > 1 ? availability / 100 : availability, 0, 1);
 }
 
 function playerAvailabilityScore(players, profile, now) {
@@ -658,7 +646,7 @@ export function predictGame(game, index, modelContext = {}) {
   probabilities = Object.fromEntries(Object.entries(probabilities).map(([key, value]) => [key, value / total]));
 
   const evidenceProbabilities = { ...probabilities };
-  const specialist = buildSportModelPrediction(game, { modelLogit });
+  const specialist = buildSportModelPrediction({...game,autoPlayers:[...awayPlayerRows,...homePlayerRows]}, { modelLogit,now:evidenceNow });
   const modelDecision = modelDecisionForSport(modelContext.modelRegistry, profile.key, {now:evidenceNow,league:game.leagueKey,horizon:modelContext.forecastHorizon || 'Daily'});
   const hybridProbabilities = specialist.available
     ? blendProbabilityVectors(evidenceProbabilities, specialist.probabilities, modelDecision.specialistWeight, profile.twoWay)
@@ -775,7 +763,7 @@ export function predictGame(game, index, modelContext = {}) {
   return {
     gameId: game.id,
     inputChronology: inputs.audit,
-    evidenceCoverage: buildEvidenceCoverage(game, { now: evidenceNow, players: { away: awayPlayerRows, home: homePlayerRows }, teams: { away: awayTeam, home: homeTeam } }),
+    evidenceCoverage: {...buildEvidenceCoverage(game, { now: evidenceNow, players: { away: awayPlayerRows, home: homePlayerRows }, teams: { away: awayTeam, home: homeTeam } }),specialistAvailability:specialist.availabilityEvidence||null},
     index: index + 1,
     league: game.league,
     leagueKey: game.leagueKey,
@@ -885,7 +873,8 @@ export function predictGame(game, index, modelContext = {}) {
       expectedScores: specialist.expectedScores,
       features: specialist.features,
       sampleSize: specialist.sampleSize,
-      notes: specialist.notes
+      notes: specialist.notes,
+      availabilityEvidence:specialist.availabilityEvidence||null
     },
     inputCount: components.filter((row) => row.present).length + (market ? 1 : 0),
     missingInputPenalty: Math.round((100 - evidenceQualityValue) / 10),

@@ -72,3 +72,16 @@ export function hasAvailabilityObservation(player={}){
  if(!rolePrior&&/probable/i.test(text)&&!/probable starter/i.test(text))return true;
  return !rolePrior&&finiteNumber(player.availability)!==null;
 }
+
+/** Existing primary-model health scale; an assertion is not a calibrated medical probability. */
+export function availabilityFraction(player={}){
+ const status=String(player.status||'').toLowerCase();
+ if(player.active===false||explicitlyUnavailable(player))return 0;
+ if(!hasAvailabilityObservation(player))return null;
+ if(/doubtful/.test(status))return .25;
+ if(/questionable|game.?time/.test(status))return .52;
+ if(/probable|limited/.test(status))return .82;
+ const value=finiteNumber(player.availability);
+ if(value===null)return /\bavailable\b|\bhealthy\b|\bactive\b/.test(status)?1:null;
+ return Math.max(0,Math.min(1,value>1?value/100:value));
+}

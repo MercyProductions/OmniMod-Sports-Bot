@@ -1,0 +1,25 @@
+{
+  "phase": "specialist-health-evidence",
+  "modelVersion": "v6.0.58",
+  "overallSportsStatus": "in progress",
+  "items": [
+    {"item": "Reproduce pre-edit full suite", "status": "verified complete", "testsPassed": 1016},
+    {"item": "Unify role health assertions with primary semantics", "status": "verified complete"},
+    {"item": "Preserve current restrictions over old workload and unknown-health priors", "status": "verified complete"},
+    {"item": "Use selected manual/automatic rows without changing caller inputs", "status": "verified complete"},
+    {"item": "Conservative duplicate, team/side and chronology controls", "status": "verified complete"},
+    {"item": "Freeze structured specialist availability with each forecast", "status": "verified complete"},
+    {"item": "Final full regression and syntax checks", "status": "verified complete", "testsPassed": 1031, "syntaxFiles": 210},
+    {"item": "Native injuries and confirmed goalie source coverage", "status": "in progress", "limitation": "Saved real slate contains no automatic player/lineup assertions; inspected native season leaders do not confirm starters."},
+    {"item": "Independent forward and economic validation of current source", "status": "pending"},
+    {"item": "Frozen v6.0.52 forward-trial collection", "status": "in progress"},
+    {"item": "Queued complete Crypto and Stocks specifications", "status": "pending"}
+  ],
+  "newTests": 15,
+  "focusedTestsPassed": 78,
+  "liveTradingEnabled": false,
+  "productionChanged": false,
+  "modelPromoted": false,
+  "frozenTrialChanged": false,
+  "stocksScheduleChanged": false
+}
