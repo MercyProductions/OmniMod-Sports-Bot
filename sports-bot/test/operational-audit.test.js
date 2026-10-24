@@ -202,7 +202,7 @@ test('the read-only CLI scores an actual issued-and-graded immutable journal wit
  const frozen=records.find(event=>event.type==='forecast').payload;assert.deepEqual(frozen.modeledOutcomes,['away','home']);assert.equal(frozen.outcomePercentages.draw,null);
  const script=fileURLToPath(new URL('../scripts/audit-operations.js',import.meta.url));
  const {stdout}=await promisify(execFile)(process.execPath,[script,'--journal='+file,'--as-of='+iso(0)],{env:process.env,windowsHide:true});
- const report=JSON.parse(stdout);assert.equal(report.schema,'sports-operational-audit-v2');assert.equal(report.runtimeVerified,false);
+ const report=JSON.parse(stdout);assert.equal(report.schema,'sports-operational-audit-v3');assert.equal(report.runtimeVerified,false);
  const cohort=report.calibrationMonitoring.cohorts[0];assert.equal(cohort.recent.games,1);assert.equal(cohort.recent.accuracy,1);assert.ok(Math.abs(cohort.recent.brier-.32)<1e-12);
  assert.equal(report.calibrationMonitoring.automaticAction,false);
  const early=JSON.parse((await promisify(execFile)(process.execPath,[script,'--journal='+file,'--as-of='+iso(-2000)],{env:process.env,windowsHide:true})).stdout);
