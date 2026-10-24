@@ -1,5 +1,6 @@
 import {nativeNhlRecordEvidence} from './teamRecordEvidence.js';
 import {capturedEventTime} from './capturedEventTime.js';
+import {cdnWindowEvidence,scoreboardCoverage} from './scoreboardWindow.js';
 import {selectLineMarkets} from './lineMarketIntegrity.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {collectH2HBooks} from './bookmakerIntegrity.js';
@@ -149,12 +150,14 @@ function parseTeam(competitors, homeAway) {
 }
 
 export function parseEspnEvent(event, league, sourceMeta = {}) {
+  if(!event||typeof event!=='object')return null;
   const competition = Array.isArray(event.competitions) ? event.competitions[0] : null;
   if (!competition || !Array.isArray(competition.competitors)) return null;
+  const startTime = event.date || competition.date || '';
+  if(!Number.isFinite(capturedEventTime(startTime)))return null;
   const status = parseStatus(event.status ?? competition.status);
   const away = parseTeam(competition.competitors, 'away');
   const home = parseTeam(competition.competitors, 'home');
-  const startTime = event.date || competition.date || '';
   return {
     id: String(event.id || competition.id || `${league.key}-${away.abbr}-${home.abbr}-${startTime}`),
     league: league.label,
@@ -248,7 +251,7 @@ function cdnScoreboardUrl(league, dateParam) {
   const route = league.sport === 'soccer' ? `soccer/${league.league}` : league.league;
   const url = new URL(`https://cdn.espn.com/core/${route}/scoreboard`);
   url.searchParams.set('xhr', '1');
-  url.searchParams.set('dates', dateParam);
+  url.searchParams.set('date', dateParam);
   if (league.groups) url.searchParams.set('groups', league.groups);
   if (league.limit) url.searchParams.set('limit', String(league.limit));
   return url.toString();
@@ -256,7 +259,7 @@ function cdnScoreboardUrl(league, dateParam) {
 
 async function fetchEspnGames(date = new Date(), options = {}) {
   if (options.localOnly || config.localOnly) {
-    return { games: [], diagnostics: ['ESPN scoreboard: skipped because LOCAL_ONLY=true.'], externalCalls: 0 };
+    return { games: [], diagnostics: ['ESPN scoreboard: skipped because LOCAL_ONLY=true.'], externalCalls: 0,coverage:[] };
   }
   const dateParam = espnDateKey(date);
   const requestedKeys = new Set((options.leagueKeys || []).map((key) => String(key).toLowerCase()));
@@ -266,6 +269,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     .slice(0, config.maxLeaguesPerRefresh);
   const diagnostics = [];
   const allGames = [];
+  const coverage=[];
   let externalCalls = 0;
 
   await Promise.all(leagues.map(async (league) => {
@@ -283,12 +287,12 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     let provider = 'ESPN';
     if (!primary.ok || !primary.json || primary.upstreamError) {
       const cdn = await cachedFetchJson(cdnScoreboardUrl(league, dateParam), {
-        namespace: `espn-cdn-v2-${league.key}`,
+        namespace: `espn-cdn-v3-${league.key}`,
         ttlMs: config.scoreboardCacheMinutes * 60_000,
         staleMs: config.scoreboardStaleHours * 60 * 60_000,
         negativeTtlMs: 5 * 60_000,
         timeoutMs: 12_000,
-        transformJson: (payload) => ({ events: scoreboardEventsFromCdn(payload, league) })
+        transformJson: (payload) => ({ events: scoreboardEventsFromCdn(payload, league),windowEvidence:cdnWindowEvidence(payload) })
       });
       if (cdn.cacheState === 'network' || cdn.cacheState === 'revalidated') externalCalls += 1;
       if (cdn.ok && Array.isArray(cdn.json?.events)) {
@@ -312,10 +316,13 @@ async function fetchEspnGames(date = new Date(), options = {}) {
       });
       if (official.cacheState === 'network' || official.cacheState === 'revalidated') externalCalls += 1;
       if (official.ok && Array.isArray(official.json?.games)) {
+        const parsedGames=[];
         for (const game of official.json.games) {
           const parsed = parseNhlOfficialGame(game, league, { fetchedAt: official.fetchedAt, cacheState: official.cacheState, upstreamError: official.upstreamError || '' });
-          if (parsed && parsed.dateKey === localDateKey(date)) allGames.push(parsed);
+          if(parsed)parsedGames.push(parsed);
         }
+        const report=scoreboardCoverage({leagueKey:league.key,provider:'NHL API',requestedDay:localDateKey(date),reportedEvents:official.json.games.length,parsedGames,sourceMeta:official});coverage.push(report);
+        for(const game of parsedGames)if(game.dateKey===localDateKey(date)){game.sourceMeta.scoreboardWindow=report;allGames.push(game);}
         diagnostics.push(`${league.label}: ${official.json.games.length} official event(s), source=${official.cacheState}.`);
         return;
       }
@@ -323,6 +330,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     }
     if (result.cacheState === 'network' || result.cacheState === 'revalidated') externalCalls += 1;
     if (!result.ok || !result.json) {
+      coverage.push({...scoreboardCoverage({leagueKey:league.key,provider,requestedDay:localDateKey(date),reportedEvents:null,sourceMeta:result}),windowStatus:'provider_unavailable'});
       diagnostics.push(`${league.label}: ${result.error || 'no response'}`);
       return;
     }
@@ -331,6 +339,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
           ? result.json.events.filter((event) => String(event?.leagueId || '') === league.league)
           : result.json.events)
       : [];
+    const parsedGames=[];
     for (const event of events) {
       const parsed = parseEspnEvent(event, league, {
         fetchedAt: result.fetchedAt,
@@ -338,12 +347,14 @@ async function fetchEspnGames(date = new Date(), options = {}) {
         provider,
         upstreamError: result.upstreamError || ''
       });
-      if (parsed && parsed.dateKey === localDateKey(date)) allGames.push(parsed);
+      if(parsed)parsedGames.push(parsed);
     }
-    diagnostics.push(`${league.label}: ${events.length} event(s), source=${result.cacheState}`);
+    const report=scoreboardCoverage({leagueKey:league.key,provider,requestedDay:localDateKey(date),reportedEvents:events.length,parsedGames,sourceMeta:result,windowEvidence:result.json.windowEvidence||null});coverage.push(report);
+    for(const game of parsedGames)if(game.dateKey===localDateKey(date)){game.sourceMeta.scoreboardWindow=report;allGames.push(game);}
+    diagnostics.push(`${league.label}: ${events.length} provider event(s), ${report.acceptedLocalDayGames} accepted local-day game(s), ${report.outsideLocalDayGames} outside day, ${report.invalidRows} invalid; window=${report.windowStatus}; source=${result.cacheState}`);
   }));
   allGames.sort((a, b) => new Date(a.startTime) - new Date(b.startTime) || a.league.localeCompare(b.league));
-  return { games: allGames, diagnostics, externalCalls };
+  return { games: allGames, diagnostics, externalCalls,coverage:coverage.sort((a,b)=>a.leagueKey.localeCompare(b.leagueKey)) };
 }
 
 function resolveLeague(row) {
@@ -801,6 +812,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     disclaimer: 'Probabilistic research onlyâ€”not a guarantee or wagering advice. Confidence must be validated against the botâ€™s calibration report.',
     games,
     predictions,
+    scoreboardCoverage:scoreboard.coverage||[],
     modelSummary: {
       version: MODEL_VERSION,
       frozenLegacyPredictions: predictions.filter((prediction) => !/^OmniMod Evidence Ensemble v(?:3|4|5|6)/.test(String(prediction.modelVersion || ''))).length,
@@ -936,6 +948,7 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
     return !fresh?cachedGame:String(fresh.id)===String(cachedGame.id)?fresh:{...fresh,id:cachedGame.id,upstreamEventId:fresh.id};
   });
   const refreshed = { ...cachedSlate, refreshedAt: new Date().toISOString(), games, predictions,
+    finalScoreboardCoverage:scoreboard.coverage||[],
     finalAssociationRejections:rejections,manualResultAudit,
     diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.',`Final source association rejections: ${rejections.length}`,`Manual result audit: ${manualResultAudit.filter(row=>row.status==='applied').length} applied, ${manualResultAudit.filter(row=>row.status==='rejected').length} rejected.`],
     alerts: [], newFinals: finals };

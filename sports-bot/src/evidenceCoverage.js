@@ -49,7 +49,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       : meta.cacheState === 'stale' ? 'stale_cache' : 'receipt_available';
     const clocks = observationClocks(meta,now);
     sources[key] = { fetchedAt, state, ...clocks, cacheState: meta?.cacheState || 'unknown',
-      sourceObservationAt: timestamp(meta?.sourceObservationAt), underlyingFreshnessVerified: false };
+      sourceObservationAt: timestamp(meta?.sourceObservationAt), underlyingFreshnessVerified: false,
+      ...(key==='schedule'?{requestWindow:meta?.scoreboardWindow||null}:{}) };
     if (state !== 'receipt_available') missing.push(`${key}:${state}`);
     if (clocks.observationState !== 'observed_by_cutoff') missing.push(`${key}:observation_${clocks.observationState}`);
     if (clocks.nativeObservationState !== 'observed_by_cutoff') missing.push(`${key}:native_observation_${clocks.nativeObservationState}`);
