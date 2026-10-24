@@ -69,7 +69,9 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
   }).map(row=>row.payload.durationMs);
   return {schema:'sports-operational-audit-v3',asOf:new Date(asOf).toISOString(),runtimeVerified:false,
     refreshes:{terminalAttempts:attempts.length,gameOutcomes:statuses,rejectionReasons:reasons,
-      sourceAcceptance:{selectedSnapshotCompletions,invalidSnapshotAcceptanceProofs,scope:'Explicit linked proofs only; no inference from absent legacy metadata.'},
+      sourceAcceptance:{selectedSnapshotCompletions,invalidSnapshotAcceptanceProofs,
+        rejectedFrozenInputProofs:new Set(visible.filter(row=>row.type==='forecast_lifecycle'&&row.payload?.state==='REJECTED'
+          &&row.payload.reason==='availability_refresh_frozen_input_not_verified'&&/^[a-f0-9]{64}$/.test(row.payload.forecastId||'')).map(row=>row.payload.forecastId)).size,scope:'Explicit linked proofs only; no inference from absent legacy metadata.'},
       reasonEvidence:{policy:REFRESH_REASON_POLICY,currentPolicyAttempts,legacyOrUnknownPolicyAttempts:attempts.length-currentPolicyAttempts,
         unrecognizedReasonsOmitted:omittedCounts.filter(value=>Number.isSafeInteger(value)&&value>=0).reduce((sum,value)=>sum+value,0),
         invalidOmissionCounters:omittedCounts.filter(value=>!Number.isSafeInteger(value)||value<0).length,historicalCompletenessVerified:false},

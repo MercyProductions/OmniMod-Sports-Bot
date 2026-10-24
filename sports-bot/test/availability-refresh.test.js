@@ -149,6 +149,7 @@ test('matching probabilities cannot hide different frozen provisional inputs at 
  assert.equal(result.completed.length,0);const rows=await readPredictionJournal(file);
  assert.equal(rows.filter(row=>row.type==='forecast').length,0);
  assert.ok(rows.some(row=>row.payload.reason==='availability_refresh_frozen_input_not_verified'));
+ assert.equal(auditSportsOperations(rows,{asOf:now+1000}).refreshes.sourceAcceptance.rejectedFrozenInputProofs,1);
 });
 
 test('alternate-source retries preserve the same issued forecast and terminal proof bytes',async t=>{

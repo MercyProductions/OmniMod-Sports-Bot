@@ -22,7 +22,7 @@ The original cache, source-conflict, event, schedule, probability and journal-is
 
 `pregameRefresh.js` takes one local input snapshot across asynchronous issuance. `predictionJournal.js:255` rechecks the acceptance proof against the **frozen provisional/issued inputs inside the journal write transaction before issuance**. Equal probabilities cannot conceal mismatched source evidence. Failed proof checks do not create a new eligible forecast. Matching existing issued records stay immutable; a failed retry is not permission to rewrite them.
 
-Successful terminal attempts carry a sanitized `sourceAcceptanceEvidence` linked to the actual acknowledged forecast ID. Its fixed fields include source hashes, event-binding hashes, horizon and original clocks, without source URLs, provider keys or raw error text. Terminal serialization verifies that the cited issued forecast contains those selected inputs. `operationalAudit.js` reports linked snapshot completions and invalid proofs separately. Missing legacy proof metadata is not interpreted as a successful summary refresh.
+Successful terminal attempts carry a sanitized `sourceAcceptanceEvidence` linked to the actual acknowledged forecast ID. Its fixed fields include source hashes, event-binding hashes, horizon and original clocks, without source URLs, provider keys or raw error text. Terminal serialization verifies that the cited issued forecast contains those selected inputs. `operationalAudit.js` reports linked snapshot completions, invalid terminal proofs and rejected frozen-input proofs separately. Missing legacy proof metadata is not interpreted as a successful summary refresh.
 
 ## Setup with an authorized provider
 
