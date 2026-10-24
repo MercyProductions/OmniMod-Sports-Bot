@@ -90,6 +90,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     const lineup = reconcilePlayerEvidence((game.autoLineups || []).filter(row => matches(game[side], row.team)), players);
     const injuries = players.filter(row => /injury/i.test(row.source || ''));
     const critical = criticalRole ? reconcilePlayerEvidence([...players, ...lineup]).filter(row => criticalRole.test(row.role || '')) : [];
+    const confirmedCritical=critical.filter(isConfirmedStarter);
     const metrics = players.flatMap(row => Object.values(row.stats || {})).map(value => finiteNumber(value));
     const historyGames = finiteNumber(game.autoHistory?.[`${side}Games`]);
     sides[side] = {
@@ -115,7 +116,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
       lineupEvidenceConflicts: lineup.filter(row => row.availabilityConflict || row.starterEvidenceConflict).length,
       projectedStarters: players.filter(row => row.starter && !isConfirmedStarter(row)).length,
       criticalRole: criticalRole ? criticalRole.source : 'not_a_single_position',
-      criticalStarterStatus: !criticalRole ? 'not_applicable' : critical.some(isConfirmedStarter)
+      criticalConfirmedAssertions:confirmedCritical.length,
+      criticalStarterStatus: !criticalRole ? 'not_applicable' : confirmedCritical.length>1?'conflicting_confirmed_records':confirmedCritical.length===1
         ? 'confirmed_record_present' : critical.length ? 'projected_or_unavailable' : 'missing',
       playerHistorySampleSizes: players.map(row => ({ playerId: String(row.sourceAthleteId || row.id || ''),
         games: finiteNumber(row.stats?.historicalBoxscoreGames) })),
@@ -127,6 +129,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     if (sides[side].lineupEvidenceConflicts) missing.push(`${side}:lineup_evidence_conflict`);
     if (historyGames === null || historyGames < 8) missing.push(`${side}:thin_or_unknown_team_history`);
     if (criticalRole && sides[side].criticalStarterStatus !== 'confirmed_record_present') missing.push(`${side}:critical_starter_unconfirmed`);
+    if(confirmedCritical.length>1)missing.push(`${side}:critical_starter_identity_conflict`);
   }
   return { schema: 'sports-evidence-coverage-v2', gameId: String(game.id || ''), league: game.leagueKey || '',
     cutoffAt: new Date(now).toISOString(), summary, sources, sides,

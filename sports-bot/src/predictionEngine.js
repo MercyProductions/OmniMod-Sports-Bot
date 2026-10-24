@@ -1,4 +1,5 @@
 import {parseTeamRecord as parseRecord} from './teamRecordEvidence.js';
+import {capturedEventTime} from './capturedEventTime.js';
 import {marketTimestampEvidence} from './quoteChronology.js';
 import {availabilityFraction,hasAvailabilityObservation} from './dataValidation.js';
 import {predictionInputsAt,observedInputState} from './inputChronology.js';
@@ -437,8 +438,8 @@ function localDataConfidence(awayTeam, homeTeam, awayPlayers, homePlayers, conte
 function modelMode(game,now) {
   if (game.statusKey === 'final') return 'retrospective_ungraded';
   if (game.statusKey === 'live') return 'in_play';
-  const start = new Date(game.startTime).getTime();
-  return Number.isFinite(start) && start < now ? 'late_pregame' : 'pregame';
+  const start = capturedEventTime(game.startTime);
+  return !Number.isFinite(start)?'unverifiable_time':start<=now?'late_pregame':'pregame';
 }
 
 function confidenceBand(value) {
@@ -714,8 +715,10 @@ export function predictGame(game, index, modelContext = {}) {
     finite(homeAutomatic?.seasonTransitionRisk, 0),
     finite(game.autoLineup?.rosterTransitionRisk, 0)
   );
+  const evidenceCoverage=buildEvidenceCoverage(game,{now:evidenceNow,players:{away:awayPlayerRows,home:homePlayerRows},teams:{away:awayTeam,home:homeTeam}});
   const uncertainty = estimatePredictionUncertainty({
-    game,
+    game:{...game,autoPlayers:[...awayPlayerRows,...homePlayerRows]},
+    now:evidenceNow,
     probabilities,
     selectedSide: predictedSide,
     specialistProbabilities: specialist.probabilities,
@@ -763,7 +766,8 @@ export function predictGame(game, index, modelContext = {}) {
   return {
     gameId: game.id,
     inputChronology: inputs.audit,
-    evidenceCoverage: {...buildEvidenceCoverage(game, { now: evidenceNow, players: { away: awayPlayerRows, home: homePlayerRows }, teams: { away: awayTeam, home: homeTeam } }),specialistAvailability:specialist.availabilityEvidence||null},
+    evidenceCoverage: {...evidenceCoverage,specialistAvailability:specialist.availabilityEvidence||null,uncertaintyContext:uncertainty.context},
+    uncertaintyContext:uncertainty.context,
     index: index + 1,
     league: game.league,
     leagueKey: game.leagueKey,

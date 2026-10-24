@@ -47,3 +47,7 @@ The first actual invocation at 2026-10-24 05:46:11 UTC captured 12 NHL forecasts
 ## Latest checked installation state
 
 The existing Sports heartbeat remains ACTIVE and unchanged after the v6.0.57 source repairs. Two actual current-time invocations completed at 2026-10-24T05:46:11.398Z and 06:58:56.840Z, retaining 12 distinct games, one date and zero finals, with two evidence receipts and 25 retained provider blobs. These checks do not establish every automated hourly invocation. Original source/plan/artifact are preserved; current data repairs are not silently installed into the trial. The Stocks automation remains ACTIVE with unchanged file hash. See [current data limitations](SPORTS_NATIVE_RECORD_AVAILABILITY.md).
+
+## Additional checked current-time run
+
+At 2026-10-24T08:03:07.820Z a due invocation completed after checking the prior terminal run, no live worker and no owner lock. It retained 12 games/one date/zero finals, appended receipt 3 and preserved 34 provider blobs; 10 ordinary free-provider requests/three failures were recorded. Cumulative requests across the three checked runs are 37. Original archived v52 source/plan/artifact and first forecasts remain unchanged; current v59 code was not substituted. This is no proof that every automatic hourly wake ran, and the worker interval counter is not continuity proof. [Current repair and limits](SPORTS_UNCERTAINTY_CUTOFF_LINEUPS.md).
