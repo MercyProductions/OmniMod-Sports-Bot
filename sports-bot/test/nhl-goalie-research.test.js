@@ -7,10 +7,10 @@ import {importIntelligence,readIntelligenceStore} from '../src/intelligenceStore
 import {projectPlayerParticipation} from '../src/participationProjection.js';
 import {isConfirmedStarter} from '../src/playerEvidence.js';
 const asOf=Date.parse('2099-02-01T18:00:00Z'),fetchedAt='2099-02-01T17:59:00Z';
-const game=()=>({id:'nhl-2098020001',leagueKey:'nhl',sportGroup:'Hockey',statusKey:'scheduled',startTime:'2099-02-02T18:00:00Z',seasonYear:20982099,away:{name:'Away',abbr:'AAA'},home:{name:'Home',abbr:'HHH'}});
+const game=()=>({id:'nhl-2098020001',leagueKey:'nhl',sportGroup:'Hockey',statusKey:'scheduled',startTime:'2099-02-02T18:00:00Z',seasonYear:20982099,away:{id:'1',name:'Away',abbr:'AAA'},home:{id:'2',name:'Home',abbr:'HHH'}});
 const leader=(playerId)=>({playerId,positionCode:'G',name:{default:'Goalie '+playerId},gamesPlayed:5,savePctg:.91,gaa:2.5});
-const payload=()=>({id:2098020001,gameState:'FUT',startTimeUTC:game().startTime,season:20982099,awayTeam:{abbrev:'AAA'},homeTeam:{abbrev:'HHH'},matchup:{goalieComparison:{contextSeason:20982099,awayTeam:{leaders:[leader(1),leader(2)]},homeTeam:{leaders:[leader(3),leader(4)]}}}});
-const parse=(p=payload(),g=game(),meta={})=>parseNhlGoalieResearch(p,g,{asOf,fetchedAt,...meta});
+const payload=()=>({id:2098020001,gameState:'FUT',startTimeUTC:game().startTime,season:20982099,awayTeam:{id:1,abbrev:'AAA'},homeTeam:{id:2,abbrev:'HHH'},matchup:{goalieComparison:{contextSeason:20982099,awayTeam:{leaders:[leader(1),leader(2)]},homeTeam:{leaders:[leader(3),leader(4)]}}}});
+const parse=(p=payload(),g=game(),meta={})=>parseNhlGoalieResearch(p,g,{asOf,fetchedAt,cacheState:'network',...meta});
 test('native goalie season candidates retain samples but never become starters or health clearances',()=>{
  const result=parse();assert.equal(result.status,'season_context_only');assert.equal(result.confirmedStarters,0);assert.equal(result.injuryCoverage,'unknown');assert.equal(result.sides.away.candidates.length,2);
  for(const row of result.sides.away.candidates){assert.equal(row.availability,null);assert.equal(row.healthStatus,'unknown');assert.equal(isConfirmedStarter(row),false);}assert.equal(result.nativePublicationVerified,false);
@@ -54,4 +54,19 @@ test('imported missing player availability remains unknown rather than 100 perce
 test('unknown availability adds uncertainty instead of claiming an observed health probability',()=>{
  const unknown=projectPlayerParticipation({role:'Goalie'},null,'hockey'),known=projectPlayerParticipation({role:'Goalie',availability:100},null,'hockey');assert.equal(unknown.availabilityObserved,false);assert.equal(known.availabilityObserved,true);assert.ok(unknown.uncertainty>known.uncertainty);assert.equal(unknown.availabilityBasis,'unobserved_role_prior_not_health_clearance');
  const rolePrior=projectPlayerParticipation({role:'Goalie',availability:100,status:'probable starter',availabilityEvidence:'role_prior_not_injury_clearance'},null,'hockey');assert.equal(rolePrior.availabilityObserved,false);
+});
+test('stale, negative-cache and unknown-cache goalie receipts cannot be described as usable season context',()=>{
+ for(const meta of [{fetchedAt:'2099-02-01T17:00:00Z'},{cacheState:'stale'},{cacheState:'unknown'},{cacheState:'negative_cache'}])assert.equal(parse(payload(),game(),meta).status,'unavailable');
+});
+test('native goalie context rejects postponed games and unverified team ID bindings',()=>{
+ for(const p of [{...payload(),gameScheduleState:'PPD'},{...payload(),awayTeam:{id:999,abbrev:'AAA'}},{...payload(),homeTeam:{id:1,abbrev:'HHH'}},{...payload(),startTimeUTC:'2099-02-30T18:00:00Z'}])assert.equal(parse(p).status,'unavailable');
+ assert.equal(parse(payload(),{...game(),statusKey:'alert'}).status,'unavailable');
+});
+test('retained goalie context expires at inference and cannot be transplanted to another game',()=>{
+ const g={...game(),goalieResearch:parse()},original=structuredClone(g);
+ for(const [input,at] of [[g,asOf+15*60000],[{...g,id:'nhl-2098020002'},asOf],[{...g,away:{...g.away,id:'999'}},asOf]]){
+  const safe=predictionInputsAt(input,{},at);assert.equal(safe.game.goalieResearch,null);assert.ok(Object.keys(safe.audit.excluded).some(key=>key.startsWith('goalieResearch:')));
+  const report=buildEvidenceCoverage(input,{now:at});assert.equal(report.goalieResearch.status,'unavailable');assert.equal(report.goalieResearch.candidatesBySide.away,0);assert.equal(report.sides.away.injuryCoverage,'unknown');
+ }
+ assert.deepEqual(g,original);
 });

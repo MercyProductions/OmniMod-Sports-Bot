@@ -47,8 +47,12 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 
 ## Later reconciliation repair
 
-[Development v6.0.55](SPORTS_AVAILABILITY_RECONCILIATION.md) preserves original same-player inputs across provider replacement, expiry and JSON restart; checks per-source clocks; retains separate provider conflict/empty-snapshot state; and quarantines incompatible event starter identities. Primary health scoring now keeps missing health unknown. Full966 tests pass. The schema/configuration remains compatible; no actual external injury/confirmed-goalie coverage was recovered, and the frozenv52 trial remains separate.
+[Development v6.0.55](SPORTS_AVAILABILITY_RECONCILIATION.md) preserves original same-player inputs across provider replacement, expiry and JSON restart; checks per-source clocks; retains separate provider conflict/empty-snapshot state; and quarantines incompatible event starter identities. Primary health scoring now keeps missing health unknown. Full966 tests pass. The schema/configuration remains compatible; no actual external injury/confirmed-goalie coverage was recovered, and the frozen v52 trial remains separate.
 
 ## Native naming reuse
 
 [Development v6.0.56](SPORTS_NHL_ODDS_IDENTITY.md) extracts scoped native place/common-name evidence from the same bounded landing request for odds event/outcome matching. It does not turn season goalie leaders into confirmed starters or add health confidence. The shared6-game default/12 maximum remain unchanged. Separate twelve-game real research found no explicit injury/starter fields; actual confirmed coverage remains unavailable.
+
+## Receipt and identity revalidation
+
+[Development v6.0.57](SPORTS_NATIVE_RECORD_AVAILABILITY.md) now rejects stale/unbound goalie context at parsing, inference and evidence reporting, and stops describing stale team injury reports as current coverage. Explicit unavailable-player restrictions remain. A receipt-correct retrospective review retained 47 season-candidate rows from 12 saved native responses but recovered zero confirmed goalies or injury assertions. Full 1,016 tests pass; this is neither a new forecast nor evidence of predictive improvement. The frozen v52 trial and optional provider adapter remain separate.

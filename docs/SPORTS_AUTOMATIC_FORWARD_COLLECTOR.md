@@ -6,7 +6,7 @@ The user authorized automatic collection for the existing NHL Daily hybrid trial
 
 The trial still uses source commit `03c6714ff0ca47ce98b491807ad3742877ca0102`, model v6.0.52 and the original registered artifact/plan. No frozen source, artifact, forecast or plan was rewritten. A separate collector file manifest pins 104 extracted-source/support files and the private empty environment. Original source archive SHA256 and selection state/plan/artifact digests are checked before work. Dependencies share the verified existing Node dependency directory by junction; this is controlled isolation, not an OS security sandbox or authentication of every dependency byte.
 
-The declared period is **2026-10-24 05:46 UTC through 2026-11-07 05:46 UTC**. Before it starts, the runner returns awaiting-trial-start with zero provider requests. The actual frozen worker also has a no-network preflight, which verified the registered source/artifact. No real trial collection has occurred at this phase's verification checkpoint.
+The declared period is **2026-10-24 05:46 UTC through 2026-11-07 05:46 UTC**. Before it starts, the runner returns awaiting-trial-start with zero provider requests. The actual frozen worker also has a no-network preflight, which verified the registered source/artifact. At this initial installation checkpoint no real trial collection had occurred; later checked runs are recorded below.
 
 The collector stops starting new forecasts four minutes before the end to respect its bounded four-minute child timeout. Trial eligibility still uses original journal receipt times strictly inside the declared period. Final-only reconciliation may continue for seven additional days, after which the heartbeat must report actual status/unresolved outcomes and remove itself. A review-ready research result never promotes a model automatically.
 
@@ -43,3 +43,7 @@ The minimum remains 75 independent games and eight dates over the predeclared 14
 ## Subsequent actual-run checkpoint
 
 The first actual invocation at 2026-10-24 05:46:11 UTC captured 12 NHL forecasts and zero finals. Earlier pending statements above describe the installation checkpoint. [Evidence-receipt report](SPORTS_FORWARD_EVIDENCE_RECEIPTS.md) documents the new local capture/provider/journal protections, three request failures and remaining unknown injuries/goalies. The source and registered experiment are unchanged. Full 945 tests pass; model validation remains in progress.
+
+## Latest checked installation state
+
+The existing Sports heartbeat remains ACTIVE and unchanged after the v6.0.57 source repairs. Two actual current-time invocations completed at 2026-10-24T05:46:11.398Z and 06:58:56.840Z, retaining 12 distinct games, one date and zero finals, with two evidence receipts and 25 retained provider blobs. These checks do not establish every automated hourly invocation. Original source/plan/artifact are preserved; current data repairs are not silently installed into the trial. The Stocks automation remains ACTIVE with unchanged file hash. See [current data limitations](SPORTS_NATIVE_RECORD_AVAILABILITY.md).

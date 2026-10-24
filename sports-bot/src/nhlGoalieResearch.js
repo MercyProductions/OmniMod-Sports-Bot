@@ -1,14 +1,14 @@
 import {parseNhlTeamIdentity} from './nhlTeamIdentity.js';
 import {cachedFetchJson} from './providerCache.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
+import {nativeGoalieContextState} from './nhlGoalieFreshness.js';
+import {capturedEventTime} from './capturedEventTime.js';
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
 /** Native season leaders are context, never an event starter/health confirmation. */
 export function parseNhlGoalieResearch(payload,game,{fetchedAt,cacheState='unknown',asOf=Date.now()}={}){
- const start=quoteTimeEpoch(game?.startTime),receipt=quoteTimeEpoch(fetchedAt),native=/^nhl-(\d+)$/.exec(String(game?.id||''));
+ const start=capturedEventTime(game?.startTime),receipt=quoteTimeEpoch(fetchedAt),native=/^nhl-(\d+)$/.exec(String(game?.id||''));
  const unavailable=reason=>({schema:'sports-nhl-goalie-research-v1',status:'unavailable',reason,confirmedStarters:0,injuryCoverage:'unknown'});
- if(!Number.isFinite(asOf)||!Number.isFinite(start)||!Number.isFinite(receipt)||receipt>asOf||asOf>=start)return unavailable('invalid_pregame_chronology');
- if(!native||String(payload?.id)!==native[1]||quoteTimeEpoch(payload?.startTimeUTC)!==start||!['FUT','PRE'].includes(payload?.gameState))return unavailable('event_identity_or_state_mismatch');
- for(const side of ['away','home'])if(!game[side]?.abbr||payload[side+'Team']?.abbrev!==game[side].abbr)return unavailable('team_identity_mismatch');
+ const state=nativeGoalieContextState(payload,game,{fetchedAt,cacheState,asOf});if(state)return unavailable(state);
  const comparison=payload.matchup?.goalieComparison;
  if(!comparison||comparison.contextSeason!==payload.season||!Array.isArray(comparison.awayTeam?.leaders)||!Array.isArray(comparison.homeTeam?.leaders))return unavailable('native_goalie_context_missing');
  if(game.seasonYear&&String(game.seasonYear).length===8&&game.seasonYear!==payload.season)return unavailable('season_mismatch');
@@ -29,7 +29,9 @@ export function parseNhlGoalieResearch(payload,game,{fetchedAt,cacheState='unkno
  }
  const awayIds=new Set(sides.away.candidates.map(row=>row.playerId));
  const shared=sides.home.candidates.filter(row=>awayIds.has(row.playerId));if(shared.length)return unavailable('cross_team_player_identity_conflict');
- return {schema:'sports-nhl-goalie-research-v1',status:sides.away.candidates.length&&sides.home.candidates.length?'season_context_only':'incomplete_context',provider:'NHL API',eventId:native[1],startTime:new Date(start).toISOString(),fetchedAt:new Date(receipt).toISOString(),cacheState,
+ const sourceEvent={id:payload.id,season:payload.season,gameState:payload.gameState,gameScheduleState:payload.gameScheduleState,startTimeUTC:payload.startTimeUTC,
+  ...Object.fromEntries(['away','home'].map(side=>[side+'Team',{id:payload[side+'Team'].id,abbrev:payload[side+'Team'].abbrev}]))};
+ return {schema:'sports-nhl-goalie-research-v1',status:sides.away.candidates.length&&sides.home.candidates.length?'season_context_only':'incomplete_context',provider:'NHL API',eventId:native[1],startTime:new Date(start).toISOString(),fetchedAt:new Date(receipt).toISOString(),cacheState,sourceEvent,
   sourceObservationAt:null,nativePublicationVerified:false,season:payload.season,confirmedStarters:0,injuryCoverage:'unknown',sides,rejectedRows,
   policy:'Season leaders only; not projected or confirmed starters. No health clearance, model-confidence bonus or automatic player input.'};
 }

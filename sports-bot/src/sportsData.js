@@ -1,3 +1,5 @@
+import {nativeNhlRecordEvidence} from './teamRecordEvidence.js';
+import {capturedEventTime} from './capturedEventTime.js';
 import {selectLineMarkets} from './lineMarketIntegrity.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {collectH2HBooks} from './bookmakerIntegrity.js';
@@ -200,17 +202,20 @@ export function scoreboardEventsFromCdn(payload, league = null) {
   return events.filter((event) => String(event?.leagueId || '') === league.league);
 }
 
-export function parseNhlOfficialGame(game, league, sourceMeta = {}) {
-  if (!game?.id || !game.startTimeUTC || !game.awayTeam?.abbrev || !game.homeTeam?.abbrev) return null;
+export function parseNhlOfficialGame(game, league, sourceMeta = {}, {asOf=Date.now()}={}) {
+  if (!game?.id || !Number.isFinite(capturedEventTime(game.startTimeUTC)) || !game.awayTeam?.abbrev || !game.homeTeam?.abbrev) return null;
   const state = String(game.gameState || '').toUpperCase();
-  const statusKey = ['FINAL', 'OFF'].includes(state) ? 'final' : ['LIVE', 'CRIT'].includes(state) ? 'live' : 'scheduled';
+  const schedule=String(game.gameScheduleState||'').toUpperCase();
+  const statusKey = schedule&&schedule!=='OK'?'alert':['FINAL', 'OFF'].includes(state) ? 'final' : ['LIVE', 'CRIT'].includes(state) ? 'live' : ['FUT','PRE'].includes(state)?'scheduled':'alert';
+  const records=Object.fromEntries(['away','home'].map(side=>[side,nativeNhlRecordEvidence(game,side,sourceMeta,{asOf})]));
   const awayScore = validScore(game.awayTeam.score);
   const homeScore = validScore(game.homeTeam.score);
-  const team = (side, score, otherScore) => ({
+  const team = (side, score, otherScore, recordEvidence) => ({
     id: String(side.id || ''),
     name: side.name?.default || side.abbrev,
     abbr: side.abbrev,
-    record: '',
+    record:['parsed_native_assertion','zero_games'].includes(recordEvidence.status)?recordEvidence.raw:'',
+    recordEvidence,
     score,
     winner: statusKey === 'final' && score !== null && otherScore !== null && score > otherScore,
     logo: side.logo || ''
@@ -223,16 +228,16 @@ export function parseNhlOfficialGame(game, league, sourceMeta = {}) {
     startTimeLocal: formatLocalTime(game.startTimeUTC),
     dateKey: localDateKey(new Date(game.startTimeUTC)),
     statusKey,
-    statusLabel: statusKey === 'final' ? 'Final' : statusKey === 'live' ? 'Live' : 'Upcoming',
-    detail: state || 'Scheduled',
+    statusLabel: statusKey === 'final' ? 'Final' : statusKey === 'live' ? 'Live' : statusKey==='alert'?'Alert':'Upcoming',
+    detail: [state,schedule].filter(Boolean).join(' / ') || 'Unknown native status',
     venue: game.venue?.default || '',
     venueDetails: { id: '', name: game.venue?.default || '', address: { city: '', state: '', country: '' } },
-    neutralSite: false,
+    neutralSite: typeof game.neutralSite==='boolean'?game.neutralSite:null,
     seasonYear: Number(game.season) || null,
     seasonType: Number(game.gameType) || null,
     seasonSlug: '',
-    away: team(game.awayTeam, awayScore, homeScore),
-    home: team(game.homeTeam, homeScore, awayScore),
+    away: team(game.awayTeam, awayScore, homeScore,records.away),
+    home: team(game.homeTeam, homeScore, awayScore,records.home),
     odds: null,
     source: 'NHL official scoreboard',
     sourceMeta: { provider: 'NHL API', ...sourceMeta }

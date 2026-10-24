@@ -4,6 +4,7 @@ import {parseEspnSummary} from '../src/autoEnrichment.js';
 import {buildEvidenceCoverage, summaryEvidence, summarizeEvidenceCoverage} from '../src/evidenceCoverage.js';
 import {attachParticipationProjections, projectPlayerParticipation} from '../src/participationProjection.js';
 import {predictGame} from '../src/predictionEngine.js';
+import {predictionInputsAt} from '../src/inputChronology.js';
 import {modelDecisionForSport} from '../src/modelRegistry.js';
 import {applyPlayerProfilesAndLineups} from '../src/advancedMetrics.js';
 import {reconcilePlayerEvidence} from '../src/playerEvidence.js';
@@ -51,6 +52,14 @@ test('stale and future summary receipts cannot earn fresh summary or injury conf
   assert.ok(buildEvidenceCoverage(value,{now}).missing.includes('summary:future_receipt'));
   value.autoEnrichment={cacheState:'stale',fetchedAt:new Date(now-1000).toISOString(),injuryTeams:['Away','Home']};
   assert.equal(summaryEvidence(value,now).receiptFresh,false);
+});
+
+test('stale or untimed team injury reports remain descriptive records, not current injury coverage',()=>{
+ for(const meta of [{cacheState:'stale',fetchedAt:new Date(now-1000).toISOString()},{cacheState:'network',fetchedAt:new Date(now-16*60000).toISOString()},{cacheState:'network'}]){
+  const value=game();value.autoEnrichment={...meta,injuryTeams:['Away','Home']};value.autoPlayers=[{team:'Away',name:'Unavailable Player',status:'Out',availability:0,source:'ESPN injury report'}];const original=structuredClone(value);
+  const summary=summaryEvidence(value,now);assert.equal(summary.injuryCoverage,'unknown');assert.deepEqual(summary.reportedInjurySides,['away','home']);
+  assert.equal(buildEvidenceCoverage(value,{now}).sides.away.injuryCoverage,'unknown');assert.equal(predictionInputsAt(value,{},now).game.autoPlayers[0].availability,0);assert.deepEqual(value,original);
+ }
 });
 
 test('coverage distinguishes true numeric zero, missing values, absent starters and unknown history',()=>{

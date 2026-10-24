@@ -1,5 +1,7 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
+import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
+import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 
 const time=quoteTimeEpoch;
 const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -46,6 +48,10 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
  for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
+ if(safe.goalieResearch&&safe.goalieResearch.status!=='unavailable'){
+  const reason=retainedGoalieContextState(safe.goalieResearch,game,cutoff);
+  if(reason){safe.goalieResearch=null;excluded['goalieResearch:'+reason]=1;}
+ }
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
  const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
  const playerInputs=rawPlayers.filter(row=>retain(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retain(row,'auto_lineup_player'));
@@ -90,6 +96,12 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const schedule=observedInputState(game.sourceMeta,cutoff);
  if(['after_information_cutoff','invalid_observation_time'].includes(schedule)){
   safe.away={...game.away,record:''};safe.home={...game.home,record:''};excluded['schedule:'+schedule]=1;
+ }
+ for(const side of ['away','home'])if(game[side]?.recordEvidence){
+  const evidence=retain(game[side].recordEvidence,side+'_team_record');
+  const reason=evidence&&safe[side]?.record?nativeNhlRecordInputState(evidence,game,side,cutoff):null;
+  if(reason)excluded[side+'_team_record:'+reason]=1;
+  if(!evidence||reason)safe[side]={...safe[side],record:'',recordEvidence:null};
  }
  const next={...context,intelligence,externalResults:(context.externalResults||[]).filter(row=>{
   const selected=retain(row,'head_to_head_result');

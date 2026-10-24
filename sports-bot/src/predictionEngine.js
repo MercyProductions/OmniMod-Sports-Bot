@@ -1,3 +1,4 @@
+import {parseTeamRecord as parseRecord} from './teamRecordEvidence.js';
 import {marketTimestampEvidence} from './quoteChronology.js';
 import {explicitlyUnavailable,hasAvailabilityObservation} from './dataValidation.js';
 import {predictionInputsAt,observedInputState} from './inputChronology.js';
@@ -49,23 +50,8 @@ function probabilityToAmerican(probability) {
   return `+${Math.round(((1 - p) / p) * 100)}`;
 }
 
-function parseRecord(record) {
-  const numbers = String(record ?? '').match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
-  if (numbers.length < 2) return { wins: 0, losses: 0, ties: 0, games: 0, pct: 0.5, present: false };
-  const [wins, losses, ties = 0] = numbers;
-  const games = wins + losses + ties;
-  return {
-    wins,
-    losses,
-    ties,
-    games,
-    pct: games ? (wins + 0.5 * ties) / games : 0.5,
-    present: games > 0
-  };
-}
-
-function bayesianRecordStrength(record, priorGames = 10) {
-  const parsed = parseRecord(record);
+function bayesianRecordStrength(record, priorGames = 10,game={}) {
+  const parsed = parseRecord(record,game);
   if (!parsed.present) return 0.5;
   return (parsed.wins + parsed.ties * 0.5 + priorGames * 0.5) / (parsed.games + priorGames);
 }
@@ -405,7 +391,7 @@ function apiConfidence(game, market, awayTeam, homeTeam, now = Date.now()) {
   const externalScoreboard = !['after_information_cutoff','invalid_observation_time'].includes(observedInputState(game.sourceMeta,now)) && /espn|api|provider/i.test(`${game.source || ''} ${game.sourceMeta?.provider || ''}`) && !/manual/i.test(game.source || '');
   let score = externalScoreboard ? 28 : 0;
   if (externalScoreboard && game.id && game.startTime && game.away?.name && game.home?.name) score += 12;
-  if (externalScoreboard && parseRecord(game.away?.record).present && parseRecord(game.home?.record).present) score += 10;
+  if (externalScoreboard && parseRecord(game.away?.record,game).present && parseRecord(game.home?.record,game).present) score += 10;
   if (externalScoreboard && game.statusKey && game.statusLabel) score += 5;
   const freshness = sourceFreshnessMinutes(game, now);
   if (externalScoreboard && freshness !== null) {
@@ -519,9 +505,9 @@ export function predictGame(game, index, modelContext = {}) {
   const { combined: context, manual: manualContext } = contextForGame(game, intelligence, evidenceNow);
   const situation = situationalScore(game, awayTeam, homeTeam, context);
   const headToHead = headToHeadScore(game, modelContext.externalResults || []);
-  const awayRecord = bayesianRecordStrength(game.away?.record, profile.key === 'football' ? 4 : 10);
-  const homeRecord = bayesianRecordStrength(game.home?.record, profile.key === 'football' ? 4 : 10);
-  const hasRecords = parseRecord(game.away?.record).present && parseRecord(game.home?.record).present;
+  const awayRecord = bayesianRecordStrength(game.away?.record, profile.key === 'football' ? 4 : 10,game);
+  const homeRecord = bayesianRecordStrength(game.home?.record, profile.key === 'football' ? 4 : 10,game);
+  const hasRecords = parseRecord(game.away?.record,game).present && parseRecord(game.home?.record,game).present;
   // buildEloRatings seeds from local team Elo and then applies every imported
   // and cached final, so the learned value must take precedence over the seed.
   const awayElo = lookupElo(modelContext.eloRatings, game.leagueKey || game.league, game.away?.name);
@@ -647,7 +633,7 @@ export function predictGame(game, index, modelContext = {}) {
   const localConfidenceValue = localDataConfidence(awayTeam, homeTeam, manualAwayPlayers, manualHomePlayers, manualContext, modelContext.history, evidenceNow);
   const drift = modelContext.drift?.[profile.key] || modelContext.drift?.all || { status: 'insufficient', penalty: 0 };
   const driftPenalty = clamp(finite(drift.penalty, 0), 0, 0.35);
-  const evidenceQualityValue = Math.round(clamp(apiConfidenceValue * 0.45 + localConfidenceValue * 0.45 + (parseRecord(game.away?.record).present && parseRecord(game.home?.record).present ? 10 : 0) - driftPenalty * 25, 0, 100));
+  const evidenceQualityValue = Math.round(clamp(apiConfidenceValue * 0.45 + localConfidenceValue * 0.45 + (parseRecord(game.away?.record,game).present && parseRecord(game.home?.record,game).present ? 10 : 0) - driftPenalty * 25, 0, 100));
   let marketBlendWeight = 0;
   if (market) {
     const consensusReliability = clamp(market.bookmakerCount / 5, 0.25, 1) * clamp(1 - market.dispersion / 0.18, 0.35, 1);
