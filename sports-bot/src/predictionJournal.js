@@ -1,4 +1,5 @@
 import {capturedEventTime} from './capturedEventTime.js';
+import {serializeAvailabilityRefreshProof} from './availabilityRefresh.js';
 import {REFRESH_REASON_POLICY,structuredRefreshReasons} from './refreshReasonCodes.js';
 import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
 import {journalResultState} from './journalResults.js';
@@ -133,7 +134,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
 }
 
 /** Mandatory prospective audit trail, independent of optional warehouse retention. */
-export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now(), lifecycle = 'issued', reason = '', refreshAttempt = null } = {}) {
+export function recordPredictionJournal(slate = {}, { file = predictionJournalFile, now = Date.now(), lifecycle = 'issued', reason = '', refreshAttempt = null, refreshAcceptance = null } = {}) {
   const operation = writeChain.then(async () => {
     if (!Number.isFinite(now)) throw new Error('A valid journal observation time is required.');
     if (!['provisional', 'issued', 'rejected', 'delivered', 'results_only', 'prices_only', 'refresh_attempt'].includes(lifecycle)) throw new Error('Invalid forecast lifecycle operation.');
@@ -155,6 +156,11 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
       const activeConflicts=journalResultState(records).conflicts;
       const rejectedAssociations=new Set(records.filter(row=>row.type==='event_association_rejected').map(row=>row.payload.associationId));
       const pending = [];
+      const failedAcceptanceIds=new Set();
+      if(refreshAcceptance&&(lifecycle!=='issued'||quoteTimeEpoch(refreshAcceptance.attemptedAt)>quoteTimeEpoch(refreshAcceptance.completedAt)
+        ||quoteTimeEpoch(refreshAcceptance.completedAt)!==now||!Number.isFinite(quoteTimeEpoch(refreshAcceptance.attemptedAt))
+        ||!Array.isArray(refreshAcceptance.events)||!refreshAcceptance.events.length
+        ||refreshAcceptance.events.some(row=>!row||!row.gameId||!row.leagueKey||!eventIso(row.startTime)||!row.sourceAcceptanceEvidence)))throw Error('Invalid availability refresh issuance request');
       if (lifecycle === 'refresh_attempt') {
         const started = iso(refreshAttempt?.attemptedAt), ended = iso(refreshAttempt?.completedAt);
         const games = refreshAttempt?.games;
@@ -166,6 +172,7 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
           durationMs: Date.parse(ended) - Date.parse(started), games: games.map(row => ({
             gameId: String(row.gameId), leagueKey:String(row.leagueKey||''),startTime:eventIso(row.startTime), status: row.status,
             ...structuredRefreshReasons(row.reasons || []),
+            ...(row.sourceAcceptanceEvidence?{sourceAcceptanceEvidence:serializeAvailabilityRefreshProof(row.sourceAcceptanceEvidence,row,{began:Date.parse(started),ended:Date.parse(ended),frozenForecast:forecasts.get(row.sourceAcceptanceEvidence.forecastId)})}:{}),
             dueWindows: (row.dueWindows || []).filter(value => Number.isInteger(value) && value > 0 && value <= 720)
           })) };
         const attemptId = digest({ guildId: payload.guildId, attemptedAt: started, events: payload.games.map(row => [row.leagueKey,row.gameId,row.startTime]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))) });
@@ -245,6 +252,28 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
             messageId: String(slate.messageId), channelId: String(slate.channelId) });
           continue;
         }
+        if(refreshAcceptance&&lifecycle==='issued'){
+          const matches=refreshAcceptance.events.filter(row=>String(row.gameId)===snapshot.gameId&&row.leagueKey===snapshot.league&&eventIso(row.startTime)===snapshot.startTime);
+          {
+            try{
+              const anchoredSource=original||provisional.get(id)||snapshot;
+              if(!matches.length){
+                const summary=anchoredSource.dataTimestamps?.summary,receipt=quoteTimeEpoch(summary?.fetchedAt);
+                if(!['network','revalidated'].includes(summary?.cacheState)||!Number.isFinite(receipt)||receipt<quoteTimeEpoch(refreshAcceptance.attemptedAt)||receipt>now)
+                  throw Error('Refresh source acceptance request missing');
+              }else{
+                if(matches.length!==1)throw Error('Ambiguous availability acceptance request');
+                serializeAvailabilityRefreshProof({...matches[0].sourceAcceptanceEvidence,forecastId:id},{...matches[0],status:'completed'},
+                  {began:quoteTimeEpoch(refreshAcceptance.attemptedAt),ended:now,frozenForecast:anchoredSource,issuedOnly:false});
+              }
+            }catch{
+              failedAcceptanceIds.add(id);
+              if(!original){if(!provisional.has(id)){add('provisional_forecast',{...snapshot,lifecycleState:'PROVISIONAL'});provisional.set(id,pending.at(-1).payload);}
+                transition(id,'REJECTED',{reason:'availability_refresh_frozen_input_not_verified'});}
+              continue;
+            }
+          }
+        }
         if (original || observations.has(id)) continue;
         if (!provisional.has(id)) {
           add('provisional_forecast', { ...snapshot, lifecycleState: 'PROVISIONAL' });
@@ -316,7 +345,7 @@ export function recordPredictionJournal(slate = {}, { file = predictionJournalFi
       const acknowledgements=lifecycle==='issued'?(slate.predictions||[]).map(prediction=>{
         const game=matchJournalGame(gameIndex,prediction).game;if(!game)return {gameId:String(prediction.gameId),verified:false};
         const snapshot=forecastSnapshot(prediction,game,slate,now);
-        return {gameId:String(prediction.gameId),verified:snapshot.recordEligibility==='observed_pregame'&&matchesIssuedSnapshot(forecasts.get(snapshot.forecastId),snapshot),snapshot};
+        return {gameId:String(prediction.gameId),verified:!failedAcceptanceIds.has(snapshot.forecastId)&&snapshot.recordEligibility==='observed_pregame'&&matchesIssuedSnapshot(forecasts.get(snapshot.forecastId),snapshot),snapshot};
       }):[];
       const verifiedIds=[...new Set(acknowledgements.filter(row=>row.verified&&!acknowledgements.some(other=>other.gameId===row.gameId&&!other.verified)).map(row=>row.gameId))];
       return { appended: pending.length, forecastRecords: pending.filter(row => row.type === 'forecast').length,

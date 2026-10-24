@@ -1,4 +1,6 @@
 import {journalGameIndex} from './journalEventMatch.js';
+import {availabilityRefreshEvidence} from './availabilityRefresh.js';
+import {predictionHorizon} from './horizonEvaluation.js';
 import {eventReference,scopedEventKey,resolveSlateGame,scopedSlatePredictions,scopedRefreshState} from './slateEventIdentity.js';
 import { forecastIssuanceEvidence, recordPredictionJournal } from './predictionJournal.js';
 function finiteTime(value) {
@@ -51,12 +53,12 @@ export function markPregameRefreshes(slate = {}, due = [], refreshedAt = new Dat
   return { ...slate, pregameRefreshes, lastPregameRefreshAt: refreshedAt };
 }
 
-/** Mark only a freshly obtained summary plus a new pregame forecast as completed. */
+/** Complete only a fresh summary or verified new selected snapshot plus a valid new pregame forecast. */
 export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due = [], attemptedAt, completedAt, { blockedGameIds = [], blockedEventKeys = [], cacheBlockedEventKeys = [] } = {}) {
   const began = finiteTime(attemptedAt), ended = finiteTime(completedAt);
   if (began === null || ended === null || ended < began) throw new Error('Invalid pregame refresh attempt timestamps.');
   const games=journalGameIndex(rebuilt.games||[]),previousIndex=journalGameIndex(previous.games||[]);
-  const predictions=scopedSlatePredictions(rebuilt),acceptedRows=new Map();
+  const predictions=scopedSlatePredictions(rebuilt),previousPredictions=scopedSlatePredictions(previous),acceptedRows=new Map();
   const completed = [], rejected = [];
   for (const row of due) {
     const old=resolveSlateGame(previousIndex,row).game,subject=old?{...row,...eventReference(old)}:row;
@@ -67,19 +69,24 @@ export function completePregameRefreshAttempt(previous = {}, rebuilt = {}, due =
     const journalBlocked = blockedGameIds.includes(String(row.gameId))||blockedEventKeys.includes(key);
     const cacheBlocked = cacheBlockedEventKeys.includes(key);
     const summaryConflict=game?.autoEnrichment?.sourceIdentity?.status==='conflict'||game?.summaryIdentity?.sourceIdentity?.status==='conflict';
+    const freshSummary=['network','revalidated'].includes(game?.autoEnrichment?.cacheState)&&fetched!==null&&fetched>=began&&fetched<=ended;
+    const alternate=freshSummary?{accepted:false,reason:null}:availabilityRefreshEvidence(game,prediction,{previousGame:old,
+      previousPrediction:previousPredictions.get(key),began,ended,
+      expectedHorizon:Array.isArray(row.dueWindows)&&row.dueWindows.length&&row.dueWindows.every(value=>Number.isInteger(value)&&value>=1&&value<=720)
+        ?predictionHorizon({snapshotStage:row.stage||'t-'+Math.min(...row.dueWindows),minutesToStart:(start-generated)/60000}):null});
+    const sourceAccepted=freshSummary||alternate.accepted,sourceReceipt=alternate.accepted?alternate.receivedAt:fetched;
     const valid = !summaryConflict&&!cacheBlocked && !journalBlocked && game?.statusKey === 'scheduled' && start !== null && ended < start
-      && ['network', 'revalidated'].includes(game?.autoEnrichment?.cacheState)
-      && fetched !== null && fetched >= began && fetched <= ended
-      && prediction?.predictionMode === 'pregame' && generated !== null && generated >= fetched && generated <= ended && issuable;
-    if (valid) {completed.push({...row,...reference});acceptedRows.set(key,{game,prediction});}
+      && sourceAccepted && prediction?.predictionMode === 'pregame' && generated !== null && sourceReceipt !== null && generated >= sourceReceipt && generated <= ended && issuable;
+    if (valid) {completed.push({...row,...reference,...(alternate.accepted?{sourceAcceptanceEvidence:alternate.proof}:{})});acceptedRows.set(key,{game,prediction});}
     else rejected.push({ ...row,...reference, reason: 'fresh_summary_and_new_pregame_forecast_not_verified', reasons: [
       ...(!game?[association.reason||'game_identity_not_verified']:[]),
       ...(!prediction?['unique_event_forecast_not_verified']:[]),
       ...(game?.statusKey !== 'scheduled' ? ['game_not_scheduled'] : []),
       ...(start === null || ended >= start ? ['start_or_completion_invalid'] : []),
-      ...(!['network','revalidated'].includes(game?.autoEnrichment?.cacheState) ? ['summary_not_revalidated'] : []),
-      ...(fetched === null || fetched < began || fetched > ended ? ['summary_receipt_outside_attempt'] : []),
-      ...(prediction?.predictionMode !== 'pregame' || generated === null || fetched === null || generated < fetched || generated > ended ? ['pregame_forecast_not_verified'] : []),
+      ...(!sourceAccepted&&!['network','revalidated'].includes(game?.autoEnrichment?.cacheState) ? ['summary_not_revalidated'] : []),
+      ...(!sourceAccepted&&(fetched === null || fetched < began || fetched > ended) ? ['summary_receipt_outside_attempt'] : []),
+      ...(!sourceAccepted&&alternate.reason?[alternate.reason]:[]),
+      ...(prediction?.predictionMode !== 'pregame' || generated === null || sourceReceipt === null || generated < sourceReceipt || generated > ended ? ['pregame_forecast_not_verified'] : []),
       ...(!issuable ? ['forecast_issuance_not_verified'] : []),
       ...(journalBlocked ? ['journal_issuance_not_verified'] : []),
       ...(cacheBlocked ? ['cache_event_changed_during_refresh'] : []),
@@ -130,6 +137,8 @@ export function nextPregameRefresh(slate = {}, now = new Date(), options = {}) {
 
 /** Commit eligible refreshed forecasts only after the same completion gate used by the scheduler. */
 export async function completeAndJournalPregameRefresh(previous, rebuilt, due, attemptedAt, completedAt, { cacheBlockedEventKeys = [], ...journalOptions } = {}) {
+  // Hold one local input snapshot across asynchronous journal checks and issuance.
+  previous=structuredClone(previous);rebuilt=structuredClone(rebuilt);due=structuredClone(due);
   let attempt = completePregameRefreshAttempt(previous, rebuilt, due, attemptedAt, completedAt, { cacheBlockedEventKeys });
   const key=row=>scopedEventKey(row),index=journalGameIndex(rebuilt.games||[]);
   const predictionKey=row=>{const game=resolveSlateGame(index,row).game;return game?key(eventReference(game)):null;};
@@ -138,7 +147,9 @@ export async function completeAndJournalPregameRefresh(previous, rebuilt, due, a
   const subset=keys=>({...rebuilt,predictions:(rebuilt.predictions||[]).filter(row=>keys.has(predictionKey(row)))});
   const now=Date.parse(completedAt);
   await recordPredictionJournal(subset(rejected),{...journalOptions,now,lifecycle:'rejected',reason:'fresh_summary_and_new_pregame_forecast_not_verified'});
-  const issuance=await recordPredictionJournal(subset(completed),{...journalOptions,now,lifecycle:'issued'});
+  const acceptanceEvents=attempt.completed.filter(row=>row.sourceAcceptanceEvidence).map(row=>({...eventReference(row),sourceAcceptanceEvidence:row.sourceAcceptanceEvidence}));
+  const issuance=await recordPredictionJournal(subset(completed),{...journalOptions,now,lifecycle:'issued',
+    ...(acceptanceEvents.length?{refreshAcceptance:{attemptedAt,completedAt,events:acceptanceEvents}}:{})});
   const verified=new Set(issuance.verifiedIssuedForecasts.map(row=>key({...row,leagueKey:row.league})));
   const blockedEventKeys=[...completed].filter(value=>!verified.has(value));
   if(blockedEventKeys.length){
@@ -149,7 +160,10 @@ export async function completeAndJournalPregameRefresh(previous, rebuilt, due, a
     attemptedAt,completedAt,games:due.map(row=>{
       const match=attempt.completed.find(value=>String(value.gameId)===String(row.gameId)&&(!row.leagueKey||value.leagueKey===row.leagueKey)&&(!row.startTime||value.startTime===row.startTime));
       const rejection=attempt.rejected.find(value=>String(value.gameId)===String(row.gameId)&&(!row.leagueKey||value.leagueKey===row.leagueKey)&&(!row.startTime||value.startTime===row.startTime));
-      return {...row,...(match?eventReference(match):{}),gameId:String(row.gameId),status:match?'completed':'rejected',reasons:rejection?.reasons||[]};
+      const acknowledgement=match?.sourceAcceptanceEvidence?issuance.verifiedIssuedForecasts.find(value=>key({...value,leagueKey:value.league})===key(match)
+        &&value.predictionGeneratedAt===match.sourceAcceptanceEvidence.forecastGeneratedAt):null;
+      return {...row,...(match?eventReference(match):{}),gameId:String(row.gameId),status:match?'completed':'rejected',reasons:rejection?.reasons||[],
+        ...(match?.sourceAcceptanceEvidence?{sourceAcceptanceEvidence:{...match.sourceAcceptanceEvidence,forecastId:acknowledgement?.forecastId}}:{})};
     })
   }});
   return attempt;

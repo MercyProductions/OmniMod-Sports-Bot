@@ -1,5 +1,6 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {REFRESH_REASON_POLICY} from './refreshReasonCodes.js';
+import {serializeAvailabilityRefreshProof} from './availabilityRefresh.js';
 import {capturedEventTime} from './capturedEventTime.js';
 import {auditJournalForecastIdentities} from './journalForecastIdentity.js';
 import {journalResultState} from './journalResults.js';
@@ -36,6 +37,16 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
   const currentPolicyAttempts=attempts.filter(row=>row.payload?.reasonPolicy===REFRESH_REASON_POLICY).length;
   const omittedCounts=attempts.filter(row=>row.payload?.reasonPolicy===REFRESH_REASON_POLICY).flatMap(row=>(row.payload.games||[]).map(game=>game.unrecognizedReasonCount));
   for(const {payload} of attempts)for(const game of payload.games||[]){increment(statuses,game.status);for(const reason of new Set(game.reasons||[]))increment(reasons,reason);}
+  let selectedSnapshotCompletions=0,invalidSnapshotAcceptanceProofs=0;
+  for(const {payload,recordedAt} of attempts)for(const game of payload.games||[]){
+    if(!game.sourceAcceptanceEvidence)continue;
+    try{
+      if(epoch(payload.completedAt)>epoch(recordedAt))throw Error('Future refresh terminal evidence');
+      serializeAvailabilityRefreshProof(game.sourceAcceptanceEvidence,game,{began:epoch(payload.attemptedAt),ended:epoch(payload.completedAt),
+        frozenForecast:byId.get(game.sourceAcceptanceEvidence.forecastId)?.payload});
+      selectedSnapshotCompletions++;
+    }catch{invalidSnapshotAcceptanceProofs++;}
+  }
   let unresolved=0,overdue=0,unknownStart=0,missingCoverage=0,unknownUnderlying=0;
   for(const {payload:row} of issued){
     const league=byLeague[row.league||'unknown'] ||= {issued:0,delivered:0,missingResults:0,overdueResults:0};
@@ -58,6 +69,7 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
   }).map(row=>row.payload.durationMs);
   return {schema:'sports-operational-audit-v3',asOf:new Date(asOf).toISOString(),runtimeVerified:false,
     refreshes:{terminalAttempts:attempts.length,gameOutcomes:statuses,rejectionReasons:reasons,
+      sourceAcceptance:{selectedSnapshotCompletions,invalidSnapshotAcceptanceProofs,scope:'Explicit linked proofs only; no inference from absent legacy metadata.'},
       reasonEvidence:{policy:REFRESH_REASON_POLICY,currentPolicyAttempts,legacyOrUnknownPolicyAttempts:attempts.length-currentPolicyAttempts,
         unrecognizedReasonsOmitted:omittedCounts.filter(value=>Number.isSafeInteger(value)&&value>=0).reduce((sum,value)=>sum+value,0),
         invalidOmissionCounters:omittedCounts.filter(value=>!Number.isSafeInteger(value)||value<0).length,historicalCompletenessVerified:false},
