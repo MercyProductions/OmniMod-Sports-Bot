@@ -1,7 +1,7 @@
 import {readManualResultLedger,appendManualResultChanges} from './manualResultHistory.js';
 import {withAuditFileLock} from './auditFileLock.js';
 import {createHash} from 'node:crypto';
-import {validScore} from './dataValidation.js';
+import {validScore,finiteNumber} from './dataValidation.js';
 import path from 'node:path';
 import { dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
@@ -177,8 +177,8 @@ function normalizePlayer(row = {}, actor = '') {
   const league = cleanText(row.league ?? row.leagueKey, 50);
   if (!name || !team || !league) throw new Error('Every player row needs name, team, and league.');
   const availabilityInput = row.availability ?? row.availablePct ?? row.availabilityPct;
-  let availability = bounded(availabilityInput, 0, 100, 100);
-  const parsedAvailability = finiteOrNull(availabilityInput);
+  const parsedAvailability = finiteNumber(availabilityInput);
+  let availability = parsedAvailability===null?null:Math.max(0,Math.min(100,parsedAvailability));
   if (parsedAvailability !== null && parsedAvailability <= 1) availability *= 100;
   return {
     id: playerKey({ ...row, name, team, league }),
@@ -189,7 +189,8 @@ function normalizePlayer(row = {}, actor = '') {
     impact: bounded(row.impact ?? row.impactRating, -10, 10),
     rating: bounded(row.rating, 0, 100),
     availability,
-    status: cleanText(row.status, 80) || (availability < 100 ? 'limited' : 'available'),
+    availabilityEvidence: availability===null?'unknown':'manual_numeric_assertion',
+    status: cleanText(row.status, 80) || (availability===null?'unknown':availability < 100 ? 'limited' : 'available'),
     form: bounded(row.form ?? row.recentForm, 0, 100),
     starter: booleanValue(row.starter, false),
     projectedMinutes: bounded(row.projectedMinutes ?? row.minutes, 0, 100),

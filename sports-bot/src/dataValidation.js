@@ -62,3 +62,13 @@ export function americanToProbability(price) {
   if (value === null || Math.abs(value) < 100) return null;
   return value > 0 ? 100 / (value + 100) : -value / (-value + 100);
 }
+
+/** An explicit availability assertion is separate from a role/workload prior or medical verification. */
+export function hasAvailabilityObservation(player={}){
+ if(player.active===false||explicitlyUnavailable(player))return true;
+ const text=String(player.status||'');
+ if(/doubtful|questionable|game.?time|day.?to.?day|limited|\bavailable\b|\bhealthy\b|\bactive\b/i.test(text))return true;
+ const rolePrior=player.availabilityEvidence==='role_prior_not_injury_clearance';
+ if(!rolePrior&&/probable/i.test(text)&&!/probable starter/i.test(text))return true;
+ return !rolePrior&&finiteNumber(player.availability)!==null;
+}

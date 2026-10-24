@@ -6,7 +6,7 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 21, 2026
 
-Forecast model identity is now **v6.0.49**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v4`; it does not rewrite or relabel forecast captures. Current full suite: **850 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 837 passing tests. Test counts establish exercised code behavior, not forecasting quality.
+Forecast model identity is now **v6.0.50**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v4`; it does not rewrite or relabel forecast captures. Current full serialized suite: **875 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 850 passing tests. Test counts establish exercised code behavior, not forecasting quality.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |
@@ -40,6 +40,8 @@ Latest coverage/final evidence: [coverage clocks and completed prospective final
 Latest model evidence: [model availability and missing-data causes](SPORTS_MODEL_AVAILABILITY_VALIDATION.md). Registry/review/promotion/evaluation and ML artifact clocks are now cutoff-checked; native-ID summary blockers are explicit. Full 837 tests pass. Missing provider data, full report/plan binding and independent current-version forward performance remain incomplete.
 
 Latest missing-data recovery: [official NHL recent history](SPORTS_NATIVE_NHL_HISTORY.md). Actual isolated collection restored 47 final results/32 thin team profiles across seven dates, no failed dates. Full 850 tests pass. This restores team-result inputs, not injury/goalie evidence, and does not establish v6.0.49 predictive improvement. Model selection and broader source coverage remain incomplete.
+
+Latest player-data evidence: [goalie/injury providers](SPORTS_GOALIE_INJURY_PROVIDERS.md). Free native sample has four season candidates, zero confirmed starters; injury endpoint 403 remains. Omitted imported health remains unknown and raises uncertainty. Optional normalized provider snapshots have identity/expiry/conflict checks, but no live alternate provider is configured. Full serialized 875/focused 61 pass; default parallel claim-recovery and EPERM failures remain unresolved. Sports/model validation is not complete.
 
 ## Historical requirement matrix — original v6.0.7 checkpoint
 

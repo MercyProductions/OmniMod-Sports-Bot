@@ -1,7 +1,7 @@
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { ADVANCED_PROVENANCE_METADATA_FIELDS } from './advancedProvenance.js';
-import { finiteNumber } from './dataValidation.js';
+import { finiteNumber,hasAvailabilityObservation } from './dataValidation.js';
 import { quoteTimeEpoch } from './oddsPricing.js';
 import { observedInputState } from './inputChronology.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
@@ -101,7 +101,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           historicalStarterEvidence: row.participationProjection?.historicalStarterEvidence || 'unknown',
           historicalStatConflicts: row.historicalStatConflicts || [], historicalFormEvidence: row.historicalFormEvidence || 'unknown',
           historicalParticipationEvidence: row.participationProjection?.historicalParticipationEvidence || 'unknown',
-          workloadBasis: row.participationProjection?.workloadBasis || null, workloadUnitMismatch: row.participationProjection?.workloadUnitMismatch || false, availabilityObserved: finiteNumber(row.availability) !== null && row.availabilityEvidence !== 'role_prior_not_injury_clearance',
+          workloadBasis: row.participationProjection?.workloadBasis || null, workloadUnitMismatch: row.participationProjection?.workloadUnitMismatch || false, availabilityObserved: hasAvailabilityObservation(row),
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },
       injuryCoverage: summary.injuryCoveredSides.includes(side) ? 'team_report_received_not_a_clean_bill_of_health' : 'unknown',
@@ -124,6 +124,11 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   }
   return { schema: 'sports-evidence-coverage-v2', gameId: String(game.id || ''), league: game.leagueKey || '',
     cutoffAt: new Date(now).toISOString(), summary, sources, sides,
+    availabilityProviderEvidence: game.availabilityProviderEvidence || null,
+    goalieResearch: game.goalieResearch ? {status:game.goalieResearch.status,reason:game.goalieResearch.reason||null,provider:game.goalieResearch.provider||null,
+      fetchedAt:timestamp(game.goalieResearch.fetchedAt),confirmedStarters:0,injuryCoverage:'unknown',
+      candidatesBySide:Object.fromEntries(['away','home'].map(side=>[side,game.goalieResearch.sides?.[side]?.candidates?.length||0])),
+      policy:'Season context only; not a starter or health confirmation.'} : null,
     sourceConflicts: (game.sourceCorroboration?.conflicts || []).length,
     sourceProviders: game.sourceCorroboration?.providers || [],
     venue: { neutral: typeof game.neutralSite === 'boolean' ? game.neutralSite : null,

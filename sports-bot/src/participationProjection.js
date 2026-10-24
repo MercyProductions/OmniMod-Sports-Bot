@@ -2,7 +2,7 @@ import { isConfirmedStarter, reconcilePlayerEvidence, samePlayerIdentity } from 
 export { samePlayerIdentity } from './playerEvidence.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
-import { explicitlyUnavailable, finiteNumber } from './dataValidation.js';
+import { explicitlyUnavailable, finiteNumber, hasAvailabilityObservation } from './dataValidation.js';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -82,12 +82,14 @@ export function projectPlayerParticipation(player = {}, learned = null, profileK
   const declaredSamples = profileKey === 'basketball' && suppliedUnitContract !== workloadBasis.contract ? 0 : verifiedSamples ?? 0;
   const historySamples = measuredShare !== null && measuredShare >= 0 && measuredShare <= 1 ? Math.max(0, declaredSamples) : 0;
   const evidenceReliability = clamp(historySamples / (historySamples + 6), 0, 0.92);
-  const statusUncertainty = 4 * availabilityProbability * (1 - availabilityProbability);
+  const availabilityObserved = hasAvailabilityObservation(player);
+  const statusUncertainty = availabilityObserved ? 4 * availabilityProbability * (1 - availabilityProbability) : 1;
   const roleUncertainty = 4 * conditionalStartProbability * (1 - conditionalStartProbability);
   const uncertainty = clamp((1 - evidenceReliability) * 0.5 + statusUncertainty * 0.32 + roleUncertainty * 0.18, 0.04, 1);
   const workload = workloadLabel(profileKey, expectedShare, player.role, leagueKey);
   return {
-    availabilityProbability,
+    availabilityProbability, availabilityObserved,
+    availabilityBasis: availabilityObserved?'explicit_status_or_numeric_assertion':'unobserved_role_prior_not_health_clearance',
     startProbability,
     conditionalStartProbability,
     historicalStarterSamples: observedStarterRate === null ? 0 : historicalStarterSamples, historicalStarterEvidence,

@@ -33,6 +33,10 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const excluded={},unknown={};
  const retain=(row,path)=>{
   if(!row)return row;
+  if(row.availabilityExpiresAt!==undefined){
+   const expiry=time(row.availabilityExpiresAt);
+   if(!Number.isFinite(expiry)||expiry<=cutoff){const reason=path+':availability_report_expired_or_invalid';excluded[reason]=(excluded[reason]||0)+1;return null;}
+  }
   const state=observedInputState(row,cutoff);
   if(state==='unknown'){unknown[path]=(unknown[path]||0)+1;return row;}
   if(state==='observed_by_cutoff')return row;
@@ -40,7 +44,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  };
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary'])safe[field]=retain(game[field],field);
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
  safe.autoPlayers=(game.autoPlayers||[]).filter(row=>retain(row,'auto_player'));
  safe.autoLineups=(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_player'));

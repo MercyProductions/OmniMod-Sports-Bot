@@ -1,0 +1,29 @@
+{
+  "schema": "sports-player-availability-v1",
+  "provider": "Your provider name",
+  "sourceReference": "https://example.com/replace-with-your-permitted-report",
+  "observedAt": "2099-01-01T12:00:00Z",
+  "expiresAt": "2099-01-01T12:20:00Z",
+  "records": [
+    {
+      "kind": "goalie_starter",
+      "eventId": "nhl-REPLACE_NATIVE_GAME_ID",
+      "startTime": "2099-01-01T18:00:00Z",
+      "teamAbbr": "REPLACE_TEAM",
+      "playerId": "REPLACE_NATIVE_PLAYER_ID",
+      "playerIdNamespace": "nhl",
+      "name": "Replace player name"
+    },
+    {
+      "kind": "injury",
+      "eventId": "nhl-REPLACE_NATIVE_GAME_ID",
+      "startTime": "2099-01-01T18:00:00Z",
+      "teamAbbr": "REPLACE_TEAM",
+      "playerId": "REPLACE_NATIVE_PLAYER_ID",
+      "playerIdNamespace": "nhl",
+      "name": "Replace player name",
+      "role": "Goalie",
+      "status": "out"
+    }
+  ]
+}

@@ -68,6 +68,8 @@ export const config = {
   autoSummaryCacheMinutes: intEnv('AUTO_SUMMARY_CACHE_MINUTES', 180, 15, 1440),
   autoHistoryMaxLeagues: intEnv('AUTO_HISTORY_MAX_LEAGUES', 10, 0, 24),
   autoHistoryCacheHours: intEnv('AUTO_HISTORY_CACHE_HOURS', 12, 1, 168),
+  availabilityProviderSnapshotFile: process.env.AVAILABILITY_PROVIDER_SNAPSHOT_FILE || '',
+  nhlGoalieContextMaxGames: intEnv('NHL_GOALIE_CONTEXT_MAX_GAMES', 6, 0, 12),
   nativeHistoryFallbackDays: intEnv('NATIVE_NHL_HISTORY_DAYS', 7, 0, 14),
   autoHistoryMaxDays: intEnv('AUTO_HISTORY_MAX_DAYS', 365, 14, 730),
   autoBoxscoreMaxEvents: intEnv('AUTO_BOXSCORE_MAX_EVENTS', 36, 0, 75),

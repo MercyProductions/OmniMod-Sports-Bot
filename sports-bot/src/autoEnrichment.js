@@ -8,6 +8,8 @@ import { cachedFetchJson } from './providerCache.js';
 import { buildAutomaticScheduleContext } from './situationalAutomation.js';
 import { applyOfficialAndEnvironmentContext, buildOfficialProfiles, extractEventEnvironment } from './sourceIntelligence.js';
 import { sportProfile } from './sportProfiles.js';
+import {applyAvailabilitySnapshotFile} from './availabilityProvider.js';
+import {enrichNhlGoalieResearch} from './nhlGoalieResearch.js';
 import {collectNativeNhlHistory,mergeNativeNhlHistory} from './nativeNhlHistory.js';
 import { localDateKey } from './time.js';
 
@@ -662,13 +664,15 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       game.autoContext = mergeAutomaticContexts(game.autoContext, buildAutomaticScheduleContext(game, awayTeam, homeTeam));
     }
     const officialProfileMatches = applyOfficialAndEnvironmentContext(games, officialProfiles);
+    const localAvailability=await applyAvailabilitySnapshotFile(games,{file:config.availabilityProviderSnapshotFile});
     return {
       games,
       historyResults: stored.results,
       historicalSamples: stored.boxscores,
       teamProfiles,
       playerProfiles,
-      diagnostics: [`Automatic network enrichment: skipped (${options.localOnly || config.localOnly ? 'LOCAL_ONLY=true' : 'AUTO_ENRICH_ENABLED=false'}); loaded ${stored.results.length} final(s) and ${stored.boxscores.length} box score(s) from the local feature warehouse.`],
+      diagnostics: [`Automatic network enrichment: skipped (${options.localOnly || config.localOnly ? 'LOCAL_ONLY=true' : 'AUTO_ENRICH_ENABLED=false'}); loaded ${stored.results.length} final(s) and ${stored.boxscores.length} box score(s) from the local feature warehouse.`,
+        ...(localAvailability.status==='disabled'?[]:[`Availability provider: ${localAvailability.status}, ${localAvailability.accepted} local observation(s); no team health clearance implied.`])],
       externalCalls: 0,
       historyLeagues: 0,
       summaryGames: 0,
@@ -768,9 +772,14 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     }
   });
 
+  const goalieContext=await enrichNhlGoalieResearch(games,{maxGames:config.nhlGoalieContextMaxGames,forcedIds:options.targetedPregame?forcedSummaryIds:null});
+  externalCalls+=goalieContext.externalCalls;
+  if(goalieContext.eligible)diagnostics.push(`NHL goalie season context: ${goalieContext.available}/${goalieContext.attempted} available, ${goalieContext.capOmissions} omitted by cap, ${goalieContext.deferred} deferred; 0 confirmed starters; injuries unknown.`);
   const official = await corroborateOfficialSources(games, cutoffDateKey, { localOnly: false });
   externalCalls += official.externalCalls;
   diagnostics.push(...official.diagnostics);
+  const availability=await applyAvailabilitySnapshotFile(games,{file:config.availabilityProviderSnapshotFile});
+  if(availability.status!=='disabled')diagnostics.push(`Availability provider: ${availability.status}, ${availability.accepted} observation(s), rejections ${JSON.stringify(availability.rejected)}; no team health clearance implied.`);
   const starterRestMatches = applyHistoricalStarterRest(games, historyResults);
   if (starterRestMatches) diagnostics.push(`Starter rest: matched ${starterRestMatches} current starter(s) to cached historical starts.`);
 
