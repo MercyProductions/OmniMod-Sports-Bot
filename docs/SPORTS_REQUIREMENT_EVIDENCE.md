@@ -201,3 +201,5 @@ Development v6.0.30 preserves missing inputs, separates forecast identities and 
 Development v6.0.31 adds explicit journal-bound warehouse adjudication, shared writer locks and current-proof checks. [Workflow, 22 integration cases and trust limits](SPORTS_WAREHOUSE_RESULT_REVIEW.md); 447 tests passing. Labels become available at application time; original forecasts remain immutable. Source truth/reviewer identity, live operation and predictive improvement remain unverified.
 
 Legacy final protection: [lost-ack recovery cannot invent a frozen historical forecast](SPORTS_LEGACY_FINAL_PROTECTION.md). Exact desired digests recover without editing; corrections verify their remote predecessor. Unverifiable legacy baseline adoption remains unfinished.
+
+Windows and research-clock continuation: [verified repairs and unresolved boundaries](SPORTS_WINDOWS_LOCK_SELECTION_VALIDATION.md), development v6.0.51. Bounded Windows exclusive-create retries, stored plan digest/chronology checks and unknown ESPN injury status are implemented. This is correctness evidence, not a completed prospective model comparison or recovery of unavailable injury/confirmed-goalie data.

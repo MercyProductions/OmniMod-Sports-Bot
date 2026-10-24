@@ -319,13 +319,14 @@ export function buildAutomaticTeamProfiles(results = [], predictionDate = new Da
 }
 
 function injuryAvailability(status, type = {}) {
-  const text = `${status || ''} ${type.name || ''} ${type.description || ''} ${type.abbreviation || ''}`.toLowerCase();
-  if (/out|inactive|suspend|reserve|\bil\b|il\d|injury_status_.*il/.test(text)) return 0;
+  const text = `${status || ''} ${type.name || ''} ${type.description || ''} ${type.abbreviation || ''}`.toLowerCase().replace(/_/g, ' ');
+  if (/\bout\b|\binactive\b|\bsuspend(?:ed|sion)?\b|\breserve\b|\bil\b|\bil\d+\b/.test(text)) return 0;
   if (/doubtful/.test(text)) return 25;
   if (/questionable|game.?time/.test(text)) return 52;
   if (/day.?to.?day/.test(text)) return 65;
   if (/probable|limited/.test(text)) return 82;
-  return 55;
+  if (/^(available|healthy|active)$/i.test(String(status || '').trim())) return 100;
+  return null; // Unrecognized reports are not measured participation probabilities.
 }
 
 function automaticPlayerImpact(game, position, starter) {
@@ -528,6 +529,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
       const role = athlete.position?.displayName || athlete.position?.name || athlete.position?.abbreviation || '';
       const starter = starters.get(`${normalizeEntityName(teamName)}__${athlete.id || ''}`) || false;
       const status = String(injury.status || injury.type?.description || injury.type?.abbreviation || 'injury report');
+      const availability = injuryAvailability(status, injury.type);
       const row = {
         id: `auto-injury-${game.id}-${athlete.id || normalizeEntityName(name)}`,
         sourceAthleteId: String(athlete.id || ''),
@@ -536,8 +538,8 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         league: game.league,
         role,
         impact: automaticPlayerImpact(game, role, starter),
-        availability: injuryAvailability(status, injury.type),
-        availabilityEvidence: 'reported_status',
+        availability,
+        availabilityEvidence: availability === null ? 'unknown_reported_status' : 'reported_status',
         status,
         form: 50,
         starter,

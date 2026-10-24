@@ -222,3 +222,18 @@ test('unmapped official game does not consume the ESPN summary cap or issue an i
   assert.equal(urls.some(url=>url.includes('/summary?event=401123456')),true);
  }finally{globalThis.fetch=saved;}
 });
+
+
+test('unknown injury reports preserve missing availability instead of inventing 55 percent',()=>{
+ for(const status of [undefined,'Monitoring','Workout scheduled']){
+  const parsed=parseEspnSummary({injuries:[{team:{displayName:'Home Team'},injuries:[{status,athlete:{id:'99',displayName:'Home Star'}}]}]},game());
+  assert.equal(parsed.players[0].availability,null);assert.equal(parsed.players[0].availabilityEvidence,'unknown_reported_status');
+ }
+});
+
+test('recognized injury assertions retain conservative heuristics and explicit available status',()=>{
+ for(const [status,value] of [['Out',0],['injury_status_out',0],['Doubtful',25],['Questionable',52],['Day to day',65],['Probable',82],['Available',100]]){
+  const parsed=parseEspnSummary({injuries:[{team:{displayName:'Home Team'},injuries:[{status,athlete:{id:'99',displayName:'Home Star'}}]}]},game());
+  assert.equal(parsed.players[0].availability,value,status);assert.equal(parsed.players[0].availabilityEvidence,'reported_status');
+ }
+});

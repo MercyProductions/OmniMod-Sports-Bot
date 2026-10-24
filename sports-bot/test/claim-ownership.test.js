@@ -78,7 +78,7 @@ test('real child owners remain exclusive and foreign processes cannot finish the
 
 test('concurrent new processes recover a dead owner through one fenced successor',async t=>{
  const dir=await workerDirectory(t);await assert.rejects(run(dir,'claim-exit','dead'),error=>error.code===23);
- const contenders=await Promise.all(Array.from({length:4},()=>hold(t,dir,'dead')));assert.equal(contenders.filter(row=>row.result.claimed).length,1);
+ const contenders=await Promise.all(Array.from({length:4},()=>hold(t,dir,'dead')));assert.equal(contenders.filter(row=>row.result.claimed).length,1,JSON.stringify(contenders.map(row=>({pid:row.child.pid,claimed:row.result.claimed,reason:row.result.reason,owner:row.result.claim?.owner}))));
  for(const row of contenders)await row.close();
  const guard=JSON.parse(await readFile(join(dir,'final-result-fixture-2026-10-21-dead.json'),'utf8'));assert.equal(guard.state,'protocol_v2');
 });

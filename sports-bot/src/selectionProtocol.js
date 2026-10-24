@@ -1,21 +1,23 @@
+import {quoteTimeEpoch} from './oddsPricing.js';
+import {withAuditFileLock} from './auditFileLock.js';
 import {journalResultState} from './journalResults.js';
 import {hybridArtifact} from './hybridArtifact.js';
 import {createHash} from 'node:crypto';
-import {mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
+import {mkdir,open,readFile,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {evaluateMatchedJournal} from './matchedJournalEvaluation.js';
 import {localMlArtifactId} from './localMl.js';
 
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const epoch=value=>Date.parse(value||'');
+const epoch=quoteTimeEpoch;
 const gameKey=row=>JSON.stringify([row.league,row.gameId,Number.isFinite(epoch(row.startTime))?new Date(row.startTime).toISOString():String(row.startTime)]);
 const identifier=value=>typeof value==='string'&&/^[a-z0-9-]{1,80}$/i.test(value);
 
 async function transaction(directory,action){
   if(!directory)throw new Error('Explicit isolated selection-research directory required');
   await mkdir(directory,{recursive:true,mode:0o700});
-  const file=join(directory,'selection-state.json'),lock=await open(file+'.lock','wx',0o600);
-  try{
+  const file=join(directory,'selection-state.json');
+  return withAuditFileLock(file,async()=>{
     let state,created=false;
     try{state=JSON.parse(await readFile(file,'utf8'));}
     catch(error){if(error.code!=='ENOENT')throw error;created=true;state={schema:'sports-selection-state-v1',plans:{},reports:{},consumedGames:[]};}
@@ -30,7 +32,7 @@ async function transaction(directory,action){
       await handle.close();handle=null;await rename(temp,file);
     }catch(error){if(handle)await handle.close();throw error;}
     return result;
-  }finally{await lock.close();await unlink(file+'.lock');}
+  });
 }
 
 /** Predeclare one exact ML fit or fixed hybrid recipe before a disjoint prospective period. */
@@ -86,6 +88,16 @@ export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()
   if(!identifier(id)||!Number.isFinite(now)||!Array.isArray(records))throw new Error('Invalid selection review request');
   return transaction(directory,async state=>{
     const plan=state.plans[id];if(!plan)throw new Error('Selection plan not found');
+    const {planHash,...planBody}=plan;
+    if(planHash!==hash(planBody))throw new Error('Selection plan integrity failed; preserve existing records');
+    const registered=epoch(plan.registeredAt),start=epoch(plan.start),end=epoch(plan.end);
+    const artifactReady=plan.candidate==='ml'
+      ? [epoch(plan.lastTrainingOutcomeAt),epoch(plan.trainedAt)]
+      : [epoch(plan.recipeFrozenAt),epoch(plan.recipeFrozenAt)];
+    if(![registered,start,end,...artifactReady].every(Number.isFinite)||registered>=start
+      ||end-start<14*86400000||artifactReady[0]>artifactReady[1]||artifactReady[1]>registered)
+      throw new Error('Selection plan chronology is unverified; preserve existing records');
+
     if(createHash('sha256').update(await readFile(join(directory,plan.artifactFile))).digest('hex')!==plan.artifactFileHash)
       throw new Error('Pinned artifact changed; preserve existing evidence');
     if(Object.hasOwn(state.reports,id))return {status:'already_finalized',report:state.reports[id],newEvidenceIgnored:true};

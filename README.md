@@ -208,3 +208,5 @@ Model availability: [chronological champion/ML guards and missing-data causes](d
 Missing NHL history: [bounded official recent-final fallback](docs/SPORTS_NATIVE_NHL_HISTORY.md), development v6.0.49. A real isolated seven-date run restored 47 finals and 32 thin team profiles (1-4 games each); full 850 tests pass. Injuries/goalies remain unverified and no predictive improvement is claimed.
 
 Goalies and injuries: [free context, unknown health and optional provider setup](docs/SPORTS_GOALIE_INJURY_PROVIDERS.md), development v6.0.50. Native season leaders remain unconfirmed; omitted health no longer defaults to available. Provider-neutral exports can supply explicitly scoped assertions; no vendor subscription is required by default. Full serialized 875/focused 61 pass; parallel Windows failures remain open.
+
+Windows locks and selection clocks: [bounded exclusive-create retries, strict research clocks and unknown injury status](docs/SPORTS_WINDOWS_LOCK_SELECTION_VALIDATION.md), development v6.0.51. Focused 97 tests pass; the earlier zero-successor failure remains undiagnosed, and independent model/source validation remains open.

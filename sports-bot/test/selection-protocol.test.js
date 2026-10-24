@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {hybridArtifact,hybridArtifactId} from '../src/hybridArtifact.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {registerSelectionPlan,finalizeSelectionPlan} from '../src/selectionProtocol.js';
-import {trainLocalMlModels,predictLocalMlCandidate} from '../src/localMl.js';
+import {trainLocalMlModels,predictLocalMlCandidate,localMlArtifactId} from '../src/localMl.js';
 import {selectCandidateCohort} from '../src/candidateCohorts.js';
 import {CURRENT_MODEL_VERSION} from '../src/modelIdentity.js';
 
@@ -247,4 +248,63 @@ test('a disputed outcome prevents finalization even when the remaining cohort me
  const records=prospectiveRows();records.push({type:'result_conflict',recordedAt:'2101-01-15T23:00:00Z',payload:{forecastId:'f0',conflictId:'c'}});
  const result=await finalizeSelectionPlan(spec().id,{directory:dir,records,now:Date.parse('2101-01-16T00:00:00Z')});
  assert.equal(result.status,'awaiting_outcomes');assert.equal(result.pendingForecasts,1);assert.equal(result.promotionAllowed,false);
+});
+
+
+test('selection plans reject unzoned, day-only and impossible evaluation clocks',async t=>{
+ const dir=await directory(t),options={directory:dir,model:pinnedModel,now:registeredAt};
+ for(const start of ['2101-01-01','2101-01-01T00:00:00','2101-02-30T00:00:00Z']){
+  await assert.rejects(registerSelectionPlan({...spec(),start,end:'2101-04-01T00:00:00Z'},options),/Declare after/);
+ }
+ for(const end of ['2101-01-15','2101-01-15T00:00:00','2101-02-30T00:00:00Z']){
+  await assert.rejects(registerSelectionPlan({...spec(),end},options),/Declare after/);
+ }
+});
+
+test('selection plans reject malformed fitted-artifact availability even with a matching artifact hash',async t=>{
+ const dir=await directory(t);
+ for(const field of ['trainedAt','lastTrainingOutcomeAt']){
+  for(const value of ['2099-12-01','2099-12-01T00:00:00','2099-02-30T00:00:00Z']){
+   const artifact={...pinnedModel,[field]:value};artifact.artifactId=localMlArtifactId(artifact);
+   await assert.rejects(registerSelectionPlan({...spec(),[field]:value,artifactId:artifact.artifactId},
+    {directory:dir,model:artifact,now:registeredAt}),/Declare after/);
+  }
+ }
+});
+
+test('an invalid journal receipt cannot supply a predeclared trial result',async t=>{
+ const dir=await directory(t);await registerSelectionPlan(spec(),{directory:dir,model:pinnedModel,now:registeredAt});
+ const records=prospectiveRows();
+ records.find(row=>row.type==='result').recordedAt='2101-01-01T16:00:00';
+ const result=await finalizeSelectionPlan(spec().id,{directory:dir,records,now:Date.parse('2101-01-16T00:00:00Z')});
+ assert.equal(result.status,'awaiting_outcomes');assert.equal(result.pendingForecasts,1);
+});
+
+test('explicit timezone offsets remain valid for equivalent trial instants',async t=>{
+ const dir=await directory(t),plan=await registerSelectionPlan({...spec(),start:'2100-12-31T19:00:00-05:00',end:'2101-01-14T19:00:00-05:00'},
+  {directory:dir,model:pinnedModel,now:registeredAt});
+ assert.equal(plan.start,iso(Date.parse(spec().start)));assert.equal(plan.end,iso(Date.parse(spec().end)));
+});
+
+
+test('legacy plan clocks cannot pass finalization through a valid outer state digest',async t=>{
+ const dir=await directory(t);await registerSelectionPlan(spec(),{directory:dir,model:pinnedModel,now:registeredAt});
+ const file=join(dir,'selection-state.json'),original=JSON.parse(await readFile(file,'utf8'));
+ const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+ for(const [field,value] of [['start','2101-01-01'],['end','2101-02-30T00:00:00Z'],['registeredAt','2101-01-02T00:00:00Z'],['trainedAt','2102-01-01T00:00:00Z']]){
+  const state=structuredClone(original),plan=state.plans[spec().id];
+  plan[field]=value;delete plan.planHash;plan.planHash=digest(plan);
+  delete state.stateHash;state.stateHash=digest(state);const bytes=JSON.stringify(state);await writeFile(file,bytes);
+  await assert.rejects(finalizeSelectionPlan(spec().id,{directory:dir,records:[],now:Date.parse('2101-01-16T00:00:00Z')}),/chronology/);
+  assert.equal(await readFile(file,'utf8'),bytes);
+ }
+});
+
+test('an independently changed plan digest is rejected before outcomes are consumed',async t=>{
+ const dir=await directory(t);await registerSelectionPlan(spec(),{directory:dir,model:pinnedModel,now:registeredAt});
+ const file=join(dir,'selection-state.json'),state=JSON.parse(await readFile(file,'utf8'));
+ state.plans[spec().id].planHash='0'.repeat(64);delete state.stateHash;
+ state.stateHash=createHash('sha256').update(JSON.stringify(state)).digest('hex');const bytes=JSON.stringify(state);await writeFile(file,bytes);
+ await assert.rejects(finalizeSelectionPlan(spec().id,{directory:dir,records:prospectiveRows(),now:Date.parse('2101-01-16T00:00:00Z')}),/plan integrity/);
+ assert.equal(await readFile(file,'utf8'),bytes);
 });
