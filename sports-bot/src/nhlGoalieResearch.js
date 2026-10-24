@@ -1,3 +1,4 @@
+import {parseNhlTeamIdentity} from './nhlTeamIdentity.js';
 import {cachedFetchJson} from './providerCache.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
@@ -42,6 +43,7 @@ export async function enrichNhlGoalieResearch(games,{maxGames=6,forcedIds=null,f
   const result=await fetchJson('https://api-web.nhle.com/v1/gamecenter/'+native+'/landing',{namespace:'official-nhl-goalie-context',ttlMs:15*60000,staleMs:0,negativeTtlMs:300000,timeoutMs:12000});
   if(['network','revalidated'].includes(result.cacheState))externalCalls++;
   const evidence=result.ok?parseNhlGoalieResearch(result.json,game,{fetchedAt:result.fetchedAt,cacheState:result.cacheState,asOf:clock()}):{schema:'sports-nhl-goalie-research-v1',status:'unavailable',reason:'provider_unavailable',confirmedStarters:0,injuryCoverage:'unknown'};
+  game.nhlTeamIdentity=result.ok?parseNhlTeamIdentity(result.json,game,{fetchedAt:result.fetchedAt,asOf:clock()}):null;
   game.goalieResearch=evidence;if(evidence.status==='season_context_only')available++;else failures++;
   if([401,403,429].includes(result.status)){deferred=selected.length-attempted;break;}
  }

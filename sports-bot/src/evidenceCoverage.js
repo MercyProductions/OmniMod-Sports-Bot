@@ -125,6 +125,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   return { schema: 'sports-evidence-coverage-v2', gameId: String(game.id || ''), league: game.leagueKey || '',
     cutoffAt: new Date(now).toISOString(), summary, sources, sides,
     availabilityProviderEvidence: game.availabilityProviderEvidence || null,
+    nhlTeamIdentity:game.nhlTeamIdentity?{status:game.nhlTeamIdentity.status,reason:game.nhlTeamIdentity.reason||null,fetchedAt:timestamp(game.nhlTeamIdentity.fetchedAt),provider:game.nhlTeamIdentity.provider||null,policy:'Scoped naming evidence only; no injury/starter coverage or confidence bonus.'}:null,
     goalieResearch: game.goalieResearch ? {status:game.goalieResearch.status,reason:game.goalieResearch.reason||null,provider:game.goalieResearch.provider||null,
       fetchedAt:timestamp(game.goalieResearch.fetchedAt),confirmedStarters:0,injuryCoverage:'unknown',
       candidatesBySide:Object.fromEntries(['away','home'].map(side=>[side,game.goalieResearch.sides?.[side]?.candidates?.length||0])),

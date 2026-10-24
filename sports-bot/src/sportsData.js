@@ -399,11 +399,11 @@ function bestQuote(quotes) {
   return [...quotes].sort((a, b) => a.rawImplied - b.rawImplied)[0] || null;
 }
 
-export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}) {
+export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american',asOf=Date.now() } = {}) {
   const fairRows = [];
   const quoteGroups = { away: [], home: [], draw: [] };
   const twoWay = sportProfile(game).twoWay;
-  const {books,audit}=collectH2HBooks(bookmakers,game,{twoWay,oddsFormat});
+  const {books,audit}=collectH2HBooks(bookmakers,game,{twoWay,oddsFormat,asOf});
   for (const book of books) {
     const total = book.away.rawImplied + book.home.rawImplied + (book.draw?.rawImplied || 0);
     if (total <= 0) continue;
@@ -443,8 +443,8 @@ export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american' } = {}
   };
 }
 
-export function bestSpreadTotalMarkets(bookmakers,game){
-  return selectLineMarkets(bookmakers,game);
+export function bestSpreadTotalMarkets(bookmakers,game,options={}){
+  return selectLineMarkets(bookmakers,game,options);
 }
 
 export function oddsEventMatches(game,event){

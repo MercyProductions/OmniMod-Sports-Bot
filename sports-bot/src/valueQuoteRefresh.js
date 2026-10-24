@@ -127,14 +127,14 @@ export async function refreshValueQuotes(slate, options = {}) {
   try {
   const issuedAt = new Date(options.now ?? Date.now()).toISOString();
   const updated = new Map();
-  const matches=matchOddsEventCohort((slate.games||[]).filter(game=>game.leagueKey===league),result.json,supported.get(league));
+  const matches=matchOddsEventCohort((slate.games||[]).filter(game=>game.leagueKey===league),result.json,supported.get(league),{asOf:now});
   const oddsMatchAudit=[];
   for (const game of games) {
     if(Date.parse(game.startTime)<=Date.parse(issuedAt))continue;
     const match=matches.get(scopedEventKey(eventReference(game)));oddsMatchAudit.push({event:eventReference(game),...match.evidence});
     const event = match.event;
     if (!event) continue;
-    const h2h = bestH2HMarket(event.bookmakers, game);
+    const h2h = bestH2HMarket(event.bookmakers, game,{asOf:now});
     oddsMatchAudit.at(-1).bookmakerIntegrity=h2h.bookmakerIntegrity;
     if (!h2h.away || !h2h.home || !h2h.bookmakerCount) continue;
     updated.set(scopedEventKey(eventReference(game)), { ...game, oddsMatchEvidence:match.evidence, odds: { eventId: event.id,eventIdentity:match.evidence, commenceTime: event.commence_time, h2h, bookmakerCount: h2h.bookmakerCount, lastUpdate: h2h.lastUpdate, fetchedAt: result.fetchedAt || issuedAt, cacheState: result.cacheState, matchStatus: 'matched', provider: 'The Odds API', quoteRefreshOnly: true } });

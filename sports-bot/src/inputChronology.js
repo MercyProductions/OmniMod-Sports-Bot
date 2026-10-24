@@ -45,7 +45,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  };
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
  const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
  const playerInputs=rawPlayers.filter(row=>retain(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retain(row,'auto_lineup_player'));

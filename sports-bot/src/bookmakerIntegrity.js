@@ -1,11 +1,12 @@
+import {oddsTeamNames} from './nhlTeamIdentity.js';
 import {normalizeEntityName} from './intelligenceStore.js';
 import {normalizeOddsPrice} from './oddsPricing.js';
 import {eventObservationHash} from './journalEventMatch.js';
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value);
 const signature=book=>eventObservationHash(Object.fromEntries(Object.entries(book).map(([side,row])=>[side,[row.originalPrice,row.originalFormat,row.lastUpdate,row.timestampSource]])));
 
-function parseMarket(market,bookmaker,game,twoWay,oddsFormat){
- const aliases=side=>new Set([normalizeEntityName(game[side]?.name),normalizeEntityName(game[side]?.abbr)].filter(Boolean));
+function parseMarket(market,bookmaker,game,twoWay,oddsFormat,asOf){
+ const aliases=side=>oddsTeamNames(game,side,{asOf});
  const away=aliases('away'),home=aliases('home'),book={};
  if(!Array.isArray(market.outcomes))return {reason:'invalid_outcome_collection'};
  for(const outcome of market.outcomes){
@@ -23,8 +24,8 @@ function parseMarket(market,bookmaker,game,twoWay,oddsFormat){
 }
 
 /** Validate each provider book independently; never assemble a complete book from fragments. */
-export function collectH2HBooks(bookmakers,game,{twoWay=true,oddsFormat='american'}={}){
- return collectProviderMarkets(bookmakers,{marketKey:'h2h',parse:(market,row)=>parseMarket(market,row,game,twoWay,oddsFormat),signature});
+export function collectH2HBooks(bookmakers,game,{twoWay=true,oddsFormat='american',asOf=Date.now()}={}){
+ return collectProviderMarkets(bookmakers,{marketKey:'h2h',parse:(market,row)=>parseMarket(market,row,game,twoWay,oddsFormat,asOf),signature});
 }
 
 export function collectProviderMarkets(bookmakers,{marketKey,parse,signature}){

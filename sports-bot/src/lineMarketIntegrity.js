@@ -1,3 +1,4 @@
+import {oddsTeamNames} from './nhlTeamIdentity.js';
 import {collectProviderMarkets} from './bookmakerIntegrity.js';
 import {normalizeEntityName} from './intelligenceStore.js';
 import {finiteNumber} from './dataValidation.js';
@@ -5,9 +6,9 @@ import {normalizeOddsPrice} from './oddsPricing.js';
 import {eventObservationHash} from './journalEventMatch.js';
 const signature=book=>eventObservationHash(Object.fromEntries(Object.entries(book).map(([side,row])=>[side,[row.point,row.originalPrice,row.originalFormat,row.lastUpdate,row.timestampSource]])));
 
-function parseLineMarket(market,bookmaker,game,key){
+function parseLineMarket(market,bookmaker,game,key,asOf){
  if(!Array.isArray(market.outcomes)||!market.outcomes.length)return {reason:'invalid_outcome_collection'};
- const book={},aliases=side=>new Set([normalizeEntityName(game[side]?.name),normalizeEntityName(game[side]?.abbr)].filter(Boolean));
+ const book={},aliases=side=>oddsTeamNames(game,side,{asOf});
  for(const row of market.outcomes){
   if(!row||typeof row.name!=='string')return {reason:'invalid_outcome'};
   const name=normalizeEntityName(row.name),sides=key==='spreads'?['away','home'].filter(side=>name&&aliases(side).has(name)):['over','under'].filter(side=>row.name.trim().toLowerCase()===side);
@@ -34,10 +35,10 @@ function representative(books,key){
  return output;
 }
 
-export function selectLineMarkets(bookmakers,game){
+export function selectLineMarkets(bookmakers,game,{asOf=Date.now()}={}){
  const result={integrity:{}};
  for(const key of ['spreads','totals']){
-  const {books,audit}=collectProviderMarkets(bookmakers,{marketKey:key,parse:(market,row)=>parseLineMarket(market,row,game,key),signature});
+  const {books,audit}=collectProviderMarkets(bookmakers,{marketKey:key,parse:(market,row)=>parseLineMarket(market,row,game,key,asOf),signature});
   result.integrity[key]=audit;result[key==='spreads'?'spread':'total']=representative(books,key);
  }
  return result;

@@ -48,3 +48,7 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 ## Later reconciliation repair
 
 [Development v6.0.55](SPORTS_AVAILABILITY_RECONCILIATION.md) preserves original same-player inputs across provider replacement, expiry and JSON restart; checks per-source clocks; retains separate provider conflict/empty-snapshot state; and quarantines incompatible event starter identities. Primary health scoring now keeps missing health unknown. Full966 tests pass. The schema/configuration remains compatible; no actual external injury/confirmed-goalie coverage was recovered, and the frozenv52 trial remains separate.
+
+## Native naming reuse
+
+[Development v6.0.56](SPORTS_NHL_ODDS_IDENTITY.md) extracts scoped native place/common-name evidence from the same bounded landing request for odds event/outcome matching. It does not turn season goalie leaders into confirmed starters or add health confidence. The shared6-game default/12 maximum remain unchanged. Separate twelve-game real research found no explicit injury/starter fields; actual confirmed coverage remains unavailable.
