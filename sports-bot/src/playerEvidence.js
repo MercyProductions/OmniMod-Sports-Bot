@@ -21,7 +21,7 @@ const unavailable = row => row.active === false || explicitlyUnavailable(row)
   || (finiteNumber(row.availability) !== null && finiteNumber(row.availability) <= 0);
 
 /** Retain observations separately; derive conservative, distinct-player evidence without mutating them. */
-export function reconcilePlayerEvidence(rows = [], availabilityObservations = []) {
+export function reconcilePlayerEvidence(rows = [], availabilityObservations = [], { retainAvailabilitySources = false } = {}) {
   const groups = new Map();
   for (const row of rows) {
     const team = normalizeEntityName(row.team), id = String(row.athleteId || row.sourceAthleteId || '');
@@ -45,6 +45,7 @@ export function reconcilePlayerEvidence(rows = [], availabilityObservations = []
     return { ...merged, ...(denied ? { active: false } : {}),
       confirmedStarter: confirmed && !denied && !starterConflict,
       availabilityConflict: group.some(row => row.availabilityConflict) || (confirmed && denied),
-      starterEvidenceConflict: group.some(row => row.starterEvidenceConflict) || starterConflict };
+      starterEvidenceConflict: group.some(row => row.starterEvidenceConflict) || starterConflict,
+      ...(retainAvailabilitySources && group.some(row => row.availabilityProvider) ? { availabilitySourceRows: structuredClone(group) } : {}) };
   });
 }

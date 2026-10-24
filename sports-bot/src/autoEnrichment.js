@@ -658,6 +658,7 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       stored.boxscores
     );
     const playerProfiles = buildAutomaticPlayerProfiles(stored.boxscores);
+    const localAvailability=await applyAvailabilitySnapshotFile(games,{file:config.availabilityProviderSnapshotFile});
     const playerApplication = applyPlayerProfilesAndLineups(games, playerProfiles);
     const officialProfiles = buildOfficialProfiles(stored.boxscores);
     for (const game of games) {
@@ -666,7 +667,6 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
       game.autoContext = mergeAutomaticContexts(game.autoContext, buildAutomaticScheduleContext(game, awayTeam, homeTeam));
     }
     const officialProfileMatches = applyOfficialAndEnvironmentContext(games, officialProfiles);
-    const localAvailability=await applyAvailabilitySnapshotFile(games,{file:config.availabilityProviderSnapshotFile});
     return {
       games,
       historyResults: stored.results,

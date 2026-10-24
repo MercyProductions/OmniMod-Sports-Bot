@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFile,stat} from 'node:fs/promises';
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {normalizeEntityName} from './intelligenceStore.js';
-import {reconcilePlayerEvidence} from './playerEvidence.js';
+import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
 const MAX_AGE=30*60000;
 /** Provider-neutral, user-supplied data contract. No network, credential handling or orders. */
 export function applyAvailabilitySnapshot(games,payload,{now=Date.now()}={}){
@@ -18,13 +18,14 @@ export function applyAvailabilitySnapshot(games,payload,{now=Date.now()}={}){
  const snapshotHash=createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex');
  const prepared=[];
  for(const row of payload.records){
+  if(!row||typeof row!=='object'||Array.isArray(row)){reject('invalid_record');continue;}
   const matches=games.filter(g=>g.id===row.eventId&&quoteTimeEpoch(g.startTime)===quoteTimeEpoch(row.startTime)&&g.leagueKey==='nhl'&&g.statusKey==='scheduled'&&quoteTimeEpoch(g.startTime)>now);
   if(matches.length!==1){reject('event_identity_or_pregame_mismatch');continue;}
   const game=matches[0],side=['away','home'].find(side=>game[side]?.abbr===row.teamAbbr);
   if(!side||!/^\d+$/.test(String(row.playerId||''))||typeof row.name!=='string'||!row.name.trim()||row.playerIdNamespace!=='nhl'){reject('invalid_team_or_native_player_identity');continue;}
   if(!['goalie_starter','injury'].includes(row.kind)||row.kind==='injury'&&!['out','injured_reserve','doubtful','questionable','day_to_day','probable','available'].includes(row.status)){reject('unsupported_availability_assertion');continue;}
   const id='nhl:'+row.playerId,team=game[side].name||game[side].abbr;
-  const collision=(game.autoPlayers||[]).some(old=>normalizeEntityName(old.team)===normalizeEntityName(team)&&normalizeEntityName(old.name)===normalizeEntityName(row.name)&&String(old.sourceAthleteId||old.athleteId||'')&&String(old.sourceAthleteId||old.athleteId)!==id);
+  const collision=availabilitySourceRows(game.autoPlayers||[]).some(old=>normalizeEntityName(old.team)===normalizeEntityName(team)&&normalizeEntityName(old.name)===normalizeEntityName(row.name)&&String(old.sourceAthleteId||old.athleteId||'')&&String(old.sourceAthleteId||old.athleteId)!==id);
   if(collision){reject('unverified_player_namespace_mapping');continue;}
   const statuses={out:['Out',0],injured_reserve:['Injured Reserve',0],doubtful:['Doubtful',20],questionable:['Questionable',52],day_to_day:['Day to day',52],probable:['Probable',84],available:['Available',100]};
   const values=row.kind==='injury'?statuses[row.status]:['Confirmed event starter; health unknown',null];
@@ -34,14 +35,21 @@ export function applyAvailabilitySnapshot(games,payload,{now=Date.now()}={}){
    availabilityProvider:payload.provider,availabilityExpiresAt:new Date(expires).toISOString(),
    source:payload.provider+' '+(row.kind==='injury'?'injury report':'event starter report'),sourceReference:reference.toString(),updatedAt:new Date(now).toISOString(),sourceObservationAt:new Date(observed).toISOString()}});
  }
+ const crossTeam=new Set();
+ for(const item of prepared)if(prepared.some(other=>other.game===item.game&&other.side!==item.side&&other.player.sourceAthleteId===item.player.sourceAthleteId))crossTeam.add(item);
+ if(crossTeam.size){reject('cross_team_player_identity_conflict');for(let i=prepared.length-1;i>=0;i--)if(crossTeam.has(prepared[i]))prepared.splice(i,1);}
  let accepted=0;
  for(const game of games){
-  const prior=game.availabilityProviderEvidence,previous=quoteTimeEpoch(prior?.sourceObservationAt);
+  if(game.leagueKey!=='nhl'||game.statusKey!=='scheduled'||!(quoteTimeEpoch(game.startTime)>now))continue;
+  let history={...(game.availabilityProviderEvidenceByProvider||{})};
+  const legacy=game.availabilityProviderEvidence;if(legacy?.provider&&!Object.hasOwn(history,legacy.provider))history={...history,[legacy.provider]:legacy};
+  const prior=Object.hasOwn(history,payload.provider)?history[payload.provider]:null,previous=quoteTimeEpoch(prior?.sourceObservationAt);
+  let players=availabilitySourceRows(game.autoPlayers||[]),lineups=availabilitySourceRows(game.autoLineups||[]);
+  const materialize=()=>{game.autoPlayers=reconcileAvailabilityRows(players);game.autoLineups=reconcileAvailabilityRows(lineups,players);};
+  const removeProvider=()=>{players=players.filter(row=>row.availabilityProvider!==payload.provider);lineups=lineups.filter(row=>row.availabilityProvider!==payload.provider);};
   if(prior?.provider===payload.provider&&Number.isFinite(previous)&&observed<=previous){
    if(observed===previous&&prior.snapshotHash!==snapshotHash){
-    game.autoPlayers=(game.autoPlayers||[]).filter(row=>row.availabilityProvider!==payload.provider);
-    game.autoLineups=(game.autoLineups||[]).filter(row=>row.availabilityProvider!==payload.provider);
-    game.availabilityProviderEvidence={...prior,conflict:true};reject('conflicting_same_time_snapshot');
+    removeProvider();materialize();game.availabilityProviderEvidence={...prior,conflict:true};history={...history,[payload.provider]:game.availabilityProviderEvidence};game.availabilityProviderEvidenceByProvider=history;reject('conflicting_same_time_snapshot');
    }else if(observed<previous)reject('older_snapshot_not_selected');
    continue;
   }
@@ -52,16 +60,13 @@ export function applyAvailabilitySnapshot(games,payload,{now=Date.now()}={}){
   }
   const selected=rows.filter(row=>!conflicts.has(row));
   // A new full event snapshot replaces only this provider's previous effective assertions.
-  game.autoPlayers=(game.autoPlayers||[]).filter(row=>row.availabilityProvider!==payload.provider);
-  game.autoLineups=(game.autoLineups||[]).filter(row=>row.availabilityProvider!==payload.provider);
-  if(!rows.length&&!prior)continue;
+  removeProvider();
   const observations=selected.map(row=>row.player);accepted+=observations.length;
   game.availabilityProviderEvidence={provider:payload.provider,snapshotHash,availabilityExpiresAt:new Date(expires).toISOString(),sourceReference:reference.toString(),fetchedAt:new Date(now).toISOString(),sourceObservationAt:new Date(observed).toISOString(),expiresAt:new Date(expires).toISOString(),acceptedObservations:observations.length,
    evidencePolicy:'User-supplied provider assertions; no independent publication or medical verification.',injuryCoverage:'individual_reports_only_not_team_clearance'};
-  game.availabilityObservations=[...(game.availabilityObservations||[]),...observations];
-  game.autoPlayers=reconcilePlayerEvidence([...(game.autoPlayers||[]),...observations]);
-  // Injury observations can veto a starter through the existing conservative reconciliation.
-  game.autoLineups=reconcilePlayerEvidence([...(game.autoLineups||[]),...observations.filter(row=>row.starter===true)],game.autoPlayers);
+  history={...history,[payload.provider]:game.availabilityProviderEvidence};game.availabilityProviderEvidenceByProvider=history;
+  game.availabilityObservations=[...(game.availabilityObservations||[]),...structuredClone(observations)];
+  players.push(...observations);lineups.push(...observations.filter(row=>row.starter===true));materialize();
  }
  return {status:'processed',accepted,rejected,provider:payload.provider};
 }

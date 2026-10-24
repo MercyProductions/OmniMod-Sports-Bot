@@ -1,4 +1,5 @@
 import {marketTimestampEvidence} from './quoteChronology.js';
+import {explicitlyUnavailable,hasAvailabilityObservation} from './dataValidation.js';
 import {predictionInputsAt,observedInputState} from './inputChronology.js';
 import { buildEvidenceCoverage, summaryEvidence } from './evidenceCoverage.js';
 import { calibrateSelectedProbability, lookupElo } from './modelEvaluation.js';
@@ -187,34 +188,42 @@ function derivePlayerImpact(player, profile) {
 
 function availabilityFraction(player) {
   const status = String(player.status || '').toLowerCase();
-  if (/out|inactive|suspend|injured reserve|ruled out/.test(status)) return 0;
+  if (player.active===false||explicitlyUnavailable(player)) return 0;
+  if (!hasAvailabilityObservation(player)) return null;
   if (/doubtful/.test(status)) return 0.25;
   if (/questionable|game.?time/.test(status)) return 0.52;
   if (/probable|limited/.test(status)) return 0.82;
-  const availability = finite(player.availability, 100);
+  const availability = finite(player.availability);
+  if(availability===null)return /\bavailable\b|\bhealthy\b|\bactive\b/.test(status)?1:null;
   return clamp(availability > 1 ? availability / 100 : availability, 0, 1);
 }
 
 function playerAvailabilityScore(players, profile, now) {
-  if (!players.length) return { score: 0, unavailableImpact: 0, coverage: 0, details: [] };
+  if (!players.length) return { score: 0, unavailableImpact: 0, coverage: 0, observedPlayers:0, unknownPlayers:0, uncertainty:0, details: [] };
   let score = 0;
-  let unavailableImpact = 0;
+  let unavailableImpact = 0,observedPlayers=0,unknownPlayers=0;
   const details = [];
   for (const player of players) {
     let impact = derivePlayerImpact(player, profile);
     const important = profile.importantRoles.some((role) => String(player.role || '').toLowerCase().includes(role));
     if (important || player.starter) impact *= 1.12;
     const projection = player.participationProjection || null;
-    const availability = projection ? clamp(finite(projection.availabilityProbability, 0.5), 0, 1) : availabilityFraction(player);
+    const availability=availabilityFraction(player);
+    if(availability===null)unknownPlayers++;else observedPlayers++;
     const form = finite(player.form, 50);
-    const missingShare = projection
-      ? Math.max(0, finite(projection.historicalShare, 1) - finite(projection.expectedShare, 0))
-      : 1 - availability;
+    let missingShare=availability===null?0:1-availability;
+    if(projection){
+      const historicalShare=clamp(finite(projection.historicalShare,1),0,1);
+      const expectedShare=clamp(finite(projection.expectedShare,0),0,historicalShare);
+      const availableLimit=availability===null?historicalShare:historicalShare*availability;
+      missingShare=Math.max(0,historicalShare-Math.min(expectedShare,availableLimit));
+    }
     const missing = Math.max(0, impact) * missingShare;
     const formAdjustment = impact * clamp((form - 50) / 100, -0.35, 0.35);
     score += -missing + formAdjustment;
     unavailableImpact += missing;
-    if (missing >= 0.5 || Math.abs(formAdjustment) >= 0.5) {
+    if(availability===null)details.push(`${player.name}: availability unknown${projection?'; workload uses a role/history prior, not health clearance':''}`);
+    else if (missing >= 0.5 || Math.abs(formAdjustment) >= 0.5) {
       details.push(`${player.name}: ${Math.round(availability * 100)}% available${projection ? `, ${projection.expectedWorkload} ${projection.workloadUnit}` : ''}, impact ${round(impact, 1)}`);
     }
   }
@@ -222,7 +231,7 @@ function playerAvailabilityScore(players, profile, now) {
   return {
     score: clamp(score, -18, 12),
     unavailableImpact: round(unavailableImpact, 1),
-    coverage: clamp(players.length / 8, 0, 1) * freshness,
+    coverage: clamp(observedPlayers / 8, 0, 1) * freshness, observedPlayers,unknownPlayers,uncertainty:unknownPlayers/players.length,
     details: details.slice(0, 5)
   };
 }
@@ -603,7 +612,7 @@ export function predictGame(game, index, modelContext = {}) {
     component('Recent head-to-head', headToHeadContribution, headToHead.sampleSize ? `${game.home.abbr} Bayesian result rate ${percentage(headToHead.homeRate, 1)} across ${headToHead.sampleSize} meeting(s)` : 'no recent meetings in automatic history', headToHead.sampleSize > 0),
     component('Opponent-adjusted strength', opponentAdjustedContribution, awayOpponentAdjusted !== null && homeOpponentAdjusted !== null ? `${game.away.abbr} ${round(awayOpponentAdjusted, 1)} vs ${game.home.abbr} ${round(homeOpponentAdjusted, 1)}; schedule strength ${round(awayAutomatic?.scheduleStrength, 1)} vs ${round(homeAutomatic?.scheduleStrength, 1)}` : 'opponent-adjusted samples incomplete', awayOpponentAdjusted !== null && homeOpponentAdjusted !== null),
     component('Advanced efficiency', advancedContribution, awayAdvanced !== null && homeAdvanced !== null ? `${game.away.abbr} ${round(awayAdvanced, 1)} vs ${game.home.abbr} ${round(homeAdvanced, 1)} from historical box scores` : 'advanced box-score samples incomplete', awayAdvanced !== null && homeAdvanced !== null),
-    component('Player availability', playerContribution, `${game.away.abbr} workload-adjusted unavailable impact ${awayPlayers.unavailableImpact}; ${game.home.abbr} ${homePlayers.unavailableImpact}`, awayPlayerRows.length > 0 || homePlayerRows.length > 0),
+    component('Player availability', playerContribution, `${game.away.abbr} workload-adjusted unavailable impact ${awayPlayers.unavailableImpact}; ${game.home.abbr} ${homePlayers.unavailableImpact}; health assertions ${awayPlayers.observedPlayers+homePlayers.observedPlayers}, unknown ${awayPlayers.unknownPlayers+homePlayers.unknownPlayers}`, awayPlayers.observedPlayers+homePlayers.observedPlayers>0||awayPlayerRows.some(row=>row.participationProjection)||homePlayerRows.some(row=>row.participationProjection)),
     component('Projected participation', participationContribution, hasParticipation ? `${game.away.abbr} missing impact ${awayParticipation.projectedMissingImpact || 0}, uncertainty ${percentage(awayParticipation.uncertainty || 0, 0)}; ${game.home.abbr} missing impact ${homeParticipation.projectedMissingImpact || 0}, uncertainty ${percentage(homeParticipation.uncertainty || 0, 0)}; incorporated once in player availability/workload` : 'projected minutes/snaps/workload unavailable', hasParticipation),
     component('Confirmed lineup quality', lineupContribution, game.autoLineup ? `${game.autoLineup.confirmedSides}/2 confirmed side(s); learned player coverage ${percentage(((game.autoLineup.away?.learnedCoverage || 0) + (game.autoLineup.home?.learnedCoverage || 0)) / 2, 0)}; historical starter-pair coverage ${percentage(((game.autoLineup.away?.pairCoverage || 0) + (game.autoLineup.home?.pairCoverage || 0)) / 2, 0)}` : 'current lineups unavailable', Boolean(game.autoLineup?.confirmedSides || game.autoLineup?.away?.criticalStarterCount || game.autoLineup?.home?.criticalStarterCount)),
     component('Play-by-play efficiency', playByPlayContribution, hasPlayByPlay ? `value/event ${round(awayPlayMetrics.playValue, 3)} away vs ${round(homePlayMetrics.playValue, 3)} home; success ${percentage(awayPlayMetrics.playSuccessRate || 0, 0)} vs ${percentage(homePlayMetrics.playSuccessRate || 0, 0)}` : 'timestamped historical play events unavailable', hasPlayByPlay),
@@ -746,7 +755,7 @@ export function predictGame(game, index, modelContext = {}) {
     featureAgreement: contributionAgreement * 100,
     historySamples: Math.min(game.autoHistory?.awayGames || 0, game.autoHistory?.homeGames || 0),
     calibrationSamples: calibration.sampleSize,
-    participationUncertainty: Math.max(finite(awayParticipation.uncertainty, 0), finite(homeParticipation.uncertainty, 0)),
+    participationUncertainty: Math.max(finite(awayParticipation.uncertainty, 0), finite(homeParticipation.uncertainty, 0),awayPlayers.uncertainty,homePlayers.uncertainty),
     contextualVolatility: contextualVolatility(game)
   });
   const riskTier = uncertainty.recommendationStatus === 'withheld'

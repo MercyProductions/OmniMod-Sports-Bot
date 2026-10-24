@@ -44,3 +44,7 @@ Two default parallel full-suite runs exposed operational test failures: dead-own
 Model identity is **v6.0.50** because missing availability changes uncertainty. Full selection report/plan binding, those concurrency failures, adequate preregistered forward model comparisons, and independent starter/injury source access remain unfinished. Existing frozen v6.0.45 results do not validate this version. No predictive improvement or profitability is established.
 
 Sports is user-confirmed offline. No startup, merge, deployment, champion promotion, orders or Discord posts occurred. Live trading stays disabled. The Stocks automation file remains unchanged. Sports remains in progress before Crypto, then Stocks.
+
+## Later reconciliation repair
+
+[Development v6.0.55](SPORTS_AVAILABILITY_RECONCILIATION.md) preserves original same-player inputs across provider replacement, expiry and JSON restart; checks per-source clocks; retains separate provider conflict/empty-snapshot state; and quarantines incompatible event starter identities. Primary health scoring now keeps missing health unknown. Full966 tests pass. The schema/configuration remains compatible; no actual external injury/confirmed-goalie coverage was recovered, and the frozenv52 trial remains separate.

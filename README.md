@@ -220,3 +220,5 @@ Registry persistence integrity: [preserved first issues, consistent recent cohor
 Journal/operation clocks: [strict issuance, qualified result/delivery timing and operational report v3](docs/SPORTS_JOURNAL_OPERATION_CLOCKS.md), development v6.0.54. Eleven old-source failures reproduced; full 939 tests pass. A read-only audit confirms 13 resolved old-study journal outcomes while retaining unknown legacy outcome-space exclusions; no frozen study or production state changed.
 
 Forward evidence: [capture receipts, provider versions and first real run](docs/SPORTS_FORWARD_EVIDENCE_RECEIPTS.md). Full 945 tests pass. All 12 evidence reports remain incomplete; zero actionable opportunities or confirmed goalie starters. This verifies collection, not predictive improvement.
+
+Availability integrity: [source-preserving reconciliation and primary health scoring](docs/SPORTS_AVAILABILITY_RECONCILIATION.md), development v6.0.55. Fifteen reproduced failure scenarios; twenty-one added tests/full966 pass. Unknown health no longer receives full observed coverage. Missing external injury/confirmed-goalie inputs and independent current-version performance remain unresolved.

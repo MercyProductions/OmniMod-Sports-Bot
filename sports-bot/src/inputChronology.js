@@ -1,4 +1,5 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
+import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
 
 const time=quoteTimeEpoch;
 const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -46,8 +47,12 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
  for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','availabilityProviderEvidence'])safe[field]=retain(game[field],field);
  safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
- safe.autoPlayers=(game.autoPlayers||[]).filter(row=>retain(row,'auto_player'));
- safe.autoLineups=(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_player'));
+ const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
+ const playerInputs=rawPlayers.filter(row=>retain(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retain(row,'auto_lineup_player'));
+ const availabilityChanged=playerInputs.length!==rawPlayers.length||lineupInputs.length!==rawLineups.length;
+ safe.autoPlayers=availabilityChanged?reconcileAvailabilityRows(playerInputs):(game.autoPlayers||[]).filter(row=>retain(row,'auto_player_view'));
+ safe.autoLineups=availabilityChanged?reconcileAvailabilityRows(lineupInputs,playerInputs):(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_view'));
+ safe.availabilityProviderEvidenceByProvider=Object.fromEntries(Object.entries(game.availabilityProviderEvidenceByProvider||{}).filter(([,row])=>retain(row,'availability_provider_state')));
  safe.participationProjections=(game.participationProjections||[]).filter(row=>retain(row,'participation_projection'));
  let excludedNestedProjection=false;
  safe.autoPlayers=safe.autoPlayers.map(row=>{
@@ -60,7 +65,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   excluded['participation_derived_inputs:'+reason]=1;
  };
  if(excludedNestedProjection){safe.autoLineup=null;excluded['autoLineup:excluded_projection_dependency']=1;}
- if(safe.autoPlayers.length!==(game.autoPlayers||[]).length||safe.autoLineups.length!==(game.autoLineups||[]).length){
+ if(availabilityChanged||safe.autoPlayers.length!==(game.autoPlayers||[]).length||safe.autoLineups.length!==(game.autoLineups||[]).length){
   safe.autoLineup=null;excluded['autoLineup:excluded_player_dependency']=1;clearParticipation('player_or_lineup_unavailable');
  }
  if(excludedNestedProjection||(game.autoLineup&&!safe.autoLineup)||(game.participationSummary&&!safe.participationSummary)
