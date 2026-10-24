@@ -1,4 +1,5 @@
 import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
+import {capturedEventTime} from './capturedEventTime.js';
 import path from 'node:path';
 import { dataDir } from './config.js';
 import { readFeatureWarehouse } from './featureWarehouse.js';
@@ -40,6 +41,9 @@ function resultSide(row) {
   return scoreOutcome(row.awayScore, row.homeScore);
 }
 
+const validDateKey=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)
+  &&Number.isFinite(capturedEventTime(value+'T00:00:00Z'));
+
 function scoreCandidates(rows) {
   const modelNames = ['evidence', 'hybrid'];
   return Object.fromEntries(modelNames.map((name) => {
@@ -59,11 +63,26 @@ function scoreCandidates(rows) {
 
 export function replayHistoricalResults(results = [], options = {}) {
   const maxRows = Math.max(50, Number(options.maxRows) || 8_000);
-  const cutoffDateKey = String(options.asOfDateKey || '9999-12-31');
-  const sorted = [...results]
-    .filter((row) => String(row.dateKey || '').slice(0, 10) < cutoffDateKey && resultSide(row))
-    .sort((a, b) => String(a.startTime || a.dateKey).localeCompare(String(b.startTime || b.dateKey)))
-    .slice(-maxRows);
+  const cutoffDateKey = options.asOfDateKey ?? '9999-12-31';
+  if(!validDateKey(cutoffDateKey))throw Error('Historical replay requires a valid date cutoff');
+  if(!Array.isArray(results))throw Error('Historical replay requires result rows');
+  const eligible=[],rejections={};
+  const reject=reason=>rejections[reason]=(rejections[reason]||0)+1;
+  for(const [index,row] of results.entries()){
+    if(!row||typeof row!=='object'||Array.isArray(row)){reject('invalid_result_row');continue;}
+    if(!validDateKey(row.dateKey)){reject('invalid_result_date');continue;}
+    if(row.dateKey>=cutoffDateKey){reject('on_or_after_cutoff');continue;}
+    const hasStart=row.startTime!==undefined&&row.startTime!==null&&row.startTime!=='';
+    const start=hasStart?capturedEventTime(row.startTime):NaN;
+    if(hasStart&&!Number.isFinite(start)){reject('invalid_event_start');continue;}
+    if(!resultSide(row)){reject('invalid_result_score');continue;}
+    eligible.push({row,start,dateKey:row.dateKey,index});
+  }
+  // The learner applies labels in prior-date batches. Sorting timestamp text
+  // can interleave those batches when equivalent clocks use different zones.
+  eligible.sort((a,b)=>a.dateKey.localeCompare(b.dateKey)
+    ||(Number.isFinite(a.start)?a.start:Infinity)-(Number.isFinite(b.start)?b.start:Infinity)||a.index-b.index);
+  const sorted=eligible.slice(-maxRows);
   const states = new Map();
   const predictions = [];
   let pendingTime = '';
@@ -88,10 +107,11 @@ export function replayHistoricalResults(results = [], options = {}) {
     }
     pendingUpdates = [];
   };
-  for (const row of sorted) {
+  for (const entry of sorted) {
+    const {row,dateKey,start}=entry;
     // Start order does not establish when a result became available. Never
     // feed an earlier-starting same-day game's final into a later kickoff.
-    const rowTime = String(row.dateKey || String(row.startTime || '').slice(0, 10));
+    const rowTime = dateKey;
     if (pendingTime && rowTime !== pendingTime) applyPendingUpdates();
     pendingTime = rowTime;
     const profile = sportProfile({ leagueKey: row.leagueKey, sportGroup: row.sportGroup });
@@ -136,8 +156,9 @@ export function replayHistoricalResults(results = [], options = {}) {
     });
     if (away.games >= 2 && home.games >= 2) {
       predictions.push({
-        dateKey: String(row.dateKey || '').slice(0, 10),
-        startTime: row.startTime || `${row.dateKey}T12:00:00Z`,
+        dateKey,
+        startTime: Number.isFinite(start)?new Date(start).toISOString():null,
+        eventStartStatus:Number.isFinite(start)?'explicit_zone':'missing',
         gameId: String(row.id || `${row.dateKey}:${row.awayTeam}:${row.homeTeam}`),
         leagueKey: row.leagueKey,
         sport: profile.key,
@@ -156,13 +177,18 @@ export function replayHistoricalResults(results = [], options = {}) {
   }
   applyPendingUpdates();
   return {
-    version: 1,
+    version: 2,
+    replayProtocol:'canonical-date-batches-event-instants-v2',
+    retrospectiveOnly:true,
+    promotionAllowed:false,
     generatedAt: new Date().toISOString(),
     asOfDateKey: cutoffDateKey,
     logLossProtocol: LOG_LOSS_PROTOCOL,
     resultCount: sorted.length,
+    inputAudit:{inputRows:results.length,eligibleBeforeRowCap:eligible.length,includedRows:sorted.length,
+      omittedByRowCap:eligible.length-sorted.length,dateOnlyRows:sorted.filter(row=>!Number.isFinite(row.start)).length,rejections},
     predictionCount: predictions.length,
-    timeIntegrity: 'Only earlier dateKey results are used. Actual historical result-availability times remain unverified; research replay is not prospective promotion evidence.',
+    timeIntegrity: 'Only earlier valid dateKey result batches are used; explicit event clocks are ordered as instants, not timestamp text. Missing starts stay unknown. Actual historical result-availability times remain unverified; research replay is not prospective promotion evidence.',
     overall: scoreCandidates(predictions),
     sports: Object.fromEntries([...new Set(predictions.map((row) => row.sport))].map((sport) => [sport, scoreCandidates(predictions.filter((row) => row.sport === sport))])),
     predictions

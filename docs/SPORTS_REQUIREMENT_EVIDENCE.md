@@ -4,6 +4,10 @@ This is a current-state index for the Sports reliability assignment, not a compl
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
 
+## Replay chronology follow-up - October 24, 2026
+
+[Historical replay date ordering](SPORTS_REPLAY_DATE_ORDER.md) closes a reproduced future-label leak caused by sorting timestamp text across date batches. Report version2 validates calendars/clocks, preserves unknown starts and exposes exclusions/caps; predictive identity remains v6.0.69, with prospective gates unchanged. Eight new cases pass; 61 focused/1,272 full tests and 239 syntax files pass. The47 saved native NHL finals yield11 numerically unchanged replay predictions/scores before and after; no predictive improvement is demonstrated. The [checklist](SPORTS_REPLAY_DATE_CHECKLIST.json) preserves missing clinical inputs, sufficient independent forward validation, original-price/cost and operational requirements. Registered archives and all Sports/Stocks schedules are unchanged.
+
 ## Price receipt follow-up - October 24, 2026
 
 [Local price-receipt chronology](SPORTS_PRICE_RECEIPT_CHRONOLOGY.md) preserves fetch/revalidation clocks in new journal snapshots and requires quote <= receipt <= frozen decision in price report v3. Prediction formulas, thresholds and model v6.0.69 remain unchanged; archived trials are not rewritten. Six prior-source regression failures, eight new cases, 68 focused/1,264 full tests and 238 syntax files verify mechanisms. Read-only audits of the separate v52/v69 journals still stop at 12/21 absent qualified decisions, not an observed return or a passed downstream gate. The [checklist](SPORTS_PRICE_RECEIPT_CHECKLIST.json) retains missing clinical/goalie data, offered-price/settlement evidence, independent model validation and operational requirements as unfinished. No provider calls, schedule changes, production startup, promotion, deployment, orders or Discord posts occurred in this phase.

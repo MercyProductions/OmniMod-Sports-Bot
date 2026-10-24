@@ -842,6 +842,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         brierImprovement: row.evaluation?.brierImprovement ?? null
       }])),
       replay: replay ? {
+        version:replay.version,protocol:replay.replayProtocol,inputAudit:replay.inputAudit,
+        retrospectiveOnly:replay.retrospectiveOnly,promotionAllowed:replay.promotionAllowed,
         results: replay.resultCount,
         predictions: replay.predictionCount,
         asOfDateKey: replay.asOfDateKey,
