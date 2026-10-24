@@ -1,3 +1,4 @@
+import {inspectForwardEvidence} from './forwardEvidence.js';
 import {readFile,mkdir,open,unlink,realpath} from 'node:fs/promises';
 import {join,resolve,relative,isAbsolute} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -33,7 +34,8 @@ export async function inspectForwardCollector(directory){
  if(planHash!==body.planHash||hash(JSON.stringify(planBody))!==planHash||plan.artifactId!==body.artifactId
   ||plan.modelVersion!==checkpoint.modelVersion||plan.league!=='nhl'||plan.horizon!=='Daily'||plan.candidate!=='hybrid')throw new Error('Forward plan changed');
  if(plan.artifactFile!==plan.id+'-model.json'||hash(await readFile(join(root,'selection',plan.artifactFile)))!==plan.artifactFileHash)throw new Error('Forward artifact changed');
- return {root,checkpoint,manifest,plan};
+ const evidence=await inspectForwardEvidence(root);
+ return {root,checkpoint,manifest,plan,evidence};
 }
 
 /** One bounded collector invocation. No broker, Discord client, credentials or model activation. */

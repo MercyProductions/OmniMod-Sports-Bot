@@ -65,6 +65,8 @@ test('redirected dependencies and invalid run clocks fail closed',async t=>{
 async function workerFixture(t,{blockedRequest=false}={}){
  const root=await mkdtemp(join(tmpdir(),'sports-forward-worker-fixture-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const source=join(root,'frozen','sports-bot','src');await mkdir(source,{recursive:true});await mkdir(join(root,'selection'));
+ const support=join(root,'collector','src');await mkdir(support,{recursive:true});await writeFile(join(root,'collector','package.json'),'{"type":"module"}');
+ for(const name of ['forwardEvidence','auditFileLock','oddsPricing','dataValidation'])await writeFile(join(support,name+'.js'),await readFile(new URL('../src/'+name+'.js',import.meta.url)));
  await writeFile(join(root,'frozen','sports-bot','package.json'),'{'+'"type":"module"}');await writeFile(join(root,'empty.env'),'');
  const plan={start:new Date(Date.now()-60000).toISOString(),end:new Date(Date.now()+86400000).toISOString(),id:'fixture'};
  await writeFile(join(root,'selection','selection-state.json'),JSON.stringify({plans:{fixture:plan}}));

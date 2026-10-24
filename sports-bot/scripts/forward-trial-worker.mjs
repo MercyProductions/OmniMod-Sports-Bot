@@ -27,9 +27,11 @@ const {readPredictionJournal,predictionJournalFile}=await load('predictionJourna
 const {journalResultState}=await load('journalResults');
 const {localDateKey}=await load('time');
 const {finalizeSelectionPlan}=await load('selectionProtocol');
+const {recordForwardCapture,inspectForwardEvidence}=await import(pathToFileURL(join(root,'collector','src','forwardEvidence.js')));
+await inspectForwardEvidence(root);
 const slates=join(root,'runtime','forward-slates'),captures=join(root,'captures');await mkdir(slates,{recursive:true});await mkdir(captures,{recursive:true});
 const save=async(file,value)=>{const temp=file+'.'+randomUUID()+'.pending';await writeFile(temp,JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});await rename(temp,file);};
-const capture=async(kind,slate)=>writeFile(join(captures,Date.now()+'-'+randomUUID()+'.json'),JSON.stringify({schema:'sports-forward-capture-v1',kind,sourceCommit:checkpoint.sourceCommit,artifactId:checkpoint.artifactId,capturedAt:new Date().toISOString(),slate,liveOrders:false,discordPosts:0})+'\n',{flag:'wx',mode:0o600});
+const capture=async(kind,slate)=>recordForwardCapture(root,{schema:'sports-forward-capture-v1',kind,sourceCommit:checkpoint.sourceCommit,artifactId:checkpoint.artifactId,capturedAt:new Date().toISOString(),slate,liveOrders:false,discordPosts:0});
 let collected=0,reconciled=0,omittedDates=0;
 const today=localDateKey(new Date());
 if(now+240000<Date.parse(plan.end)){
@@ -54,11 +56,12 @@ const records=await readPredictionJournal(predictionJournalFile),outcomes=journa
 const forecasts=records.filter(row=>row.type==='forecast'&&row.payload.horizon==='Daily'&&row.payload.modelVersion===checkpoint.modelVersion&&row.payload.candidateArtifactIds?.hybrid===checkpoint.artifactId
  &&Date.parse(row.recordedAt)>=Date.parse(plan.start)&&Date.parse(row.recordedAt)<Date.parse(plan.end));
 const games=new Set(forecasts.map(row=>row.payload.gameId));
+const evidence=await inspectForwardEvidence(root);
 let reviewStatus='collecting';if(Date.now()>=Date.parse(plan.end)){const review=await finalizeSelectionPlan(plan.id,{directory:join(root,'selection'),records});reviewStatus=review.status==='already_finalized'?review.report.status:review.status;}
 let previousCompleted=Date.parse(plan.start);
 try{const lines=(await readFile(join(root,'runtime','runs.jsonl'),'utf8')).trim().split('\n');if(lines.at(-1))previousCompleted=Date.parse(JSON.parse(lines.at(-1)).completedAt);}catch(error){if(error.code!=='ENOENT')throw error;}
 const missedScheduledIntervals=Number.isFinite(previousCompleted)?Math.max(0,Math.floor((now-previousCompleted)/3600000)-1):null;
 const result={status:'forward_collection_completed',completedAt:new Date().toISOString(),modelVersion:checkpoint.modelVersion,sourceCommit:checkpoint.sourceCommit,
- missedScheduledIntervals,collectedGames:collected,reconciledDates:reconciled,deferredDates:omittedDates,eligibleForecasts:forecasts.length,distinctGames:games.size,
+ evidenceReceipts:evidence.receipts.length,frozenProviderBlobs:evidence.providerBlobs,missedScheduledIntervals,collectedGames:collected,reconciledDates:reconciled,deferredDates:omittedDates,eligibleForecasts:forecasts.length,distinctGames:games.size,
  resolvedForecasts:forecasts.filter(row=>outcomes.has(row.payload.forecastId)).length,providerRequests,providerFailures,reviewStatus,liveOrders:false,discordPosts:0,modelPromoted:false};
 await writeFile(join(root,'runtime','runs.jsonl'),JSON.stringify(result)+'\n',{flag:'a',mode:0o600});console.log(JSON.stringify(result));

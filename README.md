@@ -213,8 +213,10 @@ Windows locks and selection clocks: [bounded exclusive-create retries, strict re
 
 Model approval evidence: [recomputed local trial proof and exact league/horizon eligibility](docs/SPORTS_SELECTION_EVIDENCE_BINDING.md), development v6.0.52. Nonbaseline champions require verified plan/artifact/journal evidence; serialized flags alone cannot activate them. Optional verification paths are blank by default. Forward performance and confirmed availability remain unverified.
 
-Automatic forward collection: [pinned hourly research collector, safety checks and availability diagnostics](docs/SPORTS_AUTOMATIC_FORWARD_COLLECTOR.md). The existing v6.0.52 NHL Daily trial keeps its archived source while the collector records real first issues and finals. No account tokens, paid requests, Discord posts or orders are enabled; actual trial collection is pending its declared start.
+Automatic forward collection: [pinned hourly research collector, safety checks and availability diagnostics](docs/SPORTS_AUTOMATIC_FORWARD_COLLECTOR.md). The existing v6.0.52 NHL Daily trial keeps its archived source while the collector records real first issues and finals. No account tokens, paid requests, Discord posts or orders are enabled; the first actual run captured 12 NHL forecasts with no finals yet.
 
 Registry persistence integrity: [preserved first issues, consistent recent cohorts and cooperative write ownership](docs/SPORTS_REGISTRY_REFRESH_INTEGRITY.md), development v6.0.53. Ten old-path failures reproduced; full926 tests pass. The automatic forward trial stays frozen at v6.0.52 and cannot establish current-version superiority yet.
 
 Journal/operation clocks: [strict issuance, qualified result/delivery timing and operational report v3](docs/SPORTS_JOURNAL_OPERATION_CLOCKS.md), development v6.0.54. Eleven old-source failures reproduced; full 939 tests pass. A read-only audit confirms 13 resolved old-study journal outcomes while retaining unknown legacy outcome-space exclusions; no frozen study or production state changed.
+
+Forward evidence: [capture receipts, provider versions and first real run](docs/SPORTS_FORWARD_EVIDENCE_RECEIPTS.md). Full 945 tests pass. All 12 evidence reports remain incomplete; zero actionable opportunities or confirmed goalie starters. This verifies collection, not predictive improvement.
