@@ -5,6 +5,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {inspectForwardCollector,collectForwardTrial,forwardWorkerEnvironment} from '../src/forwardTrialCollector.js';
+import {supersededSelectionPlans} from '../src/selectionSupersession.js';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const digest=value=>sha(JSON.stringify(value));
@@ -24,7 +25,7 @@ export async function inspectForwardFamily(directory){
  const selection=await realpath(body.selectionDirectory);
  if(selection!==resolve(body.selectionDirectory)||await realpath(join(root,'selection'))!==selection)
   throw new Error('Forward family selection directory redirected');
- const ids=new Set(),roots=new Set();let own=false;
+ const ids=new Set(),roots=new Set(),inspections=new Map();let own=false;
  for(const member of body.members){
   if(!identifier(member.planId)||!isAbsolute(member.directory||'')||ids.has(member.planId))
    throw new Error('Invalid forward family member');
@@ -32,6 +33,7 @@ export async function inspectForwardFamily(directory){
   if(memberRoot!==resolve(member.directory)||roots.has(memberRoot))throw new Error('Forward family member redirected or repeated');
   ids.add(member.planId);roots.add(memberRoot);
   const inspected=memberRoot===root?current:await inspectForwardCollector(memberRoot);
+  inspections.set(member.planId,inspected);
   if(await realpath(join(memberRoot,'selection'))!==selection||inspected.plan.id!==member.planId
    ||inspected.plan.planHash!==member.planHash)throw new Error('Forward family member detached from shared selection ledger');
   if(memberRoot===root)own=true;
@@ -42,6 +44,12 @@ export async function inspectForwardFamily(directory){
  if(state.schema!=='sports-selection-state-v1'||digest(stateBody)!==stateHash
   ||!state.plans||!state.reports||!Array.isArray(state.consumedGames))throw new Error('Forward family state integrity failed');
  const plans=Object.entries(state.plans);
+ const retired=supersededSelectionPlans(state);
+ for(const id of retired){
+  const member=inspections.get(id);
+  if(member&&(member.evidence.receipts.length||member.evidence.providerBlobs||member.evidence.journalBytes))
+   throw Error('Superseded collector contains later evidence; preserve it for review');
+ }
  for(const [id,plan] of plans){
   const {planHash,...planBody}=plan||{};
   const start=epoch(plan?.start),end=epoch(plan?.end),registered=epoch(plan?.registeredAt);
@@ -56,7 +64,7 @@ export async function inspectForwardFamily(directory){
  }
  for(let i=0;i<plans.length;i++)for(let j=i+1;j<plans.length;j++){
   const a=plans[i][1],b=plans[j][1];
-  if(a.league===b.league&&epoch(a.start)<epoch(b.end)&&epoch(b.start)<epoch(a.end))
+  if(!retired.has(a.id)&&!retired.has(b.id)&&a.league===b.league&&epoch(a.start)<epoch(b.end)&&epoch(b.start)<epoch(a.end))
    throw new Error('Forward family selection windows overlap');
  }
  const consumed=[];
@@ -77,13 +85,15 @@ export async function inspectForwardFamily(directory){
   ||digest([...consumed].sort())!==digest([...state.consumedGames].sort()))
   throw new Error('Forward family games reused or consumption ledger incomplete');
  return {...current,family:{bindingHash,members:body.members.length,plans:plans.length,
+  supersededPlans:retired.size,activePlans:plans.length-retired.size,currentPlanSuperseded:retired.has(current.plan.id),
   finalizedReports:Object.keys(state.reports).length,consumedGames:consumed.length}};
 }
 
 /** Uses the existing collector lock/window rules, then rechecks the family immediately before the worker. */
 export async function collectForwardFamily(directory,{now=Date.now(),execute}={}){
  if(!Number.isFinite(now))throw new Error('Valid forward family clock required');
- await inspectForwardFamily(directory);
+ const inspected=await inspectForwardFamily(directory);
+ if(inspected.family.currentPlanSuperseded)return {status:'superseded_before_trial_start',providerRequests:0,liveOrders:false,discordPosts:0};
  return collectForwardTrial(directory,{now,execute:async root=>{
   await inspectForwardFamily(root);
   if(execute)return execute(root);

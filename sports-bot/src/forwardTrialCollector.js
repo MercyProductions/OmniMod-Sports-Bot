@@ -35,7 +35,8 @@ export async function inspectForwardCollector(directory){
   ||plan.modelVersion!==checkpoint.modelVersion||plan.league!=='nhl'||plan.horizon!=='Daily'||plan.candidate!=='hybrid')throw new Error('Forward plan changed');
  if(plan.artifactFile!==plan.id+'-model.json'||hash(await readFile(join(root,'selection',plan.artifactFile)))!==plan.artifactFileHash)throw new Error('Forward artifact changed');
  const evidence=await inspectForwardEvidence(root);
- return {root,checkpoint,manifest,plan,evidence};
+ const {supersededSelectionPlans}=await import('./selectionSupersession.js');
+ return {root,checkpoint,manifest,plan,evidence,planSuperseded:supersededSelectionPlans(selection).has(plan.id)};
 }
 
 /** One bounded collector invocation. No broker, Discord client, credentials or model activation. */
@@ -44,7 +45,8 @@ export async function collectForwardTrial(directory,{now=Date.now(),execute=asyn
  return JSON.parse(response.stdout.trim().split('\n').at(-1));
 }}={}){
  if(!Number.isFinite(now))throw new Error('Valid forward collection clock required');
- const {root,plan}=await inspectForwardCollector(directory),start=Date.parse(plan.start),end=Date.parse(plan.end);
+ const {root,plan,planSuperseded}=await inspectForwardCollector(directory),start=Date.parse(plan.start),end=Date.parse(plan.end);
+ if(planSuperseded)return {status:'superseded_before_trial_start',providerRequests:0,liveOrders:false,discordPosts:0};
  if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end)throw new Error('Invalid forward trial window');
  if(now<start)return {status:'awaiting_trial_start',start:plan.start,providerRequests:0,liveOrders:false,discordPosts:0};
  if(now>end+7*86400000)return {status:'collection_window_ended',providerRequests:0,liveOrders:false,discordPosts:0};

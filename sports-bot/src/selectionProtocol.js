@@ -1,3 +1,4 @@
+import {supersededSelectionPlans,withUnstartedForwardCollector,selectionSupersessionRecord} from './selectionSupersession.js';
 import {quoteTimeEpoch} from './oddsPricing.js';
 import {withAuditFileLock} from './auditFileLock.js';
 import {journalResultState} from './journalResults.js';
@@ -26,7 +27,9 @@ async function transaction(directory,action){
     if(state.schema!=='sports-selection-state-v1'||!Array.isArray(state.consumedGames)||!state.plans||!state.reports)
       throw new Error('Invalid selection state; preserve it for investigation');
     if(!created){const {stateHash,...body}=state;if(stateHash!==hash(body))throw new Error('Selection state integrity failed; preserve existing records');}
+    supersededSelectionPlans(state);
     const result=await action(state);
+    supersededSelectionPlans(state);
     delete state.stateHash;state.stateHash=hash(state);
     const temp=file+'.pending';let handle;
     try{
@@ -57,7 +60,7 @@ function validatePlan(plan,id){
 }
 
 /** Predeclare one exact ML fit or fixed hybrid recipe before a disjoint prospective period. */
-export async function registerSelectionPlan(spec,{directory,model,now=Date.now()}={}){
+function prepareSelectionPlan(spec,{model,now=Date.now()}={}){
   if(!Number.isFinite(now)||!identifier(spec?.id)||!identifier(spec?.sport)||!identifier(spec?.league)
     ||!['Daily','T-90','T-30','T-10'].includes(spec?.horizon)||!['ml','hybrid'].includes(spec?.candidate)
     ||!/^\w[\w .-]{1,150}$/.test(spec?.modelVersion||'')||!/^[a-f0-9]{64}$/.test(spec?.artifactId||''))
@@ -91,23 +94,51 @@ export async function registerSelectionPlan(spec,{directory,model,now=Date.now()
   plan.artifactFile=plan.id+'-model.json';
   plan.artifactFileHash=createHash('sha256').update(artifactBytes).digest('hex');
   plan.planHash=hash(plan);
+  return {plan,artifactBytes};
+}
+
+async function persistPlanArtifact(directory,plan,artifactBytes){
+  const file=join(directory,plan.artifactFile);let handle;
+  try{handle=await open(file,'wx',0o600);await handle.writeFile(artifactBytes);await handle.sync();}
+  catch(error){if(error.code!=='EEXIST'||createHash('sha256').update(await readFile(file)).digest('hex')!==plan.artifactFileHash)throw error;}
+  finally{if(handle)await handle.close();}
+}
+
+export async function registerSelectionPlan(spec,{directory,model,now=Date.now()}={}){
+  const {plan,artifactBytes}=prepareSelectionPlan(spec,{model,now}),start=epoch(plan.start),end=epoch(plan.end);
   return transaction(directory,async state=>{
+    const retired=supersededSelectionPlans(state);
     if(Object.hasOwn(state.plans,plan.id))throw new Error('Plan IDs are immutable and cannot be redeclared');
-    if(Object.values(state.plans).some(old=>old.league===plan.league&&start<epoch(old.end)&&end>epoch(old.start)))
+    if(Object.values(state.plans).some(old=>!retired.has(old.id)&&old.league===plan.league&&start<epoch(old.end)&&end>epoch(old.start)))
       throw new Error('League evaluation periods cannot overlap across model/horizon experiments');
-    const file=join(directory,plan.artifactFile);
-    let handle;
-    try{handle=await open(file,'wx',0o600);await handle.writeFile(artifactBytes);await handle.sync();}
-    catch(error){if(error.code!=='EEXIST'||createHash('sha256').update(await readFile(file)).digest('hex')!==plan.artifactFileHash)throw error;}
-    finally{if(handle)await handle.close();}
+    await persistPlanArtifact(directory,plan,artifactBytes);
     state.plans[plan.id]=plan;return plan;
   });
+}
+
+/** Replace only an observed-empty, unstarted collector; both plans/artifacts stay immutable. */
+export async function supersedeUnstartedSelectionPlan(priorPlanId,spec,{directory,model,priorTrialDirectory,now=Date.now()}={}){
+  if(!identifier(priorPlanId)||!directory||!priorTrialDirectory)throw Error('Explicit pretrial plan and collector required');
+  const {plan,artifactBytes}=prepareSelectionPlan(spec,{model,now});
+  return withUnstartedForwardCollector(priorTrialDirectory,directory,now,async({current,proof,recheck})=>transaction(directory,async state=>{
+    const prior=state.plans[priorPlanId];validatePlan(prior,priorPlanId);
+    if(current.plan.id!==priorPlanId||current.plan.planHash!==prior.planHash||supersededSelectionPlans(state).has(priorPlanId))
+      throw Error('Prior collector is detached or already superseded');
+    if(Object.hasOwn(state.plans,plan.id))throw Error('Plan IDs are immutable and cannot be redeclared');
+    const record=selectionSupersessionRecord(prior,plan,proof,now,state.consumedGames);
+    state.plans[plan.id]=plan;state.supersessions=[...(state.supersessions||[]),record];
+    supersededSelectionPlans(state);
+    await recheck();
+    await persistPlanArtifact(directory,plan,artifactBytes);
+    return {status:'pretrial_plan_superseded',priorPlanId,replacementPlan:plan,recordHash:record.recordHash,promotionAllowed:false};
+  }));
 }
 
 /** Finalized outcomes are consumed once; research review readiness never activates a model. */
 export async function finalizeSelectionPlan(id,{directory,records,now=Date.now()}={}){
   if(!identifier(id)||!Number.isFinite(now)||!Array.isArray(records))throw new Error('Invalid selection review request');
   return transaction(directory,async state=>{
+    if(supersededSelectionPlans(state).has(id))throw Error('Selection plan was superseded before its start');
     const plan=state.plans[id];if(!plan)throw new Error('Selection plan not found');
     validatePlan(plan,id);
     if(createHash('sha256').update(await readFile(join(directory,plan.artifactFile))).digest('hex')!==plan.artifactFileHash)
@@ -153,6 +184,7 @@ export function verifySelectionReviewEvidence({state,artifactBytes,records,revie
  if(!Number.isFinite(now)||!Number.isFinite(new Date(now).getTime())||!Array.isArray(records)||!review)throw new Error('Invalid selection evidence request');
  const {stateHash,...stateBody}=state||{};
  if(state?.schema!=='sports-selection-state-v1'||stateHash!==hash(stateBody))throw new Error('Selection state integrity failed');
+ if(supersededSelectionPlans(state).has(review.planId))throw Error('Selection plan was superseded before its start');
  const {reportHash,...reportBody}=review;
  if(review.schema!=='sports-selection-review-v2'||reportHash!==hash(reportBody)
   ||review.status!=='review_ready'||review.promotionAllowed!==false||review.approvalRequired!==true||hash(state.reports?.[review.planId])!==hash(review))throw new Error('Selection review integrity or readiness unverified');

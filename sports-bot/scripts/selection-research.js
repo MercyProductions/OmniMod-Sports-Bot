@@ -1,6 +1,6 @@
 import {hybridArtifact} from '../src/hybridArtifact.js';
 import {readFile} from 'node:fs/promises';
-import {registerSelectionPlan,finalizeSelectionPlan} from '../src/selectionProtocol.js';
+import {registerSelectionPlan,finalizeSelectionPlan,supersedeUnstartedSelectionPlan} from '../src/selectionProtocol.js';
 import {readPredictionJournal} from '../src/predictionJournal.js';
 import {localMlArtifactId} from '../src/localMl.js';
 import {CURRENT_MODEL_VERSION} from '../src/modelIdentity.js';
@@ -9,7 +9,7 @@ const arg=name=>process.argv.slice(2).find(value=>value.startsWith(`--${name}=`)
 try{
   const action=arg('action'),directory=arg('directory');
   if(!directory)throw new Error('Explicit research directory required');
-  if(action==='register'){
+  if(action==='register'||action==='supersede-unstarted'){
     const spec=JSON.parse(await readFile(arg('spec'),'utf8'));
     const candidate=spec.candidate || 'ml';
     let model,planSpec;
@@ -25,8 +25,12 @@ try{
       planSpec={...spec,candidate,artifactId:model.artifactId,trainedAt:model.trainedAt,
         lastTrainingOutcomeAt:model.lastTrainingOutcomeAt,modelVersion:CURRENT_MODEL_VERSION};
     }
-    const result=await registerSelectionPlan(planSpec,{directory,model});
-    console.log(JSON.stringify({status:'research_plan_registered',planId:result.id,planHash:result.planHash,promotionAllowed:false}));
+    if(action==='supersede-unstarted'){
+      console.log(JSON.stringify(await supersedeUnstartedSelectionPlan(arg('prior-plan'),planSpec,{directory,model,priorTrialDirectory:arg('prior-collector')})));
+    }else{
+      const result=await registerSelectionPlan(planSpec,{directory,model});
+      console.log(JSON.stringify({status:'research_plan_registered',planId:result.id,planHash:result.planHash,promotionAllowed:false}));
+    }
   }else if(action==='finalize'){
     if(!arg('journal'))throw new Error('Explicit isolated journal required');
     const result=await finalizeSelectionPlan(arg('id'),{directory,records:await readPredictionJournal(arg('journal'))});
