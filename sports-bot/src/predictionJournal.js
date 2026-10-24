@@ -1,4 +1,5 @@
 import {capturedEventTime} from './capturedEventTime.js';
+import {validForecastHorizonScope} from './forecastHorizonScope.js';
 import {serializeAvailabilityRefreshProof} from './availabilityRefresh.js';
 import {REFRESH_REASON_POLICY,structuredRefreshReasons} from './refreshReasonCodes.js';
 import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
@@ -75,6 +76,7 @@ export function forecastIssuanceEvidence(prediction = {}, game = {}, slate = {},
     && Math.abs(Object.values(vector).reduce((sum, value) => sum + (value || 0), 0) - 100) <= 0.5;
   return { generatedAt, startTime, version, vector,
     recordEligibility: observedPregame && probabilityValid && version !== 'legacy-unversioned'
+      &&(!Object.hasOwn(prediction,'forecastHorizonEvidence')||validForecastHorizonScope(prediction,generatedAt))
       ? 'observed_pregame' : 'unverifiable_or_late_observation' };
 }
 
@@ -90,6 +92,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
     quote.priceAmerican !== null && Math.abs(quote.priceAmerican) >= 100 && quote.bookmaker));
   return { forecastId: digest(identity), ...identity, startTime, timestampPolicy:'explicit-zone-receipts-and-event-start-v2', snapshotStage: prediction.snapshotStage || 'daily',
     recordEligibility,
+    forecastHorizonEvidence:prediction.forecastHorizonEvidence?structuredClone(prediction.forecastHorizonEvidence):null,
     selectedSide: prediction.predictedSide || null, selectedProbability: finiteNumber(prediction.predictionProbability),
     outcomePercentages: vector, modeledOutcomes: Object.keys(prediction.outcomeProbabilities || {}).sort(), recommendationStatus: prediction.recommendationStatus || 'unknown',
     evidenceCoverage: prediction.evidenceCoverage || null,

@@ -793,7 +793,10 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   const frozenPredictions=scopedSlatePredictions(options.cachedSlate||{});
   const predictions = games.map((game, index) => {
     const stage=options.marketStages?.['event:'+scopedEventKey(eventReference(game))] || options.marketStages?.[String(game.id)] || options.marketStage || 'daily';
-    return frozenOrFreshPrediction(game,index,{...modelContext,forecastHorizon:predictionHorizon({snapshotStage:stage})},options.cachedSlate,refreshGameIds,refreshEventKeys,frozenPredictions);
+    const forecastNow=Date.now();
+    return frozenOrFreshPrediction(game,index,{...modelContext,now:forecastNow,
+      forecastHorizon:predictionHorizon({snapshotStage:stage,minutesToStart:(Date.parse(game.startTime)-forecastNow)/60000})},
+      options.cachedSlate,refreshGameIds,refreshEventKeys,frozenPredictions);
   });
   for (const prediction of predictions) {
     const refreshed = !options.cachedSlate || (refreshEventKeys?refreshEventKeys.has(scopedEventKey(prediction)):!refreshGameIds||refreshGameIds.has(String(prediction.gameId)));

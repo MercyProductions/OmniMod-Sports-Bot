@@ -1,4 +1,5 @@
 import {parseTeamRecord as parseRecord} from './teamRecordEvidence.js';
+import {forecastHorizonScope} from './forecastHorizonScope.js';
 import {capturedEventTime} from './capturedEventTime.js';
 import {marketTimestampEvidence} from './quoteChronology.js';
 import {availabilityFraction,hasAvailabilityObservation} from './dataValidation.js';
@@ -480,6 +481,7 @@ function rescaleProbabilities(vector, selectedSide, calibratedProbability) {
 export function predictGame(game, index, modelContext = {}) {
   if(modelContext.now!==undefined&&!Number.isFinite(modelContext.now))throw new Error('Valid prediction information cutoff required');
   const evidenceNow = modelContext.now ?? Date.now();
+  const forecastHorizonEvidence=forecastHorizonScope(modelContext.forecastHorizon,game,evidenceNow);
   const inputs = predictionInputsAt(game,modelContext,evidenceNow);game=inputs.game;modelContext=inputs.context;
   const intelligence = modelContext.intelligence || {};
   const profile = sportProfile(game);
@@ -648,7 +650,7 @@ export function predictGame(game, index, modelContext = {}) {
 
   const evidenceProbabilities = { ...probabilities };
   const specialist = buildSportModelPrediction({...game,autoPlayers:[...awayPlayerRows,...homePlayerRows]}, { modelLogit,now:evidenceNow });
-  const modelDecision = modelDecisionForSport(modelContext.modelRegistry, profile.key, {now:evidenceNow,league:game.leagueKey,horizon:modelContext.forecastHorizon || 'Daily'});
+  const modelDecision = modelDecisionForSport(modelContext.modelRegistry, profile.key, {now:evidenceNow,league:game.leagueKey,horizon:forecastHorizonEvidence.horizon});
   const hybridProbabilities = specialist.available
     ? blendProbabilityVectors(evidenceProbabilities, specialist.probabilities, modelDecision.specialistWeight, profile.twoWay)
     : evidenceProbabilities;
@@ -765,6 +767,7 @@ export function predictGame(game, index, modelContext = {}) {
 
   return {
     gameId: game.id,
+    horizon:forecastHorizonEvidence.horizon,forecastHorizonEvidence,
     inputChronology: inputs.audit,
     evidenceCoverage: {...evidenceCoverage,specialistAvailability:specialist.availabilityEvidence||null,uncertaintyContext:uncertainty.context},
     uncertaintyContext:uncertainty.context,

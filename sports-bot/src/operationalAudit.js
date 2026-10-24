@@ -1,4 +1,5 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
+import {validForecastHorizonScope} from './forecastHorizonScope.js';
 import {REFRESH_REASON_POLICY} from './refreshReasonCodes.js';
 import {serializeAvailabilityRefreshProof} from './availabilityRefresh.js';
 import {capturedEventTime} from './capturedEventTime.js';
@@ -47,8 +48,10 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
       selectedSnapshotCompletions++;
     }catch{invalidSnapshotAcceptanceProofs++;}
   }
+  const horizonDecisionScope={bound:0,legacyOrMissing:0,invalid:0};
   let unresolved=0,overdue=0,unknownStart=0,missingCoverage=0,unknownUnderlying=0;
   for(const {payload:row} of issued){
+    horizonDecisionScope[!row.forecastHorizonEvidence?'legacyOrMissing':validForecastHorizonScope(row,row.predictionGeneratedAt)?'bound':'invalid']++;
     const league=byLeague[row.league||'unknown'] ||= {issued:0,delivered:0,missingResults:0,overdueResults:0};
     league.issued++;if(delivered.has(row.forecastId))league.delivered++;
     if(!results.has(row.forecastId)){
@@ -85,7 +88,7 @@ export function auditSportsOperations(records=[],{asOf=Date.now(),overdueAfterHo
       invalidRecordTimestamps:records.filter(row=>!Number.isFinite(epoch(row.recordedAt))).length,
       recordsAfterCutoff:records.filter(row=>epoch(row.recordedAt)>asOf).length,
       duplicateForecastRecords:identities.duplicateRecords,conflictingForecastRecords:identities.conflictingRecords},
-    evidence:{missingFrozenCoverage:missingCoverage,missingReasons:coverage,unknownUnderlyingFreshness:unknownUnderlying},
+    evidence:{horizonDecisionScope,missingFrozenCoverage:missingCoverage,missingReasons:coverage,unknownUnderlyingFreshness:unknownUnderlying},
     byLeague,calibrationMonitoring,
     limitations:['Attempt counts cover only instrumented terminal attempts; process crashes and historical attempts may be absent.',
       'Older terminal records may omit cache/source-identity causes. Zero recorded causes is not proof of zero events; unavailable reasons are not reconstructed.',
