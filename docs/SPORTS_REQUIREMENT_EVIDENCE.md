@@ -6,7 +6,7 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 24, 2026
 
-Development source identifies as **v6.0.56**. Reproduced baseline:986 tests; repaired full default-parallel suite: **998 passed**, plus syntax/whitespace checks. The current automatic prospective experiment remains frozen at commit `03c6714...`, v6.0.52; its source and plan were not rewritten. Main-source correctness checks and a running schedule are not predictive-validation results. The first real run at 2026-10-24 05:46 UTC recorded 12 NHL forecasts, zero finals and zero actionable opportunities. Its declared period still requires at least 75 games/eight dates/14 days.
+Development source identifies as **v6.0.61**. Latest reproduced baseline:1,066 tests; repaired full default-parallel suite: **1,079 passed**, focused77/postcommit59 and syntax217/whitespace checks. The original automatic selection experiment remains frozen at commit `03c6714...`, v6.0.52; its source and plan were not rewritten. Four checked captures retain12 distinct NHL games/one date/zero finals; its declared period still requires at least75 games/eight dates/14days. Separate current-source observations include21 games and two freshly recovered MLB pitcher projections, not confirmed starters or medical evidence. Main-source checks and scheduled collection are not predictive-validation results. See [scoreboard starter recovery](SPORTS_SCOREBOARD_STARTER_RECOVERY.md) for actual times, contracts and the separate final-only automation.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |

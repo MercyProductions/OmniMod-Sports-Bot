@@ -1,0 +1,21 @@
+{
+  "phase": "scoreboard_starter_recovery",
+  "status": "in_progress",
+  "modelVersion": "v6.0.61",
+  "implementationCommit": "861f78ce63f08ed2a4e1257aaf34113bbae01252",
+  "items": [
+    {"id":"reproduce_baseline_and_missing_projection", "status":"verified_complete", "evidence":"1066 baseline passes; old-source failed-summary regression loses available projections"},
+    {"id":"preserve_event_bound_projections", "status":"verified_complete", "evidence":"strict source/role/team/identity, duplicate/conflict and precedence checks; no health or confirmation invention"},
+    {"id":"inference_freshness_and_restart", "status":"verified_complete", "evidence":"receipt expiry/start/cutoff revalidation, serialized event transplant and dependent aggregate tests"},
+    {"id":"regression_and_archived_source_checks", "status":"verified_complete", "evidence":"13 new scenarios; focused77, full1079, postcommit59, syntax217; zero failures/skips"},
+    {"id":"actual_parser_and_fresh_source_integration", "status":"verified_complete", "evidence":"saved-body parser recovers two projections but expires at actual later clock; fresh v61 worker retains two projected MLB rows, zero confirmations, unknown injuries"},
+    {"id":"final_only_automation_setup", "status":"verified_complete", "evidence":"Sports current-source final reconciliation ACTIVE; original frozen trial and Stocks configurations unchanged; future continuity not certified"},
+    {"id":"confirmed_goalie_and_medical_source_coverage", "status":"pending", "evidence":"native saved feeds lack assertions; injury endpoint403; alternate provider not connected"},
+    {"id":"actual_finals_and_model_performance", "status":"pending", "evidence":"33 role/game observations not started at collection; no current proper-score, calibration or economic improvement established"},
+    {"id":"full_sports_objective", "status":"in_progress", "evidence":"broader leagues/source truth, independent samples, executable odds and operational host proof remain; Crypto then Stocks stay queued"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}
