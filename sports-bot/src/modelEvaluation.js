@@ -1,9 +1,11 @@
+import {createHash} from 'node:crypto';
 import { listDailyCaches } from './storage.js';
 import { config } from './config.js';
 import { normalizeEntityName, readIntelligenceStore } from './intelligenceStore.js';
 import { sportProfile } from './sportProfiles.js';
 import { readFeatureWarehouse } from './featureWarehouse.js';
-import { evaluatePredictionHorizons } from './horizonEvaluation.js';
+import { evaluatePredictionHorizons, predictionHorizon } from './horizonEvaluation.js';
+import { CURRENT_MODEL_VERSION, EVALUATION_VERSION } from './modelIdentity.js';
 import { finiteNumber, finalOutcomeSide, scoreOutcome } from './dataValidation.js';
 
 const EPSILON = 0.001;
@@ -95,25 +97,38 @@ export function evaluatePredictionRows(rows = []) {
   };
 }
 
-export function collectGradedRows(caches = []) {
-  const rows = [];
-  const seen = new Set();
+export function collectGradedRows(caches = [], options = {}) {
+  const rows = new Map(), conflicts = new Set();
   for (const cache of caches) {
     for (const prediction of cache?.slate?.predictions ?? []) {
       if (prediction.quoteRefreshOnly) continue;
       if (prediction.predictionCorrect !== true && prediction.predictionCorrect !== false) continue;
       if (prediction.eligibleForCalibration === false || (prediction.predictionMode && prediction.predictionMode !== 'pregame')) continue;
       if (!eligibleModelVersion(prediction.modelVersion)) continue;
-      const key = `${cache.dateKey}:${prediction.gameId}:${prediction.modelVersion || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       const game = (cache?.slate?.games || []).find((row) => String(row.id) === String(prediction.gameId));
       const generated = Date.parse(prediction.predictionGeneratedAt || cache?.slate?.generatedAt || '');
       const start = Date.parse(prediction.startTime || game?.startTime || '');
-      if (Number.isFinite(generated) && Number.isFinite(start) && generated >= start) continue;
+      if (!Number.isFinite(generated) || !Number.isFinite(start) || generated >= start) continue;
       if (game && !outcomeSide(game)) continue;
-      rows.push({
+      if (options.availableBefore !== undefined) {
+        const observed = Date.parse(prediction.resultObservedAt || '');
+        if (!game || !outcomeSide(game) || !Number.isFinite(observed) || observed < start || observed >= options.availableBefore) continue;
+      }
+      const horizon = predictionHorizon({ ...prediction, minutesToStart: (start - generated) / 60_000 });
+      if (options.modelVersion && prediction.modelVersion !== options.modelVersion) continue;
+      if (options.horizon && horizon !== options.horizon) continue;
+      const key = options.uniqueGames
+        ? JSON.stringify([prediction.leagueKey || prediction.league || game?.leagueKey || '',prediction.gameId,start,prediction.modelVersion,horizon])
+        : [cache.slate?.guildId || '', prediction.leagueKey || prediction.league || '', cache.dateKey,
+          prediction.gameId, prediction.modelVersion, horizon].join(':');
+      const prior = rows.get(key);
+      if (options.uniqueGames && prior && (prior.actualSide !== outcomeSide(game) || prior.correct !== prediction.predictionCorrect)) conflicts.add(key);
+      if (prior && (options.uniqueGames ? Date.parse(prior.prediction.predictionGeneratedAt || '') <= generated
+        : Date.parse(prior.prediction.predictionGeneratedAt || '') >= generated)) continue;
+      rows.set(key, {
         dateKey: cache.dateKey,
+        modelVersion: prediction.modelVersion,
+        horizon,
         correct: prediction.predictionCorrect,
         prediction,
         game,
@@ -121,14 +136,18 @@ export function collectGradedRows(caches = []) {
       });
     }
   }
-  return rows;
+  return [...rows].filter(([key]) => !conflicts.has(key)).map(([,row])=>row);
 }
 
-export function collectFeatureRows(caches = []) {
-  return collectGradedRows(caches)
+export function collectFeatureRows(caches = [], options = {}) {
+  return collectGradedRows(caches, options)
     .filter((row) => ['away', 'home', 'draw'].includes(row.actualSide) && Array.isArray(row.prediction?.factors) && row.prediction.factors.length)
     .map((row) => ({
       dateKey: row.dateKey,
+      gameId: String(row.prediction.gameId || ''), league: row.prediction.leagueKey || row.game?.leagueKey || '',
+      modelVersion: row.modelVersion, horizon: row.horizon,
+      predictionGeneratedAt: row.prediction.predictionGeneratedAt, startTime: row.prediction.startTime || row.game?.startTime,
+      resolvedAt: row.prediction.resultObservedAt || null,
       sport: profileKey(row.prediction),
       // The learned feature layer models the home-vs-away logit before the
       // sport-specific draw allocation. A draw is neutral evidence here,
@@ -158,54 +177,63 @@ function scoringSummary(rows) {
 
 export function buildWalkForwardFeatureModels(featureRows = [], options = {}) {
   const minSamples = Math.max(20, Number(options.minSamples ?? config.autoLearningMinSamples) || 30);
+  const asOf = options.asOf === undefined ? Date.now() : Number(options.asOf);
+  if (!Number.isFinite(asOf)) throw new Error('Feature learning requires a valid information cutoff');
   const groups = new Map();
   for (const row of featureRows) {
     if (!groups.has(row.sport)) groups.set(row.sport, []);
     groups.get(row.sport).push(row);
   }
   const output = {};
-  for (const [sport, rows] of groups) {
-    rows.sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)));
-    const weights = {};
-    const baselineScores = [];
-    const learnedScores = [];
-    let seen = 0;
-    for (const row of rows) {
-      for (const label of Object.keys(row.factors)) weights[label] ??= 1;
-      const baselineLogit = Object.values(row.factors).reduce((total, value) => total + clamp(value, -3, 3), 0);
-      const learnedLogit = Object.entries(row.factors).reduce((total, [label, value]) => total + clamp(value, -3, 3) * weights[label], 0);
-      if (seen >= minSamples) {
-        baselineScores.push({ probability: logistic(baselineLogit), outcome: row.outcome });
-        learnedScores.push({ probability: logistic(learnedLogit), outcome: row.outcome });
-      }
-      const error = logistic(learnedLogit) - row.outcome;
-      const learningRate = 0.055 / Math.sqrt(1 + seen / 80);
-      for (const [label, rawValue] of Object.entries(row.factors)) {
-        const value = clamp(rawValue, -3, 3);
-        const regularization = 0.018 * (weights[label] - 1);
-        weights[label] = clamp(weights[label] - learningRate * (error * value + regularization), 0.35, 1.65);
-      }
-      seen += 1;
+  for (const [sport, input] of groups) {
+    const excluded = {}, unique = new Map();
+    const reject = reason => { excluded[reason] = (excluded[reason] || 0) + 1; };
+    for (const row of input) {
+      const generated = Date.parse(row.predictionGeneratedAt || ''), start = Date.parse(row.startTime || ''), resolved = Date.parse(row.resolvedAt || '');
+      if (![generated,start,resolved].every(Number.isFinite) || generated >= start || resolved < start || resolved > asOf) { reject('outcome_chronology_unverified'); continue; }
+      if (!row.gameId || ![0,0.5,1].includes(row.outcome) || !row.factors || !Object.keys(row.factors).length
+        || Object.values(row.factors).some(value => typeof value !== 'number' || !Number.isFinite(value))) { reject('invalid_training_input'); continue; }
+      // Different guilds/horizons of one game are not independent training examples.
+      const key = JSON.stringify([row.league || '',row.gameId,row.startTime]);
+      const previous = unique.get(key);
+      if (previous && previous.outcome !== row.outcome) { unique.set(key,{...previous,conflicting:true}); continue; }
+      if (!previous || generated < Date.parse(previous.predictionGeneratedAt)) unique.set(key,{...row,conflicting:previous?.conflicting || false});
     }
-    const baseline = scoringSummary(baselineScores);
-    const learned = scoringSummary(learnedScores);
-    const brierImprovement = baseline.brierScore === null || learned.brierScore === null ? null : baseline.brierScore - learned.brierScore;
-    const accepted = seen >= minSamples && learned.sampleSize >= 20 && brierImprovement > 0.001;
-    const reliability = accepted ? clamp((seen - minSamples + 1) / 220, 0, 0.78) : 0;
-    const shrunkWeights = Object.fromEntries(Object.entries(weights).map(([label, value]) => [label, 1 + (value - 1) * reliability]));
-    output[sport] = {
-      trained: seen >= minSamples,
-      accepted,
-      sampleSize: seen,
-      evaluationSampleSize: learned.sampleSize,
-      weights: shrunkWeights,
-      baselineBrier: baseline.brierScore,
-      learnedBrier: learned.brierScore,
-      baselineLogLoss: baseline.logLoss,
-      learnedLogLoss: learned.logLoss,
-      brierImprovement,
-      walkForward: true
-    };
+    const rows = [...unique.values()].filter(row => { if(row.conflicting){reject('conflicting_game_outcome');return false;} return true; })
+      .sort((a,b) => Date.parse(a.predictionGeneratedAt)-Date.parse(b.predictionGeneratedAt) || String(a.gameId).localeCompare(String(b.gameId)));
+    const split = Math.max(minSamples,Math.floor(rows.length*0.7)), validation = rows.slice(split);
+    const validationStart = validation.length ? Date.parse(validation[0].predictionGeneratedAt) : null;
+    const training = rows.slice(0,split).filter(row => {
+      if (validationStart !== null && Date.parse(row.resolvedAt) >= validationStart) { reject('training_label_overlaps_validation'); return false; }
+      return true;
+    });
+    // Fit in outcome-availability order, with no validation labels or factors entering the fitted artifact.
+    training.sort((a,b) => Date.parse(a.resolvedAt)-Date.parse(b.resolvedAt) || String(a.gameId).localeCompare(String(b.gameId)));
+    const weights = {}; let seen = 0;
+    for (const row of training) {
+      for (const label of Object.keys(row.factors).sort()) weights[label] ??= 1;
+      const logit = Object.entries(row.factors).reduce((sum,[label,value]) => sum+clamp(value,-3,3)*weights[label],0);
+      const error = logistic(logit)-row.outcome, rate = 0.055/Math.sqrt(1+seen/80);
+      for (const [label,raw] of Object.entries(row.factors)) weights[label] = clamp(weights[label]-rate*(error*clamp(raw,-3,3)+0.018*(weights[label]-1)),0.35,1.65);
+      seen++;
+    }
+    const reliability = clamp((training.length-minSamples+1)/220,0,0.78);
+    const fitted = Object.fromEntries(Object.entries(weights).sort(([a],[b])=>a.localeCompare(b)).map(([label,value])=>[label,clamp(1+(value-1)*reliability,0.6,1.4)]));
+    const scores = (learned) => validation.map(row => ({outcome:row.outcome,probability:logistic(Object.entries(row.factors)
+      .reduce((sum,[label,value])=>sum+clamp(value,-3,3)*(learned ? fitted[label] ?? 1 : 1),0))}));
+    const baseline = scoringSummary(scores(false)), challenger = scoringSummary(scores(true));
+    const improvement = baseline.brierScore === null ? null : baseline.brierScore-challenger.brierScore;
+    const artifact = {schema:'sports-feature-fit-v2',sport,weights:fitted,
+      trainingHash:createHash('sha256').update(JSON.stringify(training)).digest('hex'),
+      trainingSamples:training.length,lastTrainingOutcomeAt:training.at(-1)?.resolvedAt || null};
+    const artifactId = createHash('sha256').update(JSON.stringify(artifact)).digest('hex');
+    output[sport] = {...artifact,artifactId,trained:training.length>=minSamples,accepted:false,productionEligible:false,
+      researchAccepted:training.length>=minSamples && validation.length>=20 && improvement>0.001,
+      activationReason:'Frozen feature candidate requires independent prospective artifact review; automatic activation disabled.',
+      sampleSize:rows.length,trainingSampleSize:training.length,evaluationSampleSize:validation.length,excluded,
+      baselineBrier:baseline.brierScore,learnedBrier:challenger.brierScore,baselineLogLoss:baseline.logLoss,
+      learnedLogLoss:challenger.logLoss,brierImprovement:improvement,walkForward:true,
+      validationProtocol:'Single terminal chronological split; training labels purged at first validation issuance; exact shrunk fit scored without validation updates.'};
   }
   return output;
 }
@@ -325,6 +353,7 @@ function resultRowsFromCaches(caches) {
       if (awayScore === null || homeScore === null) continue;
       rows.push({
         id: `cache:${cache.dateKey}:${game.id}`,
+        startTime: game.startTime || null,
         dateKey: cache.dateKey,
         league: game.leagueKey || game.league,
         leagueKey: game.leagueKey,
@@ -360,6 +389,49 @@ function regressLeagueRatings(ratings, league, amount) {
   }
 }
 
+/** Consolidate cross-source copies without treating revised scores as additional games. */
+export function selectEloResults(rows = []) {
+  const buckets = new Map(), audit = {inputRows:rows.length,invalidRows:0,duplicateRows:0,conflictingEvents:0,ambiguousUntimedRows:0,selectedEvents:0};
+  for (const row of rows) {
+    if (!scoreOutcome(row.awayScore,row.homeScore) || !row.awayTeam || !row.homeTeam || !row.dateKey || !(row.leagueKey || row.league)) {audit.invalidRows++;continue;}
+    const key = JSON.stringify([row.dateKey,normalizeEntityName(row.leagueKey || row.league),normalizeEntityName(row.awayTeam),normalizeEntityName(row.homeTeam)]);
+    if (!buckets.has(key)) buckets.set(key,[]);
+    buckets.get(key).push(row);
+  }
+  const selected = [];
+  for (const bucket of buckets.values()) {
+    const timed = new Map(), untimed = [], startsById = new Map();
+    for (const row of bucket) {
+      const time = Date.parse(row.startTime || '');
+      if (!row.id || !Number.isFinite(time)) continue;
+      const times = startsById.get(String(row.id)) || new Set();times.add(time);startsById.set(String(row.id),times);
+    }
+    if ([...startsById.values()].some(times=>times.size>1)) {audit.conflictingEvents++;continue;}
+    for (const row of bucket) {
+      const start = Date.parse(row.startTime || '');
+      if (!Number.isFinite(start)) {untimed.push(row);continue;}
+      if (!timed.has(start)) timed.set(start,[]);
+      timed.get(start).push(row);
+    }
+    if (timed.size > 1) audit.ambiguousUntimedRows += untimed.length;
+    else if (timed.size === 1) timed.values().next().value.push(...untimed);
+    else timed.set(null,untimed);
+    for (const group of timed.values()) {
+      // Optional season metadata missing on one copy is not itself a conflict.
+      const scores = new Set(group.map(row=>JSON.stringify([finiteNumber(row.awayScore),finiteNumber(row.homeScore)])));
+      const venues = new Set(group.filter(row=>typeof row.neutralSite==='boolean').map(row=>row.neutralSite));
+      const seasons = new Set(group.map(row=>finiteNumber(row.seasonYear)).filter(value=>value!==null));
+      if (scores.size>1 || venues.size>1 || seasons.size>1) {audit.conflictingEvents++;continue;}
+      const row = [...group].sort((a,b)=>Number(Boolean(b.startTime))-Number(Boolean(a.startTime)) || String(a.id||'').localeCompare(String(b.id||'')))[0];
+      selected.push(row);audit.duplicateRows += group.length-1;
+    }
+  }
+  selected.sort((a,b)=>String(a.dateKey).localeCompare(String(b.dateKey)) || String(a.startTime||'').localeCompare(String(b.startTime||''))
+    || JSON.stringify([a.leagueKey||a.league,a.awayTeam,a.homeTeam]).localeCompare(JSON.stringify([b.leagueKey||b.league,b.awayTeam,b.homeTeam])));
+  audit.selectedEvents=selected.length;
+  return {rows:selected,audit};
+}
+
 export function buildEloRatings(intelligence = {}, caches = [], externalResults = []) {
   const ratings = new Map();
   for (const team of Object.values(intelligence.teams || {})) {
@@ -372,15 +444,9 @@ export function buildEloRatings(intelligence = {}, caches = [], externalResults 
     ...externalResults,
     ...resultRowsFromCaches(caches)
   ];
-  const deduped = new Map();
-  for (const row of rows) {
-    if (!scoreOutcome(row.awayScore, row.homeScore) || !row.awayTeam || !row.homeTeam) continue;
-    const key = `${row.dateKey}:${eloKey(row.leagueKey || row.league, row.awayTeam)}:${eloKey(row.leagueKey || row.league, row.homeTeam)}:${row.awayScore}:${row.homeScore}`;
-    if (!deduped.has(key)) deduped.set(key, row);
-  }
-
+  const selected = selectEloResults(rows);
   const seasonByLeague = new Map();
-  for (const row of [...deduped.values()].sort((a, b) => String(a.dateKey).localeCompare(String(b.dateKey)))) {
+  for (const row of selected.rows) {
     const league = row.leagueKey || row.league;
     const seasonYear = inferredSeasonYear(row);
     const priorSeason = seasonByLeague.get(normalizeEntityName(league));
@@ -414,43 +480,80 @@ export function lookupElo(ratings, league, team) {
   return Number(ratings?.[eloKey(league, team)] ?? 1500);
 }
 
+/** Filter learning evidence by actual recorded availability, never by schedule date alone. */
+export function learningInputsBefore(caches = [], intelligence = {}, externalResults = [], { cutoff, dateKey = null } = {}) {
+  if (!Number.isFinite(cutoff)) throw new Error('Learning context requires a valid information cutoff');
+  const excluded = {};
+  const exclude = reason => { excluded[reason] = (excluded[reason] || 0) + 1; return false; };
+  const priorDate = row => !dateKey || row.dateKey && String(row.dateKey).slice(0,10) < dateKey;
+  const available = (row,kind) => {
+    if (!priorDate(row)) return exclude(`${kind}:same_or_later_schedule_date`);
+    const times = [row.observedAt,row.recordedAt,row.updatedAt,row.sourceMeta?.fetchedAt].filter(value => value !== undefined && value !== null && value !== '').map(value => Date.parse(value));
+    const start = Date.parse(row.startTime || `${row.dateKey}T00:00:00Z`);
+    if (!times.length || !times.every(Number.isFinite) || !Number.isFinite(start) || Math.min(...times) < start) return exclude(`${kind}:availability_unknown_or_invalid`);
+    if (Math.max(...times) >= cutoff) return exclude(`${kind}:not_available_before_cutoff`);
+    return true;
+  };
+  const selectedCaches = caches.filter(priorDate);
+  const eloCaches = selectedCaches.map(cache => ({...cache,slate:{...cache.slate,games:(cache.slate?.games || []).filter(game => {
+    const prediction = (cache.slate?.predictions || []).find(row => String(row.gameId) === String(game.id));
+    return available({dateKey:cache.dateKey,startTime:game.startTime,
+      observedAt:prediction?.resultObservedAt},'cached_result');
+  })}}));
+  const teams = Object.fromEntries(Object.entries(intelligence.teams || {}).filter(([,row]) => {
+    const updated = Date.parse(row.updatedAt || '');
+    return Number.isFinite(updated) && updated < cutoff || exclude('team_seed:availability_unknown_or_after_cutoff');
+  }));
+  const results = Object.fromEntries(Object.entries(intelligence.results || {}).filter(([,row]) => available(row,'manual_result')));
+  return { caches:selectedCaches,eloCaches,intelligence:{...intelligence,teams,results},
+    externalResults:externalResults.filter(row => available(row,'external_result')),
+    audit:{schema:'sports-learning-cutoff-v1',cutoffAt:new Date(cutoff).toISOString(),scheduleDateExclusive:dateKey,
+      excluded,pointInTimeComplete:false,
+      limitations:['Latest mutable records are excluded when newer than the cutoff; earlier revisions are not reconstructed.',
+        'Receipt/record time establishes observed availability only, not exact source publication or official completion time.',
+        'This gate covers learning/calibration/Elo inputs; other current manual profiles and automatic features require separate provenance review.']}};
+}
+
 export async function loadModelContext(guildId = '', days = 365, options = {}) {
   const [intelligence, loadedCaches] = await Promise.all([
     options.intelligence ? Promise.resolve(options.intelligence) : readIntelligenceStore(guildId),
     listDailyCaches(days, guildId)
   ]);
-  // A historical rebuild may only learn from caches that existed before the
-  // prediction date. This makes calibration and feature training walk-forward.
-  const caches = options.asOfDateKey
-    ? loadedCaches.filter((cache) => String(cache.dateKey) < String(options.asOfDateKey))
-    : loadedCaches;
-  const rows = collectGradedRows(caches);
-  const beforeCutoff = (row) => !options.asOfDateKey || (row.dateKey && String(row.dateKey).slice(0, 10) < String(options.asOfDateKey));
-  const historicalIntelligence = { ...intelligence, results: Object.fromEntries(Object.entries(intelligence.results || {}).filter(([, row]) => beforeCutoff(row))) };
-  const externalResults = (options.externalResults || []).filter(beforeCutoff);
-  const featureRows = collectFeatureRows(caches);
+  const cutoff = options.asOf === undefined
+    ? options.asOfDateKey ? Date.parse(`${options.asOfDateKey}T00:00:00Z`) : Date.now()
+    : Number(options.asOf);
+  const inputs = learningInputsBefore(loadedCaches,intelligence,options.externalResults || [],{cutoff,dateKey:options.asOfDateKey || null});
+  const caches = inputs.caches;
+  const cohort = { modelVersion: options.modelVersion || CURRENT_MODEL_VERSION, horizon: options.horizon || 'Daily', availableBefore:cutoff,uniqueGames:true };
+  const rows = collectGradedRows(caches,cohort);
+  const featureRows = collectFeatureRows(caches,cohort);
   const overall = evaluatePredictionRows(rows);
   const bySport = {};
   for (const key of [...new Set(rows.map((row) => profileKey(row.prediction)))]) {
     bySport[key] = evaluatePredictionRows(rows.filter((row) => profileKey(row.prediction) === key));
   }
   return {
-    intelligence,
-    history: { overall, bySport, rows: rows.length },
+    now:cutoff,
+    intelligence:inputs.intelligence,
+    learningInputAudit:{...inputs.audit,eloResults:selectEloResults([...Object.values(inputs.intelligence.results || {}),...inputs.externalResults,...resultRowsFromCaches(inputs.eloCaches)]).audit,eligibleCalibrationRows:rows.length,
+      calibrationRowsExcludedForAvailabilityOrDuplicateConflict:collectGradedRows(caches,{modelVersion:cohort.modelVersion,horizon:cohort.horizon}).length-rows.length},
+    history: { overall, bySport, rows: rows.length, cohort, evaluationVersion: EVALUATION_VERSION },
     calibration: buildCalibrationModel(rows),
     outcomeValidation: buildOutcomeValidation(rows),
-    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows) : {},
+    featureLearning: config.autoLearningEnabled ? buildWalkForwardFeatureModels(featureRows, { asOf:cutoff }) : {},
     drift: buildDriftReport(rows),
-    eloRatings: buildEloRatings(historicalIntelligence, caches, externalResults),
-    externalResults,
+    eloRatings: buildEloRatings(inputs.intelligence,inputs.eloCaches,inputs.externalResults),
+    externalResults:inputs.externalResults,
     cacheCount: caches.length
   };
 }
 
 export async function evaluateGuildModel(guildId = '', days = 365) {
   const [caches, warehouse] = await Promise.all([listDailyCaches(days, guildId), readFeatureWarehouse()]);
-  const rows = collectGradedRows(caches);
-  const featureRows = collectFeatureRows(caches);
+  const allRows = collectGradedRows(caches);
+  const cohort = { modelVersion: CURRENT_MODEL_VERSION, horizon: 'Daily' };
+  const rows = collectGradedRows(caches, cohort);
+  const featureRows = collectFeatureRows(caches, cohort);
   const overall = evaluatePredictionRows(rows);
   const bySport = {};
   for (const key of [...new Set(rows.map((row) => profileKey(row.prediction)))]) {
@@ -460,12 +563,18 @@ export async function evaluateGuildModel(guildId = '', days = 365) {
     days,
     cacheCount: caches.length,
     overall,
+    cohort,
+    evaluationVersion: EVALUATION_VERSION,
+    scoreDefinition: 'Binary selected-outcome Brier/log loss; full-outcome horizon scores are separate.',
+    byVersionAndHorizon: Object.fromEntries([...new Set(allRows.map(row => `${row.modelVersion}|${row.horizon}`))]
+      .map(key => [key, evaluatePredictionRows(allRows.filter(row => `${row.modelVersion}|${row.horizon}` === key))])),
     bySport,
     featureLearning: buildWalkForwardFeatureModels(featureRows),
     drift: buildDriftReport(rows),
     horizons: evaluatePredictionHorizons(
       warehouse.predictions.filter((row) => String(row.guildId || '') === String(guildId || '')),
-      warehouse.markets.filter((row) => String(row.guildId || '') === String(guildId || ''))
+      warehouse.markets.filter((row) => String(row.guildId || '') === String(guildId || '')),
+      { modelVersion: CURRENT_MODEL_VERSION }
     )
   };
 }

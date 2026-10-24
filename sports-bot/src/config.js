@@ -37,7 +37,7 @@ function integerListEnv(name, fallback = []) {
 
 export const config = {
   discordToken: process.env.DISCORD_TOKEN || '',
-  clientId: process.env.DISCORD_CLIENT_ID || '1522283367767212255',
+  clientId: process.env.DISCORD_CLIENT_ID || '',
   guildId: process.env.DISCORD_GUILD_ID || '',
   sportsChannelId: process.env.SPORTS_CHANNEL_ID || '',
   resultsChannelId: process.env.SPORTS_RESULTS_CHANNEL_ID || '',
@@ -50,6 +50,9 @@ export const config = {
   dailyPostHour: intEnv('DAILY_POST_HOUR', 8, 0, 23),
   dailyPostMinute: intEnv('DAILY_POST_MINUTE', 0, 0, 59),
   finalCheckMinutes: intEnv('FINAL_CHECK_MINUTES', 10, 2, 180),
+  finalLookbackDays: intEnv('FINAL_LOOKBACK_DAYS', 7, 1, 30),
+  finalCorrectionHours: intEnv('FINAL_CORRECTION_CHECK_HOURS',24,0,168),
+  finalCorrectionMinutes: intEnv('FINAL_CORRECTION_CHECK_MINUTES',60,10,1440),
   postOnStart: boolEnv('POST_ON_START', true),
   registerCommands: boolEnv('REGISTER_COMMANDS', true),
   maxGamesPerPost: intEnv('MAX_GAMES_PER_POST', 75, 1, 200),
@@ -65,6 +68,9 @@ export const config = {
   autoSummaryCacheMinutes: intEnv('AUTO_SUMMARY_CACHE_MINUTES', 180, 15, 1440),
   autoHistoryMaxLeagues: intEnv('AUTO_HISTORY_MAX_LEAGUES', 10, 0, 24),
   autoHistoryCacheHours: intEnv('AUTO_HISTORY_CACHE_HOURS', 12, 1, 168),
+  availabilityProviderSnapshotFile: process.env.AVAILABILITY_PROVIDER_SNAPSHOT_FILE || '',
+  nhlGoalieContextMaxGames: intEnv('NHL_GOALIE_CONTEXT_MAX_GAMES', 6, 0, 12),
+  nativeHistoryFallbackDays: intEnv('NATIVE_NHL_HISTORY_DAYS', 7, 0, 14),
   autoHistoryMaxDays: intEnv('AUTO_HISTORY_MAX_DAYS', 365, 14, 730),
   autoBoxscoreMaxEvents: intEnv('AUTO_BOXSCORE_MAX_EVENTS', 36, 0, 75),
   autoBoxscoreCacheDays: intEnv('AUTO_BOXSCORE_CACHE_DAYS', 30, 1, 365),
@@ -77,6 +83,8 @@ export const config = {
   featureWarehouseEnabled: boolEnv('FEATURE_WAREHOUSE_ENABLED', true),
   historicalReplayEnabled: boolEnv('HISTORICAL_REPLAY_ENABLED', true),
   historicalReplayMaxRows: intEnv('HISTORICAL_REPLAY_MAX_ROWS', 8000, 100, 20000),
+  selectionEvidenceDirectory: String(process.env.MODEL_SELECTION_EVIDENCE_DIR || '').trim(),
+  selectionEvidenceJournal: String(process.env.MODEL_SELECTION_JOURNAL_FILE || '').trim(),
   challengerMinSamples: intEnv('CHALLENGER_MIN_SAMPLES', 75, 30, 1000),
   localMlEnabled: boolEnv('LOCAL_ML_ENABLED', true),
   localMlMinSamples: intEnv('LOCAL_ML_MIN_SAMPLES', 150, 60, 5000),
@@ -93,4 +101,5 @@ export function requireRuntimeConfig() {
   if (!config.discordToken) {
     throw new Error('DISCORD_TOKEN is missing. Copy .env.example to .env or run scripts/setup-env.ps1.');
   }
+  if (!config.clientId) throw new Error('DISCORD_CLIENT_ID is missing. Set your own Discord application ID in the local .env.');
 }

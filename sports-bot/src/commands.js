@@ -303,7 +303,14 @@ export function buildCommands() {
           .addStringOption((option) => option.setName('home').setDescription('Home/second competitor.').setMaxLength(120).setRequired(true))
           .addNumberOption((option) => option.setName('away_score').setDescription('Away/first final score.').setRequired(true))
           .addNumberOption((option) => option.setName('home_score').setDescription('Home/second final score.').setRequired(true))
-          .addBooleanOption((option) => option.setName('neutral').setDescription('Whether the event was at a neutral site.')))
+          .addBooleanOption((option) => option.setName('neutral').setDescription('Whether the event was at a neutral site.'))
+          .addStringOption((option) => option.setName('result_id').setDescription('Existing result record ID when correcting an import.').setMaxLength(180))
+          .addStringOption((option) => option.setName('game_id').setDescription('Exact provider/local event ID to distinguish repeated matchups.').setMaxLength(180))
+          .addStringOption((option) => option.setName('start_time').setDescription('Scheduled start timestamp with Z or explicit UTC offset.').setMaxLength(40))
+          .addStringOption((option) => option.setName('score_basis').setDescription('Which scoring period these final scores represent.').addChoices({name:'Unknown',value:'unknown'},{name:'Regulation',value:'regulation'},{name:'Full game',value:'full_game'}))
+          .addStringOption((option) => option.setName('source_reference').setDescription('Public URL of the score source you checked.').setMaxLength(1500))
+          .addBooleanOption((option) => option.setName('source_checked').setDescription('Confirm that you checked this result against the cited source.'))
+          .addStringOption((option) => option.setName('observed_at').setDescription('When you observed the result, with Z or explicit UTC offset.').setMaxLength(40)))
       .addSubcommand((subcommand) =>
         subcommand
           .setName('remove')

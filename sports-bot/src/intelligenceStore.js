@@ -1,3 +1,7 @@
+import {readManualResultLedger,appendManualResultChanges} from './manualResultHistory.js';
+import {withAuditFileLock} from './auditFileLock.js';
+import {createHash} from 'node:crypto';
+import {validScore,finiteNumber} from './dataValidation.js';
 import path from 'node:path';
 import { dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
@@ -94,7 +98,9 @@ function gameKey(row) {
 }
 
 function resultKey(row) {
-  return cleanText(row.id, 180) || recordKey([
+  if(row.id)return cleanText(row.id,180);
+  if(row.gameId||row.startTime)return 'manual-result-v2-'+createHash('sha256').update(JSON.stringify([row.dateKey,normalizeEntityName(row.leagueKey||row.league),normalizeEntityName(row.awayTeam),normalizeEntityName(row.homeTeam),row.gameId||null,row.startTime||null,row.awayScore,row.homeScore])).digest('hex');
+  return recordKey([
     row.dateKey || row.date,
     row.league || row.leagueKey,
     row.awayTeam || row.away,
@@ -171,8 +177,8 @@ function normalizePlayer(row = {}, actor = '') {
   const league = cleanText(row.league ?? row.leagueKey, 50);
   if (!name || !team || !league) throw new Error('Every player row needs name, team, and league.');
   const availabilityInput = row.availability ?? row.availablePct ?? row.availabilityPct;
-  let availability = bounded(availabilityInput, 0, 100, 100);
-  const parsedAvailability = finiteOrNull(availabilityInput);
+  const parsedAvailability = finiteNumber(availabilityInput);
+  let availability = parsedAvailability===null?null:Math.max(0,Math.min(100,parsedAvailability));
   if (parsedAvailability !== null && parsedAvailability <= 1) availability *= 100;
   return {
     id: playerKey({ ...row, name, team, league }),
@@ -183,7 +189,8 @@ function normalizePlayer(row = {}, actor = '') {
     impact: bounded(row.impact ?? row.impactRating, -10, 10),
     rating: bounded(row.rating, 0, 100),
     availability,
-    status: cleanText(row.status, 80) || (availability < 100 ? 'limited' : 'available'),
+    availabilityEvidence: availability===null?'unknown':'manual_numeric_assertion',
+    status: cleanText(row.status, 80) || (availability===null?'unknown':availability < 100 ? 'limited' : 'available'),
     form: bounded(row.form ?? row.recentForm, 0, 100),
     starter: booleanValue(row.starter, false),
     projectedMinutes: bounded(row.projectedMinutes ?? row.minutes, 0, 100),
@@ -257,14 +264,28 @@ function normalizeResult(row = {}, actor = '') {
   const homeTeam = cleanText(row.homeTeam ?? row.home, 120);
   const league = cleanText(row.league ?? row.leagueKey, 50);
   const dateKey = cleanText(row.dateKey ?? row.date, 20);
-  const awayScore = finiteOrNull(row.awayScore);
-  const homeScore = finiteOrNull(row.homeScore);
+  const awayScore = validScore(row.awayScore);
+  const homeScore = validScore(row.homeScore);
   if (!awayTeam || !homeTeam || !league || !dateKey || awayScore === null || homeScore === null) {
     throw new Error('Every result row needs dateKey, league, awayTeam, homeTeam, awayScore, and homeScore.');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error('Result dateKey must use YYYY-MM-DD format.');
+  const time=(value,label)=>{
+    if(value===undefined||value===null||value==='')return null;
+    if(typeof value!=='string'||!/[Tt].*(?:[Zz]|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(Date.parse(value)))throw new Error(label+' must be a timestamp with an explicit timezone');
+    return new Date(value).toISOString();
+  };
+  const gameId=cleanText(row.gameId,180)||null,startTime=time(row.startTime,'Result startTime'),observedAt=time(row.observedAt,'Result observedAt');
+  if(observedAt&&Date.parse(observedAt)>Date.now())throw new Error('Result observedAt cannot be in the future');
+  const scoreBasis=cleanText(row.scoreBasis||'unknown',30).toLowerCase();
+  if(!['unknown','regulation','full_game'].includes(scoreBasis))throw new Error('Result scoreBasis must be unknown, regulation or full_game');
+  const sourceReference=cleanText(row.sourceReference,1500);
+  if(sourceReference){let reference;try{reference=new URL(sourceReference);}catch{throw new Error('Result sourceReference must be a public HTTP(S) URL');}
+    if(!['http:','https:'].includes(reference.protocol)||reference.username||reference.password)throw new Error('Result sourceReference must be HTTP(S) without embedded credentials');}
+
   return {
-    id: resultKey({ ...row, awayTeam, homeTeam, league, dateKey, awayScore, homeScore }),
+    id: resultKey({ ...row,gameId,startTime, awayTeam, homeTeam, league, dateKey, awayScore, homeScore }),
+    gameId,startTime,observedAt,scoreBasis,sourceReference,sourceChecked:booleanValue(row.sourceChecked,false),
     dateKey,
     league,
     leagueKey: cleanText(row.leagueKey, 50) || league.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
@@ -273,7 +294,7 @@ function normalizeResult(row = {}, actor = '') {
     homeTeam,
     awayScore,
     homeScore,
-    neutralSite: booleanValue(row.neutralSite, false),
+    neutralSite: booleanValue(row.neutralSite, null),
     source: cleanText(row.source, 120) || 'manual result',
     notes: cleanText(row.notes, 1000),
     recordedAt: new Date().toISOString(),
@@ -291,7 +312,11 @@ const NORMALIZERS = {
 
 export async function readIntelligenceStore(guildId = '') {
   const raw = await readJson(storePath(guildId), null, { throwOnError: true });
-  if (!raw || typeof raw !== 'object') return emptyStore(guildId);
+  const history=await readManualResultLedger(storePath(guildId)+'.results.jsonl',guildId);
+  const head=history.records.at(-1),marker=raw?.manualResultHistory;
+  if((!head&&(marker||Object.values(raw?.results||{}).some(row=>row?.manualRevision)))
+   ||(marker&&(marker.sequence>(head?.sequence||0)||(marker.sequence===head?.sequence&&marker.eventHash!==head.eventHash))))throw new Error('Manual result history is missing or rolled back; preserve the ledger and snapshot for review.');
+  if (!raw || typeof raw !== 'object') return {...emptyStore(guildId),results:history.results||{},...(head?{manualResultHistory:{sequence:head.sequence,eventHash:head.eventHash}}:{})};
   return {
     ...emptyStore(guildId),
     ...raw,
@@ -299,7 +324,8 @@ export async function readIntelligenceStore(guildId = '') {
     players: asObject(raw.players),
     contexts: asObject(raw.contexts),
     games: asObject(raw.games),
-    results: asObject(raw.results)
+    results: history.results??asObject(raw.results),
+    ...(head?{manualResultHistory:{sequence:head.sequence,eventHash:head.eventHash}}:{})
   };
 }
 
@@ -312,7 +338,7 @@ async function saveStore(guildId, store) {
 async function withStoreWriteLock(guildId, task) {
   const key = safeGuildId(guildId);
   const previous = writeQueues.get(key) || Promise.resolve();
-  const next = previous.catch(() => {}).then(task);
+  const next = previous.catch(() => {}).then(()=>withAuditFileLock(storePath(guildId),task));
   writeQueues.set(key, next);
   try {
     return await next;
@@ -322,6 +348,7 @@ async function withStoreWriteLock(guildId, task) {
 }
 
 export async function upsertIntelligence(guildId, collection, row, actor = '') {
+  row=structuredClone(row);
   const normalizer = NORMALIZERS[collection];
   if (!normalizer) throw new Error(`Unsupported intelligence collection: ${collection}`);
   return withStoreWriteLock(guildId, async () => {
@@ -329,15 +356,16 @@ export async function upsertIntelligence(guildId, collection, row, actor = '') {
     const candidate = normalizer(row, actor);
     const existing = store[collection][candidate.id];
     const normalized = existing
-      ? normalizer({ ...existing, ...nonEmptyPatch(row), id: existing.id }, actor)
+      ? normalizer({ ...existing, ...nonEmptyPatch(row), ...(collection==='results'?{sourceChecked:booleanValue(row.sourceChecked,false)}:{}),id: existing.id }, actor)
       : candidate;
-    store[collection][normalized.id] = normalized;
+    if(collection==='results'){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,store.results,[{id:normalized.id,after:normalized}],{actor,operation:'upsert'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
+    else store[collection][normalized.id] = normalized;
     await saveStore(guildId, store);
-    return normalized;
+    return store[collection][normalized.id];
   });
 }
 
-export async function removeIntelligence(guildId, collection, idOrQuery) {
+export async function removeIntelligence(guildId, collection, idOrQuery, actor='') {
   if (!NORMALIZERS[collection]) throw new Error(`Unsupported intelligence collection: ${collection}`);
   return withStoreWriteLock(guildId, async () => {
     const store = await readIntelligenceStore(guildId);
@@ -349,7 +377,8 @@ export async function removeIntelligence(guildId, collection, idOrQuery) {
     });
     if (!found) return null;
     const removed = store[collection][found];
-    delete store[collection][found];
+    if(collection==='results'){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,store.results,[{id:found,after:null}],{actor,operation:'remove'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
+    else delete store[collection][found];
     await saveStore(guildId, store);
     return removed;
   });
@@ -378,6 +407,7 @@ function nonEmptyPatch(row) {
 }
 
 export async function importIntelligence(guildId, payload, options = {}) {
+  payload=structuredClone(payload);options=structuredClone(options);
   return withStoreWriteLock(guildId, async () => {
     const store = await readIntelligenceStore(guildId);
     const actor = options.actor || '';
@@ -386,12 +416,14 @@ export async function importIntelligence(guildId, payload, options = {}) {
     if (!source || typeof source !== 'object') throw new Error('Import payload must be a JSON object or array.');
 
     const counts = { teams: 0, players: 0, contexts: 0, games: 0, results: 0 };
-    const errors = [];
+    const errors = [],resultChanges=[];
+    const originalResults=structuredClone(store.results);
     for (const [collection, normalizer] of Object.entries(NORMALIZERS)) {
       const rows = collectionRows(source[collection]).slice(0, MAX_ROWS_PER_COLLECTION);
       for (let index = 0; index < rows.length; index += 1) {
         try {
           const normalized = normalizer(rows[index], actor);
+          if(collection==='results')resultChanges.push({id:normalized.id,after:normalized});
           store[collection][normalized.id] = normalized;
           counts[collection] += 1;
         } catch (error) {
@@ -402,6 +434,7 @@ export async function importIntelligence(guildId, payload, options = {}) {
     if (!Object.values(counts).some(Boolean) && errors.length === 0) {
       throw new Error('No recognized collections found. Use teams, players, contexts, games, or results.');
     }
+    if(resultChanges.length){const history=await appendManualResultChanges(storePath(guildId)+'.results.jsonl',guildId,originalResults,resultChanges,{actor,operation:'import'});store.results=history.results;store.manualResultHistory={sequence:history.records.at(-1).sequence,eventHash:history.records.at(-1).eventHash};}
     await saveStore(guildId, store);
     return { counts, errors };
   });
@@ -457,4 +490,8 @@ export function intelligenceSchemaExample() {
     games: [{ dateKey: '2099-01-02', startTime: '2099-01-02T19:00:00-06:00', league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball', awayTeam: 'Away Team', homeTeam: 'Home Team', venue: 'Example Arena' }],
     results: [{ dateKey: '2098-12-20', league: 'NBA', leagueKey: 'nba', awayTeam: 'Away Team', homeTeam: 'Home Team', awayScore: 101, homeScore: 108 }]
   };
+}
+
+export async function readManualResultHistory(guildId=''){
+ return (await readManualResultLedger(storePath(guildId)+'.results.jsonl',guildId)).records;
 }

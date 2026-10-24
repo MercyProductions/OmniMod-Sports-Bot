@@ -30,7 +30,7 @@ test('late first sightings never publish a retrospective pick as a pregame signa
 test('high-uncertainty pregame rows identify the projected winner and distinguish feed quality', () => {
   const [embed] = formatSlateEmbeds({
     dateKey: '2026-09-20', timezone: 'America/Chicago', generatedAt: new Date().toISOString(),
-    games: [{ id: 'nfl-game', statusKey: 'scheduled' }],
+    games: [{ id: 'nfl-game',leagueKey:'nfl', statusKey: 'scheduled' }],
     predictions: [{ index: 9, gameId: 'nfl-game', league: 'NFL', matchup: 'NYG @ LAR', startTimeLocal: '7:15 PM',
       statusKey: 'scheduled', predictionMode: 'pregame', recommendationStatus: 'withheld', predictedWinner: 'Rams',
       predictionConfidence: '52.7%', predictionUncertaintyPoints: 21, apiConfidence: '94%', riskTier: 'Higher',
@@ -50,7 +50,7 @@ test('final result color is green for a match and red for a miss, with unknown k
 
 test('final-result dedupe checks the second channel when the first channel history is unavailable', async () => {
   const existing = { id: 'found-result', author: { id: 'sports-bot' }, embeds: [{
-    title: 'Final result #18: NSH @ TBL', footer: { text: 'OmniMod Sports result | 2026-09-20 | game-18' }
+    fields:[{name:'League',value:'NHL'},{name:'Started',value:'4:00 PM'}],title: 'Final result #18: NSH @ TBL', footer: { text: 'OmniMod Sports result | 2026-09-20 | game-18' }
   }] };
   const client = {
     user: { id: 'sports-bot' },
@@ -65,8 +65,8 @@ test('final-result dedupe checks the second channel when the first channel histo
     }) }
   };
   const found = await findFinalResultMessage(client,
-    { dateKey: '2026-09-20', guildId: 'guild', channelId: 'slate-channel' },
-    { gameId: 'game-18', index: 18, matchup: 'NSH @ TBL' },
+    { dateKey: '2026-09-20', guildId: 'guild', channelId: 'slate-channel',games:[{id:'game-18',leagueKey:'nhl',league:'NHL',startTime:'2026-09-20T21:00:00Z'}] },
+    { gameId: 'game-18',leagueKey:'nhl',startTime:'2026-09-20T21:00:00Z',startTimeLocal:'4:00 PM', index: 18, matchup: 'NSH @ TBL' },
     { resultsChannel: { id: 'results-channel' } });
   assert.equal(found, existing);
 });

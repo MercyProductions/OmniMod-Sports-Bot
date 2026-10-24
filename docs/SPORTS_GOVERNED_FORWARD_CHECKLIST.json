@@ -1,0 +1,20 @@
+{
+  "schema": "sports-implementation-phase-v1",
+  "phase": "governed-current-version-forward-collection",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.67",
+  "status": "in_progress",
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "items": [
+    {"id": "baseline", "status": "verified_complete", "evidence": "1190 tests reproduced before editing"},
+    {"id": "family_guard", "status": "verified_complete", "evidence": "Shared real ledger, source/plan/period/consumption checks; 12 new regression tests"},
+    {"id": "install", "status": "verified_complete", "evidence": "116 pinned files; real installed preflight, awaiting-start and worker verification; zero requests"},
+    {"id": "schedule", "status": "verified_complete", "evidence": "Additional v67 hourly November heartbeat ACTIVE; original Sports, final-only and Stocks automation files unchanged"},
+    {"id": "original_trial", "status": "in_progress", "evidence": "Eighth checked run: 12 games, one date, zero finals, eight receipts, 79 blobs; original immutable records unchanged"},
+    {"id": "availability_audit", "status": "verified_complete", "evidence": "Nine new tests; existing v67 capture audited offline: 12 NHL mappings unverified, six failed NBA/MLB summaries, three NBA cap omissions"},
+    {"id": "clinical_coverage", "status": "blocked", "evidence": "No actual explicit injury or confirmed-goalie free-feed assertions recovered; alternate provider supported but unconnected"},
+    {"id": "regression", "status": "verified_complete", "evidence": "59 focused, 1211 full tests and 231 syntax files pass"},
+    {"id": "current_model_validation", "status": "pending", "evidence": "Future Nov8-Nov22 predeclared period; 75 games/eight dates/14days plus proper-score criteria remain; no v67 selection samples yet"},
+    {"id": "sports_completion", "status": "in_progress", "evidence": "Full reliability/accuracy/operational/odds requirements remain; Crypto then Stocks queued"}
+  ]
+}

@@ -1,15 +1,25 @@
+import { probabilityLogLoss } from './probabilityLogLoss.js';
+import { quoteTimeEpoch as instant } from './oddsPricing.js';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import { config, dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
+import { selectCandidateCohort, validCandidateVector } from './candidateCohorts.js';
 
 const modelFile = path.join(dataDir, 'local-ml-models.json');
-const MODEL_VERSION = 1;
+const MODEL_VERSION = 2;
 const FEATURE_NAMES = [
   'elo', 'record', 'power', 'offenseDefense', 'form', 'headToHead', 'opponentAdjusted',
   'advanced', 'players', 'participation', 'lineup', 'playByPlay', 'situation', 'marketMovement',
   'evidenceHome', 'evidenceDraw', 'specialistHome', 'specialistDraw', 'sampleReliability', 'sourceQuality'
 ];
 let writeChain = Promise.resolve();
+
+export function localMlArtifactId(model) {
+  return createHash('sha256').update(JSON.stringify({ version: MODEL_VERSION, sport: model.sport,
+    trainingHash: model.trainingHash, trainingCohort: model.trainingCohort, featureNames: model.featureNames,
+    rounds: model.fitRounds, stumps: model.stumps, leagueAdjustments: model.leagueAdjustments })).digest('hex');
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -144,11 +154,11 @@ function scoreRows(rows, model = null) {
     const baseline = normalizeVector(row.candidateProbabilities.evidence, twoWay);
     const binary = model ? predictBinary(model, rowFeatures(row), baseline, row.leagueKey) : evidenceBinaryHome(baseline);
     const predicted = predictionFromBinary(binary, baseline, twoWay);
-    const sides = twoWay ? ['away', 'home'] : ['away', 'home', 'draw'];
+    const sides = twoWay && row.actualSide !== 'draw' ? ['away', 'home'] : ['away', 'home', 'draw'];
     baselineBrier += sides.reduce((sum, side) => sum + (baseline[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
     modelBrier += sides.reduce((sum, side) => sum + (predicted[side] - Number(side === row.actualSide)) ** 2, 0) / sides.length;
-    baselineLogLoss += -Math.log(clamp(baseline[row.actualSide], 0.001, 0.999));
-    modelLogLoss += -Math.log(clamp(predicted[row.actualSide], 0.001, 0.999));
+    baselineLogLoss += probabilityLogLoss(baseline[row.actualSide]);
+    modelLogLoss += probabilityLogLoss(predicted[row.actualSide]);
   }
   const count = rows.length;
   return {
@@ -172,6 +182,11 @@ export async function readLocalMlModels() {
 }
 
 export function trainLocalMlModels(rows = [], options = {}) {
+  const asOf = options.now ?? Date.now();
+  if (!Number.isFinite(asOf)) throw new Error('Training requires a valid information cutoff');
+  const selected = selectCandidateCohort(rows);
+  const beforeCutoff = selected.rows.filter(row => Number.isFinite(Date.parse(row.resolvedAt || '')) && Date.parse(row.resolvedAt) <= asOf);
+  rows = beforeCutoff.filter(row => validCandidateVector(row.candidateProbabilities?.evidence, row.candidateModeledOutcomes?.evidence));
   const minimum = Math.max(60, Number(options.minimum ?? config.localMlMinSamples) || 150);
   const groups = new Map();
   for (const row of rows) {
@@ -183,22 +198,44 @@ export function trainLocalMlModels(rows = [], options = {}) {
   const sports = {};
   const evaluationRows = [];
   for (const [sport, sportRows] of groups) {
-    const sorted = [...sportRows].sort((a, b) => String(a.startTime || a.dateKey || '').localeCompare(String(b.startTime || b.dateKey || '')));
+    const orderTime = row => Number.isFinite(instant(row.startTime)) ? instant(row.startTime) : Infinity;
+    const sorted = [...sportRows].sort((a, b) => orderTime(a) - orderTime(b) || String(a.gameId).localeCompare(String(b.gameId)));
     const split = Math.max(30, Math.min(sorted.length - 30, Math.floor(sorted.length * 0.7)));
-    const training = sorted.slice(0, split);
     const validation = sorted.slice(split);
+    const firstValidationForecast = Math.min(...validation.map(row => Date.parse(row.predictionGeneratedAt || '')));
+    const training = sorted.slice(0, split).filter(row => Date.parse(row.resolvedAt || '') < firstValidationForecast);
     const validationModel = fitStumps(training, 22);
     const evaluation = scoreRows(validation, validationModel);
-    const accepted = sorted.length >= minimum && validation.length >= 30 && evaluation.brierImprovement > 0.0015 && evaluation.logLossImprovement >= -0.003;
-    const finalModel = fitStumps(sorted, 28);
+    const labelsAvailableBeforeHoldout = Number.isFinite(firstValidationForecast) && training.every(row =>
+      Number.isFinite(Date.parse(row.resolvedAt || '')) && Date.parse(row.resolvedAt) < firstValidationForecast);
+    const chronologyVerified = selected.cohort.prospectiveRecordsVerified && labelsAvailableBeforeHoldout;
+    const accepted = chronologyVerified && sorted.length >= minimum && training.length >= 30 && validation.length >= 30
+      && evaluation.brierImprovement > 0.0015 && evaluation.logLossImprovement >= -0.003;
+    // Retain the exact evaluated fit; a refit on validation labels is a new, unvalidated artifact.
+    const finalModel = validationModel;
+    const trainingHash = createHash('sha256').update(JSON.stringify(training.map(row => ({
+      gameId: row.gameId, league: row.leagueKey, generatedAt: row.predictionGeneratedAt, resolvedAt: row.resolvedAt,
+      actualSide: row.actualSide, features: rowFeatures(row), evidence: row.candidateProbabilities.evidence
+    })))).digest('hex');
+    const artifactSpec = { sport, trainingHash, trainingCohort: selected.cohort.key, featureNames: FEATURE_NAMES, fitRounds: 22, ...finalModel };
+    const artifactId = localMlArtifactId(artifactSpec);
     sports[sport] = {
-      modelId: `local-gbdt-hierarchical-${sport}-v1`,
+      ...artifactSpec,
+      artifactFormat: 'sports-local-ml-artifact-v2',
+      modelId: `local-gbdt-hierarchical-${sport}-v2-${artifactId.slice(0, 16)}`,
+      artifactId, trainingHash, validationProtocol: 'fixed-22-round-fit-before-chronological-validation-v3',
+      evaluationProtocol: 'mean-coordinate-brier-observed-outcomes-log-floor-1e-12-v2',
+      promotionAllowed: false, researchOnly: true,
+      lastTrainingOutcomeAt: training.length ? new Date(Math.max(...training.map(row => Date.parse(row.resolvedAt)))).toISOString() : null,
+      purgedTrainingRows: split - training.length,
       algorithm: 'gradient-boosted decision stumps with reliability-shrunk league intercepts',
-      trainedAt: new Date().toISOString(),
+      trainedAt: new Date(asOf).toISOString(),
       sampleSize: sorted.length,
       trainingSampleSize: training.length,
       validationSampleSize: validation.length,
       accepted,
+      chronologyVerified,
+      labelsAvailableBeforeHoldout,
       evaluation,
       featureNames: FEATURE_NAMES,
       stumps: finalModel.stumps,
@@ -210,13 +247,17 @@ export function trainLocalMlModels(rows = [], options = {}) {
         const ml = predictionFromBinary(predictBinary(validationModel, rowFeatures(row), row.candidateProbabilities.evidence, row.leagueKey), row.candidateProbabilities.evidence, twoWay);
         evaluationRows.push({
           ...row,
-          source: row.source || 'historical-replay',
+          source: 'retrospective-ml-validation',
+          originSource: row.source || 'unknown',
+          snapshotPolicy: 'retrospective_model_validation_v1',
+          reconstructedAt: new Date(asOf).toISOString(),
+          candidateArtifactIds: { ...(row.candidateArtifactIds || {}), ml: artifactId },
           candidateProbabilities: { ...row.candidateProbabilities, ml }
         });
       }
     }
   }
-  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows };
+  return { version: MODEL_VERSION, updatedAt: new Date().toISOString(), sports, evaluationRows, cohort: selected.cohort, temporalRowsExcluded: selected.rows.length - beforeCutoff.length, invalidEvidenceVectorsExcluded: beforeCutoff.filter(row => !validCandidateVector(row.candidateProbabilities?.evidence, row.candidateModeledOutcomes?.evidence)).length };
 }
 
 export async function trainAndPersistLocalMlModels(rows = [], options = {}) {
@@ -230,14 +271,22 @@ export async function trainAndPersistLocalMlModels(rows = [], options = {}) {
 }
 
 export function predictLocalMlCandidate(model = null, featureVector = {}, evidence = {}, options = {}) {
-  if (!model?.stumps?.length) return { available: false, modelId: model?.modelId || 'local-ml-collecting', probabilities: null, accepted: false, sampleSize: model?.sampleSize || 0 };
+  const asOf = options.now ?? Date.now();
+  if (!Number.isFinite(asOf) || model && (!Number.isFinite(instant(model.trainedAt)) || instant(model.trainedAt) > asOf
+    || !Number.isFinite(instant(model.lastTrainingOutcomeAt)) || instant(model.lastTrainingOutcomeAt) > instant(model.trainedAt)))
+    return { available: false, modelId: model?.modelId || 'local-ml-collecting', probabilities: null, accepted: false, reason: 'model_not_available_at_forecast_cutoff' };
+  if (!Array.isArray(model?.stumps) || !model.stumps.length) return { available: false, modelId: model?.modelId || 'local-ml-collecting', probabilities: null, accepted: false, sampleSize: model?.sampleSize || 0 };
+  if (model.artifactFormat !== 'sports-local-ml-artifact-v2' || model.artifactId !== localMlArtifactId(model)
+    || JSON.stringify(model.featureNames) !== JSON.stringify(FEATURE_NAMES) || model.fitRounds !== 22
+    || model.stumps.some(stump => !FEATURE_NAMES.includes(stump.feature) || ![stump.threshold, stump.left, stump.right].every(Number.isFinite)))
+    return { available: false, modelId: model.modelId, probabilities: null, accepted: false, reason: 'model_artifact_integrity_unverified' };
   const twoWay = options.twoWay !== false;
   const probabilities = predictionFromBinary(
     predictBinary(model, normalizeMlFeatureVector(featureVector), evidence, options.leagueKey),
     evidence,
     twoWay
   );
-  return { available: true, modelId: model.modelId, probabilities, accepted: Boolean(model.accepted), sampleSize: model.sampleSize || 0, evaluation: model.evaluation || null };
+  return { available: true, modelId: model.modelId, artifactId: model.artifactId || null, researchOnly: model.researchOnly !== false, probabilities, accepted: model.accepted === true, sampleSize: model.sampleSize || 0, evaluation: model.evaluation || null };
 }
 
 export { FEATURE_NAMES, modelFile as localMlModelFile };

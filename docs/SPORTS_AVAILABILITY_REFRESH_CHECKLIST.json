@@ -1,0 +1,20 @@
+{
+  "schema": "sports-implementation-phase-v1",
+  "phase": "nhl-selected-availability-refresh-authority",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.68",
+  "status": "in_progress",
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "items": [
+    {"id": "baseline", "status": "verified_complete", "evidence": "1222 tests reproduced before modification"},
+    {"id": "reproduction", "status": "verified_complete", "evidence": "Real adapter/predictor selected fresh event-bound input; old completion path returned zero instead of one"},
+    {"id": "acceptance", "status": "verified_complete", "evidence": "Original binding recheck, stricter 15-minute age, new observation, in-attempt ingestion, selected-input and horizon proof"},
+    {"id": "issuance", "status": "verified_complete", "evidence": "Frozen source proof checked under journal transaction before eligible issuance; actual acknowledged forecast link required"},
+    {"id": "safety", "status": "verified_complete", "evidence": "Existing cache/source/schedule/journal vetoes preserved; no risk/value thresholds or formulas changed; projections and health remain distinct"},
+    {"id": "regressions", "status": "verified_complete", "evidence": "25 new cases; focused107/full1247/syntax235 pass"},
+    {"id": "frozen_trials", "status": "verified_complete", "evidence": "Original ninth run and two-plan family inspected; no source/plan/artifact substitution or schedule changes"},
+    {"id": "actual_provider", "status": "blocked", "evidence": "No real preferred feed connected; existing capture has zero provider player rows and no recovered clinical observations"},
+    {"id": "v68_forward_validation", "status": "pending", "evidence": "Fixture integration success is not real provider, prediction quality or profitability evidence; old frozen trials do not validate v68"},
+    {"id": "full_sports_goal", "status": "in_progress", "evidence": "All original reliability, accuracy, operational and odds requirements remain before Crypto then Stocks"}
+  ]
+}

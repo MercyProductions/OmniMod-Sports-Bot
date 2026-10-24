@@ -1,0 +1,150 @@
+import {quoteTimeEpoch} from './oddsPricing.js';
+import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
+import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
+import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
+import {scoreboardStarterInputState} from './scoreboardStarters.js';
+import {availabilityProviderInputState} from './availabilityProviderScope.js';
+import {officialProjectionInputState,officialCorroborationInputState,selectOfficialCorroboration,legacyOfficialProjection} from './officialScheduleEvidence.js';
+
+const time=quoteTimeEpoch;
+const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
+const observationTime=value=>dayOnly(value)?time(value+'T00:00:00Z'):time(value);
+
+/** Known observation times only; absence remains explicitly unknown, never a publication-time attestation. */
+export function observedInputState(row,cutoff){
+ if(!Number.isFinite(cutoff))throw new Error('Valid observation information cutoff required');
+ const values=[row?.updatedAt,row?.fetchedAt,row?.sourceFetchedAt,row?.recordedAt,row?.observedAt,row?.sourceObservationAt,
+  row?.sourceMeta?.fetchedAt,row?.sourceMeta?.sourceObservationAt,...Object.values(row?.fetchedAtBySide||{}),
+  ...(Array.isArray(row?.sourceReceiptTimes)?row.sourceReceiptTimes:[]),
+  ...(Array.isArray(row?.sourceContributions)?row.sourceContributions.flatMap(entry=>Array.isArray(entry?.sourceReceiptTimes)?entry.sourceReceiptTimes:[]):[]),
+  ...(Array.isArray(row?.matches)?row.matches.flatMap(match=>[match?.fetchedAt,match?.sourceObservationAt]):[]),
+  row?.environment?.fetchedAt,row?.environment?.sourceFetchedAt,row?.environment?.sourceObservationAt]
+  .filter(value=>value!==undefined&&value!==null&&value!=='');
+ if(!values.length)return 'unknown';
+ const timestamps=values.map(observationTime);
+ if(timestamps.some(value=>!Number.isFinite(value)))return 'invalid_observation_time';
+ if(timestamps.some(value=>value>cutoff))return 'after_information_cutoff';
+ const missing=value=>value===undefined||value===null||value==='';
+ if(values.some(dayOnly)
+  ||(Array.isArray(row?.sourceReceiptTimes)&&row.sourceReceiptTimes.some(missing))
+  ||(Array.isArray(row?.sourceContributions)&&row.sourceContributions.some(entry=>!Array.isArray(entry?.sourceReceiptTimes)||!entry.sourceReceiptTimes.length||entry.sourceReceiptTimes.some(missing)))
+  ||Object.values(row?.fetchedAtBySide||{}).some(missing)
+  ||(Array.isArray(row?.matches)&&row.matches.some(match=>missing(match?.fetchedAt)&&missing(match?.sourceObservationAt))))return 'unknown';
+ return 'observed_by_cutoff';
+}
+
+/** Clone inference inputs and exclude known invalid/future observations and their inseparable derived aggregates. */
+export function predictionInputsAt(game={},context={},cutoff=Date.now()){
+ if(!Number.isFinite(cutoff))throw new Error('Valid prediction information cutoff required');
+ const excluded={},unknown={};
+ const retain=(row,path)=>{
+  if(!row)return row;
+  if(legacyOfficialProjection(row)){const key=path+':official_projection_binding_unknown';excluded[key]=(excluded[key]||0)+1;return null;}
+  if(path==='autoEnrichment'&&row.sourceIdentity?.status==='conflict'){excluded['autoEnrichment:source_identity_conflict']=1;return null;}
+  if(row.officialProjection){const reason=officialProjectionInputState(row,game,cutoff);if(reason){const key=path+':official_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
+  if(row.availabilityProvider){const reason=availabilityProviderInputState(row,game,cutoff);if(reason){const key=path+':provider_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
+  if(row.scoreboardProjection){const reason=scoreboardStarterInputState(row,game,cutoff);if(reason){const key=path+':scoreboard_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
+  if(row.availabilityExpiresAt!==undefined){
+   const expiry=time(row.availabilityExpiresAt);
+   if(!Number.isFinite(expiry)||expiry<=cutoff){const reason=path+':availability_report_expired_or_invalid';excluded[reason]=(excluded[reason]||0)+1;return null;}
+  }
+  const state=observedInputState(row,cutoff);
+  if(state==='unknown'){unknown[path]=(unknown[path]||0)+1;return row;}
+  if(state==='observed_by_cutoff')return row;
+  const reason=path+':'+state;excluded[reason]=(excluded[reason]||0)+1;return null;
+ };
+ const safe={...game},intelligence={...context.intelligence};
+ for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
+ let corroborationChanged=false;
+ const corroboration=selectOfficialCorroboration(game.sourceCorroboration,game,cutoff,reason=>{corroborationChanged=true;excluded[reason]=(excluded[reason]||0)+1;});
+ safe.sourceCorroboration=retain(corroboration,'sourceCorroboration');
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence','summaryIdentity'])safe[field]=retain(game[field],field);
+ const officialState=game.officialStarterEvidence&&officialCorroborationInputState(game.officialStarterEvidence,game,cutoff);
+ safe.officialStarterEvidence=officialState?null:retain(game.officialStarterEvidence,'official_starter_evidence');
+ if(officialState)excluded['official_starter_evidence:'+officialState]=1;
+ if(safe.goalieResearch&&safe.goalieResearch.status!=='unavailable'){
+  const reason=retainedGoalieContextState(safe.goalieResearch,game,cutoff);
+  if(reason){safe.goalieResearch=null;excluded['goalieResearch:'+reason]=1;}
+ }
+ safe.autoTeamMetrics=Object.fromEntries(Object.entries(game.autoTeamMetrics||{}).map(([side,row])=>[side,retain(row,'auto_team_'+side)]));
+ const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
+ const summaryUnavailable=Boolean(game.autoEnrichment&&!safe.autoEnrichment);
+ const retainPlayer=(row,path)=>{
+  if(!retain(row,path))return false;
+  // A bad summary cannot erase independently scoped provider/scoreboard observations.
+  // Unclassified legacy automatic rows remain inseparable from that rejected parent.
+  if(summaryUnavailable&&(row.summaryObservationType||!row.availabilityProvider&&!row.scoreboardProjection&&!row.officialProjection)){
+   const key=path+':summary_parent_unavailable';excluded[key]=(excluded[key]||0)+1;return false;
+  }
+  return true;
+ };
+ const playerInputs=rawPlayers.filter(row=>retainPlayer(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retainPlayer(row,'auto_lineup_player'));
+ const availabilityChanged=playerInputs.length!==rawPlayers.length||lineupInputs.length!==rawLineups.length;
+ safe.autoPlayers=availabilityChanged?reconcileAvailabilityRows(playerInputs,lineupInputs):(game.autoPlayers||[]).filter(row=>retain(row,'auto_player_view'));
+ safe.autoLineups=availabilityChanged?reconcileAvailabilityRows(lineupInputs,playerInputs):(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_view'));
+ safe.availabilityProviderEvidenceByProvider=Object.fromEntries(Object.entries(game.availabilityProviderEvidenceByProvider||{}).filter(([,row])=>retain(row,'availability_provider_state')));
+ safe.participationProjections=(game.participationProjections||[]).filter(row=>retain(row,'participation_projection'));
+ let excludedNestedProjection=false;
+ safe.autoPlayers=safe.autoPlayers.map(row=>{
+  if(!row.participationProjection||retain(row.participationProjection,'player_participation_projection'))return row;
+  excludedNestedProjection=true;const copy={...row};delete copy.participationProjection;return copy;
+ });
+ const clearParticipation=reason=>{
+  safe.participationSummary=null;safe.participationProjections=[];
+  safe.autoPlayers=safe.autoPlayers.map(row=>{const copy={...row};delete copy.participationProjection;return copy;});
+  excluded['participation_derived_inputs:'+reason]=1;
+ };
+ if(excludedNestedProjection){safe.autoLineup=null;excluded['autoLineup:excluded_projection_dependency']=1;}
+ if(availabilityChanged||safe.autoPlayers.length!==(game.autoPlayers||[]).length||safe.autoLineups.length!==(game.autoLineups||[]).length){
+  safe.autoLineup=null;excluded['autoLineup:excluded_player_dependency']=1;clearParticipation('player_or_lineup_unavailable');
+ }
+ if(excludedNestedProjection||(game.autoLineup&&!safe.autoLineup)||(game.participationSummary&&!safe.participationSummary)
+  ||safe.participationProjections.length!==(game.participationProjections||[]).length)clearParticipation('aggregate_dependency_unavailable');
+ if(Object.entries(game.autoTeamMetrics||{}).some(([side,row])=>row&&!safe.autoTeamMetrics[side])){
+  safe.advancedDataset=null;excluded['advancedDataset:excluded_team_dependency']=1;
+ }
+ if(game.autoEnrichment&&!safe.autoEnrichment){
+  safe.autoLineup=null;safe.autoContext=null;safe.eventEnvironment=null;safe.advancedDataset=null;
+  clearParticipation('summary_unavailable');
+  excluded['summary_derived_inputs:parent_unavailable']=1;
+ }
+ if(game.autoHistory&&!safe.autoHistory){
+  safe.autoTeamMetrics={};safe.autoLineup=null;safe.advancedDataset=null;
+  clearParticipation('history_unavailable');
+  excluded['history_derived_inputs:parent_unavailable']=1;
+ }
+ if(corroborationChanged||game.sourceCorroboration&&!safe.sourceCorroboration){
+  safe.autoContext=null;safe.eventEnvironment=null;
+  excluded['corroboration_derived_inputs:parent_unavailable']=1;
+ }
+ const schedule=observedInputState(game.sourceMeta,cutoff);
+ if(['after_information_cutoff','invalid_observation_time'].includes(schedule)){
+  safe.away={...game.away,record:''};safe.home={...game.home,record:''};excluded['schedule:'+schedule]=1;
+ }
+ for(const side of ['away','home'])if(game[side]?.recordEvidence){
+  const evidence=retain(game[side].recordEvidence,side+'_team_record');
+  const reason=evidence&&safe[side]?.record?nativeNhlRecordInputState(evidence,game,side,cutoff):null;
+  if(reason)excluded[side+'_team_record:'+reason]=1;
+  if(!evidence||reason)safe[side]={...safe[side],record:'',recordEvidence:null};
+ }
+ const next={...context,intelligence,externalResults:(context.externalResults||[]).filter(row=>{
+  const selected=retain(row,'head_to_head_result');
+  if(!selected)return false;
+  if(observedInputState(row,cutoff)==='unknown'){excluded['head_to_head_result:availability_unknown']=(excluded['head_to_head_result:availability_unknown']||0)+1;return false;}
+  const start=observationTime(row.startTime||row.dateKey);
+  if(!Number.isFinite(start)||start>=cutoff){excluded['head_to_head_result:event_not_before_cutoff']=(excluded['head_to_head_result:event_not_before_cutoff']||0)+1;return false;}
+  return true;
+ })};
+ const learnedAt=time(context.learningInputAudit?.cutoffAt);
+ const learningState=context.learningInputAudit?(!Number.isFinite(learnedAt)?'invalid_observation_time':learnedAt>cutoff?'after_information_cutoff':'observed_by_cutoff'):'unknown';
+ if(learningState==='unknown')unknown.learning_context=1;
+ if(['after_information_cutoff','invalid_observation_time'].includes(learningState)){
+  for(const field of ['eloRatings','calibration','outcomeValidation','featureLearning','drift'])next[field]={};
+  next.history={overall:{sampleSize:0}};excluded['learning_context:'+learningState]=1;
+ }
+ return {game:safe,context:next,audit:{schema:'sports-input-cutoff-v2',cutoffAt:new Date(cutoff).toISOString(),excluded,unknownAvailability:unknown,
+  scope:'Provided context collections, selected nested receipts and dependent automatic aggregates; evidence coverage is reported separately.',
+  pointInTimeComplete:false,limitations:['Declared receipt/update times are not independently verified publication times.',
+   'Untimestamped or date-only legacy profiles and unaudited learned state remain explicitly unknown; older revisions are not reconstructed.',
+   'Untimestamped derived aggregates and manually supplied learned state require further provenance review.']}};
+}

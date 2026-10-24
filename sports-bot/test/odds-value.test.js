@@ -130,3 +130,32 @@ test('Discord slate surfaces payout value while labeling consensus disagreement 
 });
 
 test.after(async () => { await fs.rm(directory, { recursive: true, force: true }); });
+
+
+test('unknown quote provenance and invalid probability mass cannot qualify as value opportunities',()=>{
+  const event=game();
+  for(const side of ['away','home'])for(const quote of event.odds.h2h[side].quotes)delete quote.timestampSource;
+  const unknown=analyzeOddsValue(event,model,{now});
+  assert.equal(unknown.bestOpportunity,null);
+  assert.ok(unknown.outcomes.every(row=>!row.actionable));
+  const malformed=analyzeOddsValue(game(),{...model,probabilities:{away:.65,home:.65}},{now});
+  assert.equal(malformed.bestOpportunity,null);
+  assert.ok(malformed.outcomes[0].reasons.some(reason=>reason.includes('sum to one')));
+});
+
+test('provider start time cannot be ignored when the local schedule still says future',()=>{
+  const event=game();event.odds.commenceTime=new Date(now-1).toISOString();
+  const result=analyzeOddsValue(event,model,{now});
+  assert.equal(result.bestOpportunity,null);
+  assert.ok(result.outcomes[0].reasons.some(reason=>reason.includes('already reached')));
+});
+
+test('declared decimal ingestion preserves original format and canonical American quote math',()=>{
+  const event=game(),books=[{key:'decimal',title:'Decimal',markets:[{key:'h2h',last_update:quoteTime,outcomes:[
+    {name:event.away.name,price:3.5},{name:event.home.name,price:1.4}
+  ]}]}];
+  const market=bestH2HMarket(books,event,{oddsFormat:'decimal'});
+  assert.equal(market.away.price,250);assert.equal(market.away.originalPrice,3.5);
+  assert.equal(market.away.originalFormat,'decimal');assert.ok(Math.abs(market.home.price+250)<1e-9);
+  assert.equal(bestH2HMarket(books,event).bookmakerCount,0);
+});

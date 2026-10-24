@@ -1,7 +1,8 @@
+import {quoteTimestampVerified,quoteTimeEpoch} from './oddsPricing.js';
 import { americanToProbability, finiteNumber } from './dataValidation.js';
 import { sportProfile } from './sportProfiles.js';
 
-export const VALUE_POLICY = Object.freeze({ maxQuoteAgeMinutes: 15, minEvidenceQuality: 65, minCalibrationSamples: 40, minBookmakers: 2, minExpectedReturn: 0.02 });
+export const VALUE_POLICY = Object.freeze({ version: 2, maxQuoteAgeMinutes: 15, minEvidenceQuality: 65, minCalibrationSamples: 40, minBookmakers: 2, minExpectedReturn: 0.02 });
 const round = (value, digits = 5) => Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
 const signed = (value) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}%`;
 
@@ -12,11 +13,19 @@ export function payoutAtAmericanOdds(price) {
 // All fields describe a quoted research opportunity, never a placed wager.
 export function analyzeOddsValue(game = {}, model = {}, options = {}) {
   const now = options.now ?? Date.now();
+  if (!Number.isFinite(now)) throw new Error('A valid quote-evaluation time is required');
   const profile = sportProfile(game);
   const market = game.odds?.h2h || {};
   const sides = profile.twoWay ? ['away', 'home'] : ['away', 'home', 'draw'];
   const start = Date.parse(game.startTime || '');
   const sharedRisks = [];
+  const receipt=game.odds?.fetchedAt,hasReceipt=receipt!==undefined&&receipt!==null&&receipt!=='',received=quoteTimeEpoch(receipt);
+  if(hasReceipt&&(!Number.isFinite(received)||received>now))sharedRisks.push('quote receipt is invalid or after the evaluation cutoff');
+  const probabilities = sides.map(side => finiteNumber(model.probabilities?.[side]));
+  if (probabilities.some(p => p === null || p < 0 || p > 1) || Math.abs(probabilities.reduce((sum, p) => sum + (p || 0), 0) - 1) > 0.0011)
+    sharedRisks.push('outcome probability vector is missing or does not sum to one');
+  const providerStart = Date.parse(game.odds?.commenceTime || '');
+  if (Number.isFinite(providerStart) && providerStart <= now) sharedRisks.push('provider event has already reached its start time');
   const rules = market.rules || '';
   const comparableRules = profile.key === 'soccer' ? rules === 'regulation_3way' :
     ['baseball', 'basketball', 'hockey'].includes(profile.key) && rules === 'full_game_2way';
@@ -36,10 +45,10 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
     const quotes = (market[side]?.quotes?.length ? market[side].quotes : market[side] ? [market[side]] : [])
       .filter((quote) => payoutAtAmericanOdds(quote.price) !== null && quote.bookmaker)
       .map((quote) => {
-        const quoteTime = Date.parse(quote.lastUpdate || '');
+        const quoteTime = quoteTimeEpoch(quote.lastUpdate);
         const ageMinutes = Number.isFinite(quoteTime) ? (now - quoteTime) / 60_000 : null;
-        const fresh = ageMinutes !== null && ageMinutes >= 0 && ageMinutes <= VALUE_POLICY.maxQuoteAgeMinutes && !['fetch_time', 'bookmaker_update_unverified'].includes(quote.timestampSource);
-        return { bookmaker: String(quote.bookmaker), bookmakerKey: String(quote.bookmakerKey || quote.bookmaker), price: Number(quote.price), quotedAt: quote.lastUpdate || '', timestampSource: quote.timestampSource || 'provider_update', ageMinutes: round(ageMinutes, 2), fresh, decimalOdds: 1 + payoutAtAmericanOdds(quote.price) };
+        const fresh = ageMinutes !== null && ageMinutes >= 0 && ageMinutes <= VALUE_POLICY.maxQuoteAgeMinutes && quoteTimestampVerified(quote);
+        return { bookmaker: String(quote.bookmaker), bookmakerKey: String(quote.bookmakerKey || quote.bookmaker), price: Number(quote.price), quotedAt: quote.lastUpdate || '', timestampSource: quote.timestampSource || 'unknown', ageMinutes: round(ageMinutes, 2), fresh, decimalOdds: 1 + payoutAtAmericanOdds(quote.price) };
       });
     const freshQuotes = quotes.filter((quote) => quote.fresh);
     // Prefer a current offered quote even if an old cached quote has a larger payout.
@@ -49,6 +58,7 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
     if (outcomeSamples < VALUE_POLICY.minCalibrationSamples) reasons.push(`fewer than ${VALUE_POLICY.minCalibrationSamples} archived outcomes in this side/probability bin`);
     const calibrationError = finiteNumber(model.outcomeCalibrationError?.[side]);
     if (calibrationError === null || calibrationError > 0.10) reasons.push('outcome calibration error is unknown or exceeds 10 probability points');
+    if(hasReceipt&&quotes.some(quote=>quoteTimeEpoch(quote.quotedAt)>received))reasons.push('quote update is after its recorded receipt');
     if (!best) reasons.push('no valid bookmaker price');
     else if (!best.fresh) reasons.push('quote timestamp unknown, future, fetched-only, or older than 15 minutes');
     const freshBookmakers = new Set(freshQuotes.map((quote) => quote.bookmakerKey)).size;
@@ -75,8 +85,9 @@ export function analyzeOddsValue(game = {}, model = {}, options = {}) {
   });
   const ranked = [...outcomes].filter((row) => row.expectedReturn !== null).sort((a, b) => b.stressedReturn - a.stressedReturn || b.expectedReturn - a.expectedReturn);
   return {
-    version: 1, issuedAt: new Date(now).toISOString(), evaluatedAt: new Date(now).toISOString(), rules: rules || 'unknown', policy: VALUE_POLICY,
+    version: 2, issuedAt: new Date(now).toISOString(), evaluatedAt: new Date(now).toISOString(), rules: rules || 'unknown', policy: VALUE_POLICY,
     marketInformed: Boolean(model.marketInformed), independence: model.marketInformed ? 'Model includes bookmaker information; this is not an independent market edge.' : 'No market blend used in this prediction; profitability is unproven.',
+    settlementEvidence:structuredClone(market.settlementEvidence||{classificationSource:'legacy_scope_label',bookSpecificTermsVerified:false,executionVerified:false}),
     uncertaintyMethod: 'heuristic probability stress, not a validated confidence bound',
     outcomes, bestOpportunity: ranked.find((row) => row.actionable) || null, bestObserved: ranked[0] || null,
     disclaimer: 'Hypothetical net return per unit at an observed quote, before fees, taxes, voids, limits and price changes. No wager or available stake is confirmed.'

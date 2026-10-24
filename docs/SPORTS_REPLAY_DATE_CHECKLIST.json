@@ -1,0 +1,24 @@
+{
+  "phase": "historical-replay-date-order",
+  "status": "in_progress",
+  "predictiveModelVersion": "OmniMod Evidence Ensemble v6.0.69",
+  "replayReportVersion": 2,
+  "replayProtocol": "canonical-date-batches-event-instants-v2",
+  "items": [
+    {"item": "Reproduce future-label leakage through mixed explicit timezones", "status": "verified_complete", "evidence": "Earlier probability changed after mutating only a later result on old source; invariant after repair"},
+    {"item": "Validate dates/clocks before state updates and retain complete date batches", "status": "verified_complete", "evidence": "Eight new replay regression cases, including same-date isolation and minute timestamps"},
+    {"item": "Preserve missing starts and expose rejection/cap metadata", "status": "verified_complete", "evidence": "Null start, explicit status and versioned replay/slate diagnostics"},
+    {"item": "Keep retrospective rows outside prospective approval/training", "status": "verified_complete", "evidence": "90-game fixture remains non-prospective; no trained or evaluation models produced"},
+    {"item": "Run full software checks", "status": "verified_complete", "evidence": "1272 full / 61 focused / 239 syntax files; zero failed/skipped"},
+    {"item": "Compare saved real native history without mutation", "status": "verified_complete", "evidence": "47 finals / 11 replay predictions; numerical vectors, features and scores identical; no observed improvement"},
+    {"item": "Recover genuine permitted injury and confirmed-goalie data", "status": "pending", "evidence": "No new requests or alternate provider connection; missing health remains unknown"},
+    {"item": "Complete independent multi-date forecast and model-selection validation", "status": "in_progress", "evidence": "Registered frozen trials remain unchanged; retrospective data is not prospective evidence"},
+    {"item": "Complete original-price/settlement/cost and operational requirements", "status": "pending", "evidence": "No real execution, book-specific terms, deployment or startup proof added"},
+    {"item": "Complete full Sports then queued Crypto then Stocks", "status": "pending", "evidence": "This phase does not shrink or complete the full objective"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "predictiveImprovementEstablished": false
+}
