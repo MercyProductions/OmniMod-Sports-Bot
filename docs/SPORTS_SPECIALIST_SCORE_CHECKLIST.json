@@ -1,0 +1,24 @@
+{
+  "phase": "specialist_score_mean_and_input_consistency",
+  "status": "in_progress",
+  "modelVersion": "v6.0.67",
+  "implementationCommit": "90e7442d96d0493609da51419a852b6d7bcb6862",
+  "items": [
+    {"id":"baseline_and_reproductions","status":"verified_complete","evidence":"1170 baseline; four old-source double-margin, invalid-count, boolean-rate and negative-score regressions fail"},
+    {"id":"coherent_point_means","status":"verified_complete","evidence":"one margin/total; nonnegative mean constraint; existing coefficients/deviations/caps unchanged; Gaussian approximation remains uncalibrated"},
+    {"id":"strict_inputs_and_abstention","status":"verified_complete","evidence":"unknown versus zero, positive integer game weights, source evidence, unsupported aggregate fallback and inactive unavailable specialist"},
+    {"id":"original_specialist_forecast_record","status":"verified_complete","evidence":"raw probabilities/mean assumptions copied into new issued records; first record immutable; legacy not backfilled"},
+    {"id":"verification","status":"verified_complete","evidence":"20 new cases; focused71/full1190/postcommit59/syntax227; zero failed/skipped"},
+    {"id":"current_source_paired_capture","status":"verified_complete","evidence":"baseline12/current21 actual pregame observations,12sharedNHLpairs/9unmatched,47public requests/26failures,0calibration/actionable; cold-start diagnostic only"},
+    {"id":"final_only_automation_extension","status":"verified_complete","evidence":"newv67 study added to final-only prompt; schedule/name/status/target unchanged; Stocks and original frozen automation unchanged"},
+    {"id":"adequate_independent_current_model_selection","status":"pending","evidence":"one-date sample has no finals and is not a registered selection trial/untouched holdout; originalv52 study cannot certifyv67"},
+    {"id":"real_medical_venue_and_full_sports_validation","status":"in_progress","evidence":"missing injury/goalie feeds and remaining full Sports requirements; no demonstrated accuracy/calibration/value improvement"}
+  ],
+  "currentPairedStudyPublicRequests": 47,
+  "separateOriginalTrialPublicRequests": 10,
+  "paidRequests": 0,
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}

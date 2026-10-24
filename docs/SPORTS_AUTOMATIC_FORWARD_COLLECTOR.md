@@ -59,3 +59,9 @@ At 2026-10-24T08:03:07.820Z a due invocation completed after checking the prior 
 ## Sixth checked capture
 
 At2026-10-24T11:11:31.870Z the original frozen v52 worker completed another due bounded run:10 public requests/three failures, six receipts/61 provider blobs,67 cumulative checked requests,12 distinct games/one date/zero finals. The104-file manifest, archive, plan/artifact and original forecasts verified unchanged. Repeat captures do not add independent games. This does not validate current v65 or prove every scheduled wake. No orders, Discord, paid requests or promotion; all three automation files including Stocks remain unchanged. [Independent input repair](SPORTS_INDEPENDENT_AVAILABILITY_INPUTS.md) stays outside this frozen trial.
+
+## Seventh checked capture and separate current-source diagnostic
+
+The unchanged frozenv52 worker completed at2026-10-24T12:14:26.257Z:10public requests/three failures, seven verified receipts/70blobs,77cumulative checked requests,12distinctgames/onedate/zerofinals. Original source/plan/artifact/first predictions remain pinned; repeat captures are not extra independent games.
+
+[Separately pinnedv67 research](SPORTS_SPECIALIST_SCORE_CONSISTENCY.md) captured12sharedNHLpairs plus9unmatchedNBA/MLBforecasts at12:33UTC. It is a cold-start engineering diagnostic, not this registered selection trial or an untouched final holdout. The existing current-source final-only heartbeat now also handles that exact fourth study; its schedule/status/name/target remain, and no new forecasts or promotion are allowed. The original frozen collector and Stocks automation files stay unchanged. No model-performance improvement is established.
