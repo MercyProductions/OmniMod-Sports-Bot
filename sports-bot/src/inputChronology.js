@@ -4,6 +4,7 @@ import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 import {scoreboardStarterInputState} from './scoreboardStarters.js';
 import {availabilityProviderInputState} from './availabilityProviderScope.js';
+import {officialProjectionInputState,officialCorroborationInputState,selectOfficialCorroboration,legacyOfficialProjection} from './officialScheduleEvidence.js';
 
 const time=quoteTimeEpoch;
 const dayOnly=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -38,7 +39,9 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const excluded={},unknown={};
  const retain=(row,path)=>{
   if(!row)return row;
+  if(legacyOfficialProjection(row)){const key=path+':official_projection_binding_unknown';excluded[key]=(excluded[key]||0)+1;return null;}
   if(path==='autoEnrichment'&&row.sourceIdentity?.status==='conflict'){excluded['autoEnrichment:source_identity_conflict']=1;return null;}
+  if(row.officialProjection){const reason=officialProjectionInputState(row,game,cutoff);if(reason){const key=path+':official_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.availabilityProvider){const reason=availabilityProviderInputState(row,game,cutoff);if(reason){const key=path+':provider_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.scoreboardProjection){const reason=scoreboardStarterInputState(row,game,cutoff);if(reason){const key=path+':scoreboard_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.availabilityExpiresAt!==undefined){
@@ -52,7 +55,13 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  };
  const safe={...game},intelligence={...context.intelligence};
  for(const name of ['teams','players','contexts'])intelligence[name]=Object.fromEntries(Object.entries(context.intelligence?.[name]||{}).filter(([,row])=>retain(row,'manual_'+name)));
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','sourceCorroboration','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence','summaryIdentity'])safe[field]=retain(game[field],field);
+ let corroborationChanged=false;
+ const corroboration=selectOfficialCorroboration(game.sourceCorroboration,game,cutoff,reason=>{corroborationChanged=true;excluded[reason]=(excluded[reason]||0)+1;});
+ safe.sourceCorroboration=retain(corroboration,'sourceCorroboration');
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence','summaryIdentity'])safe[field]=retain(game[field],field);
+ const officialState=game.officialStarterEvidence&&officialCorroborationInputState(game.officialStarterEvidence,game,cutoff);
+ safe.officialStarterEvidence=officialState?null:retain(game.officialStarterEvidence,'official_starter_evidence');
+ if(officialState)excluded['official_starter_evidence:'+officialState]=1;
  if(safe.goalieResearch&&safe.goalieResearch.status!=='unavailable'){
   const reason=retainedGoalieContextState(safe.goalieResearch,game,cutoff);
   if(reason){safe.goalieResearch=null;excluded['goalieResearch:'+reason]=1;}
@@ -64,7 +73,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   if(!retain(row,path))return false;
   // A bad summary cannot erase independently scoped provider/scoreboard observations.
   // Unclassified legacy automatic rows remain inseparable from that rejected parent.
-  if(summaryUnavailable&&(row.summaryObservationType||!row.availabilityProvider&&!row.scoreboardProjection)){
+  if(summaryUnavailable&&(row.summaryObservationType||!row.availabilityProvider&&!row.scoreboardProjection&&!row.officialProjection)){
    const key=path+':summary_parent_unavailable';excluded[key]=(excluded[key]||0)+1;return false;
   }
   return true;
@@ -104,7 +113,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   clearParticipation('history_unavailable');
   excluded['history_derived_inputs:parent_unavailable']=1;
  }
- if(game.sourceCorroboration&&!safe.sourceCorroboration){
+ if(corroborationChanged||game.sourceCorroboration&&!safe.sourceCorroboration){
   safe.autoContext=null;safe.eventEnvironment=null;
   excluded['corroboration_derived_inputs:parent_unavailable']=1;
  }

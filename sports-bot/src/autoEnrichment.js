@@ -878,6 +878,8 @@ export async function enrichGamesAutomatically(games, date, options = {}) {
     officialMatches: official.matched,
     officialStarters: official.confirmedStarters,
     officialProbableStarters: official.probableStarters || 0,
+    officialAddedProjections:official.addedProjections||0,
+    officialProviderFailures:official.providerFailures||0,
     starterRestMatches,
     playByPlayGames: historicalSamples.filter((row) => row.playByPlay?.assignedPlays > 0).length,
     officialProfileMatches

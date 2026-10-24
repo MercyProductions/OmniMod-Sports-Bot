@@ -8,6 +8,7 @@ import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 import {scoreboardStarterCoverage} from './scoreboardStarters.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
 import {availabilityProviderInputState} from './availabilityProviderScope.js';
+import {officialCorroborationInputState} from './officialScheduleEvidence.js';
 export { isConfirmedStarter } from './playerEvidence.js';
 
 const timestamp = value => { const at=quoteTimeEpoch(value); return Number.isFinite(at) ? new Date(at).toISOString() : null; };
@@ -120,6 +121,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           workloadBasis: row.participationProjection?.workloadBasis || null, workloadUnitMismatch: row.participationProjection?.workloadUnitMismatch || false, availabilityObserved: hasAvailabilityObservation(row),
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
           summaryRoleEvidence:row.summaryRoleEvidence||null,summaryStatEvidence:row.summaryStatEvidence||null,
+          officialProjectionEvidence:row.officialProjectionEvidence?structuredClone(row.officialProjectionEvidence):null,
           availabilityProvider:row.availabilityProvider||null,availabilitySnapshotHash:row.availabilitySnapshotHash||null,
           availabilityEventIdentity:row.availabilityEventIdentity?structuredClone(row.availabilityEventIdentity):null,
           availabilityProviderSources:(row.availabilitySourceRows||[row]).filter(input=>input.availabilityProvider).map(input=>({
@@ -152,6 +154,9 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
   return { schema: 'sports-evidence-coverage-v2', gameId: String(game.id || ''), league: game.leagueKey || '',
     cutoffAt: new Date(now).toISOString(), summary, sources, sides,
     availabilityProviderEvidence: game.availabilityProviderEvidence || null,
+    officialStarterEvidence:game.officialStarterEvidence?structuredClone(game.officialStarterEvidence):null,
+    officialCorroboration:[...(game.sourceCorroboration?.matches||[]),...(game.sourceCorroboration?.conflicts||[])].filter(row=>row.schema==='sports-official-schedule-event-v1')
+      .map(row=>({...structuredClone(row),inputState:officialCorroborationInputState(row,game,now)||'current_bound_source_assertion'})),
     nhlTeamIdentity:game.nhlTeamIdentity?{status:game.nhlTeamIdentity.status,reason:game.nhlTeamIdentity.reason||null,fetchedAt:timestamp(game.nhlTeamIdentity.fetchedAt),provider:game.nhlTeamIdentity.provider||null,policy:'Scoped naming evidence only; no injury/starter coverage or confidence bonus.'}:null,
     goalieResearch: game.goalieResearch ? {status:goalieState?'unavailable':game.goalieResearch.status,reason:goalieState||game.goalieResearch.reason||null,provider:game.goalieResearch.provider||null,
       fetchedAt:timestamp(game.goalieResearch.fetchedAt),confirmedStarters:0,injuryCoverage:'unknown',
