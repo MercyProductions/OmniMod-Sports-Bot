@@ -249,6 +249,8 @@ Independent availability inputs: [summary-parent isolation and original provider
 
 Official schedules: [exact event identity, fresh pitcher inputs and independent-source accounting](docs/SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md), development v6.0.66. Doubleheaders and player namespaces stay separate; expired projections cannot block current observations. Full1,170 tests pass. The one real-response diagnostic recovered projected inputs at its original receipt time; it was not a forecast or accuracy result.
 
+Refresh diagnostics: [durable cache/source rejection reasons and legacy coverage](docs/SPORTS_REFRESH_REJECTION_EVIDENCE.md), with a [structured checklist](docs/SPORTS_REFRESH_REJECTION_CHECKLIST.json). Full 1,222 tests and 233 syntax checks pass. Existing freshness/issuance gates remain, and actual injury/confirmed-goalie coverage is still missing.
+
 Current validation: [governed v67 forward collection and the read-only injury/goalie audit](docs/SPORTS_GOVERNED_FORWARD_FAMILY.md), with a [structured phase checklist](docs/SPORTS_GOVERNED_FORWARD_CHECKLIST.json). Full 1,211 tests and 231 syntax checks pass. The later registered trial has no collected samples yet; missing clinical inputs and actual predictive performance remain unfinished.
 
 Specialist arithmetic: [coherent score means, numeric missingness and current-source research](docs/SPORTS_SPECIALIST_SCORE_CONSISTENCY.md), development v6.0.67. Football score means use their probability margin once; invalid point inputs abstain and new journal entries freeze specialist assumptions. Full1,190 tests pass. A separately pinned12-pair NHL diagnostic has no finals and cannot establish improvement or model selection.

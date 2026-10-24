@@ -6,6 +6,9 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 24, 2026
 
+Latest durable-evidence repair: [refresh rejection causes and historical coverage](SPORTS_REFRESH_REJECTION_EVIDENCE.md), [checklist](SPORTS_REFRESH_REJECTION_CHECKLIST.json). The journal now retains source-identity/cache-change reasons, marks its reason policy and reports unknown omissions without raw text. Legacy retries preserve original bytes. Baseline 1211; focused 69/full 1222/syntax 233 pass. The real research-journal CLI reads 12 issued forecasts and zero terminal attempts without changing bytes; historical affected-case prevalence remains unknown. Model formulas and acceptance gates stay unchanged, but source/artifact identity changes; the two frozen trials and all four automations remain intact. Medical coverage, source-neutral refresh authority and adequate prospective model validation remain unfinished. Earlier phase checkpoints follow.
+
+
 Latest infrastructure phase: [governed v67 forward collection and availability audit](SPORTS_GOVERNED_FORWARD_FAMILY.md), [checklist](SPORTS_GOVERNED_FORWARD_CHECKLIST.json). Baseline 1190; focused 59/full 1211/syntax 231 pass. A new 116-file pinned v67 trial is preregistered for November 8-22 with the same physical selection ledger and unchanged minimums, not an overlapping replacement for v52. Its installed zero-request preflight and additional ACTIVE heartbeat are verified; no v67 selection samples yet. The original eighth checked run at 13:27 UTC retains 12 games/one date/zero finals, eight receipts/79 blobs. Offline current-capture audit separates 12 unverified NHL mappings, six failed NBA/MLB summaries and three NBA cap omissions; zero actual injury/confirmed-goalie recovery. Original Sports, final-only and Stocks automation files are unchanged. Inference source remains v67. Earlier source-repair checkpoint follows.
 
 
