@@ -30,6 +30,20 @@ export function quoteTimeEpoch(value){
   return Date.parse(value);
 }
 
+/** A local fetch/revalidation receipt is not an assertion of source publication time. */
+export function oddsReceiptSnapshot(fetchedAt){
+  const at=quoteTimeEpoch(fetchedAt);
+  return {schema:'sports-local-odds-receipt-v1',fetchedAt:Number.isFinite(at)?new Date(at).toISOString():null,
+    timestampStatus:Number.isFinite(at)?'explicit_zone':fetchedAt===undefined||fetchedAt===null||fetchedAt===''?'missing':'invalid',
+    kind:'local_fetch_receipt_not_provider_publication'};
+}
+
+export function verifiedOddsReceipt(receipt){
+  if(!receipt||receipt.schema!=='sports-local-odds-receipt-v1'||receipt.timestampStatus!=='explicit_zone'
+    ||receipt.kind!=='local_fetch_receipt_not_provider_publication'||!Number.isFinite(quoteTimeEpoch(receipt.fetchedAt)))return null;
+  return oddsReceiptSnapshot(receipt.fetchedAt);
+}
+
 export function quoteTimestampVerified(quote={}){
   return quote.timestampSource==='provider_update'&&Number.isFinite(quoteTimeEpoch(quote.lastUpdate??quote.quotedAt));
 }

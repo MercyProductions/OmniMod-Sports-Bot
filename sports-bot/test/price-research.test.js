@@ -13,7 +13,7 @@ function rows(){
     modeledOutcomes:['away','home'],lifecycleState:'ISSUED',recordEligibility:'observed_pregame',predictionGeneratedAt:issue,startTime:start,
     outcomePercentages:{away:45,home:55,draw:0},modelUsesMarket:true,
     valueDecision:{side:'home',status:'research_opportunity',evaluatedAt:issue,quote:chosen},
-    odds:{rules:'full_game_2way',cacheState:'network',identity:{localGameId:'g',league:'nba',providerEventId:'provider-g',providerStartTime:start,matchStatus:'matched'},
+    odds:{rules:'full_game_2way',cacheState:'network',sourceReceipt:{schema:'sports-local-odds-receipt-v1',fetchedAt:issue,timestampStatus:'explicit_zone',kind:'local_fetch_receipt_not_provider_publication'},identity:{localGameId:'g',league:'nba',providerEventId:'provider-g',providerStartTime:start,matchStatus:'matched'},
       outcomes:{home:{offeredQuotes:[quote(150)]},away:{offeredQuotes:[quote(-180)]}}}};
   return [{type:'forecast',recordedAt:issue,payload:row},{type:'result',recordedAt:final,payload:{forecastId:'f',actualSide:'home',observedAt:final}}];
 }

@@ -4,7 +4,7 @@ import {serializeAvailabilityRefreshProof} from './availabilityRefresh.js';
 import {REFRESH_REASON_POLICY,structuredRefreshReasons} from './refreshReasonCodes.js';
 import {journalGameIndex,matchJournalGame} from './journalEventMatch.js';
 import {journalResultState} from './journalResults.js';
-import {quotePrice,quoteTimeEpoch} from './oddsPricing.js';
+import {quotePrice,quoteTimeEpoch,oddsReceiptSnapshot} from './oddsPricing.js';
 import { createHash } from 'node:crypto';
 import { open, readFile, mkdir, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -121,6 +121,7 @@ function forecastSnapshot(prediction, game, slate, capturedAt) {
       laterThanPrediction: Boolean(generatedAt && iso(meta?.fetchedAt) && Date.parse(meta.fetchedAt) > Date.parse(generatedAt))
     }])),
     odds: { status: hasOfferedPrice ? 'available' : 'unavailable',
+      sourceReceipt:oddsReceiptSnapshot(game.odds?.fetchedAt),
       lineMarkets:{spread:structuredClone(game.odds?.spread||null),total:structuredClone(game.odds?.total||null)},
       lineMarketIntegrity:structuredClone(game.odds?.lineMarketIntegrity||null),settlementEvidence:structuredClone(game.odds?.h2h?.settlementEvidence||null),
       bookmakerIntegrity:structuredClone(game.odds?.h2h?.bookmakerIntegrity||null),attemptedBookmakerIntegrity:structuredClone(game.oddsBookmakerEvidence||null),
