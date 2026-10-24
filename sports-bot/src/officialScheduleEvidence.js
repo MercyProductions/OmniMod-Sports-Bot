@@ -26,25 +26,30 @@ function teamsMatch(game,event){
  return sides.every(side=>Boolean(game[side]?.abbr)&&event?.[side]?.abbr===game[side].abbr&&Array.isArray(event[side].names)&&event[side].names.some(name=>
   [game[side].name,...(game[side].aliases||[])].filter(Boolean).map(normalizeEntityName).includes(normalizeEntityName(name))));
 }
+function sourceContextReason(event,game,provider){
+ if(game.leagueKey!==(provider==='MLB StatsAPI'?'mlb':'nhl'))return 'provider_league_mismatch';
+ if(provider==='NHL API'&&game.sourceMeta?.provider==='NHL API'){
+  const id=/^nhl-(\d+)$/.exec(String(game.id));
+  if(!id||id[1]!==event.id||sides.some(side=>String(game[side]?.id)!==event[side].id))return 'native_event_or_team_id_conflict';
+ }
+ if(game.seasonYear!==undefined&&event.season!==null&&String(game.seasonYear).length===String(event.season).length&&String(game.seasonYear)!==String(event.season))return 'source_season_conflict';
+ return null;
+}
 /** Exact ordered teams/start; provider IDs are not guessed across namespaces. */
 export function matchOfficialScheduleEvent(rows,game,provider){
  const candidates=rows.filter(row=>row&&typeof row==='object'&&!Array.isArray(row)).map(row=>sourceEvent(row,provider)).filter(row=>teamsMatch(game,row));
  const start=capturedEventTime(game.startTime),matching=candidates.filter(row=>Number.isFinite(start)&&capturedEventTime(row.startTime)===start);
  if(matching.length!==1)return {reason:matching.length?'ambiguous_source_event':candidates.length?'start_mismatch_or_invalid':'ordered_team_identity_unmatched'};
  const event=matching[0];if(!nativeId(event.id))return {reason:'native_event_id_invalid'};
- if(provider==='NHL API'&&game.sourceMeta?.provider==='NHL API'){
-  const id=/^nhl-(\d+)$/.exec(String(game.id));
-  if(!id||id[1]!==event.id||sides.some(side=>String(game[side]?.id)!==event[side].id))return {reason:'native_event_or_team_id_conflict'};
- }
- if(game.seasonYear!==undefined&&event.season!==null&&String(game.seasonYear).length===String(event.season).length&&String(game.seasonYear)!==String(event.season))return {reason:'source_season_conflict'};
- return {event};
+ const reason=sourceContextReason(event,game,provider);return reason?{reason}:{event};
 }
 export function officialCorroborationInputState(record,game,now){
  if(!Number.isFinite(now))throw Error('Valid official-source cutoff required');
  if(record?.schema!==schema||!['MLB StatsAPI','NHL API'].includes(record.provider)||!same(record.localEvent,localEvent(game)))return 'local_event_binding_mismatch';
  const receipt=quoteTimeEpoch(record.fetchedAt),expires=quoteTimeEpoch(record.expiresAt);
  if(!Number.isFinite(receipt)||receipt>now||now-receipt>=TTL||expires!==receipt+TTL||expires<=now||!['network','fresh','revalidated'].includes(record.cacheState))return 'receipt_stale_future_or_unverified';
- if(!nativeId(record.sourceEvent?.id)||capturedEventTime(record.sourceEvent?.startTime)!==capturedEventTime(game.startTime)||!teamsMatch(game,record.sourceEvent))return 'source_event_binding_mismatch';
+ if(!nativeId(record.sourceEvent?.id)||record.eventId!==record.sourceEvent.id||capturedEventTime(record.sourceEvent?.startTime)!==capturedEventTime(game.startTime)||!teamsMatch(game,record.sourceEvent))return 'source_event_binding_mismatch';
+ const context=sourceContextReason(record.sourceEvent,game,record.provider);if(context)return context;
  const independent=Boolean(game.sourceMeta?.provider)&&normalizeEntityName(game.sourceMeta.provider)!==normalizeEntityName(record.provider);
  if(record.independentFromSchedule!==independent||record.conflict!==(record.sourceEvent.statusKey==='unknown'||record.sourceEvent.statusKey!==game.statusKey))return 'corroboration_flags_conflict';
  return null;

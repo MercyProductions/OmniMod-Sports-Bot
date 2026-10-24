@@ -87,6 +87,7 @@ const hockey=()=>({id:'nhl-7001',league:'NHL',leagueKey:'nhl',sportGroup:'Hockey
 const hockeyEvent=()=>({id:7001,season:20992000,startTimeUTC:game().startTime,gameState:'FUT',awayTeam:{id:1,name:{default:'Away Team'},abbrev:'AWY'},homeTeam:{id:2,name:{default:'Home Team'},abbrev:'HOM'}});
 test('native NHL event and team IDs must agree within the known native namespace',()=>{
  for(const mutate of [raw=>raw.id=7002,raw=>raw.awayTeam.id=9]){const raw=hockeyEvent();mutate(raw);const g=hockey(),r=applyOfficialSchedulePayload([g],{games:[raw]},options({provider:'NHL API'}));assert.equal(r.matched,0);assert.equal(r.rejected.native_event_or_team_id_conflict,1);}
+ for(const mutate of [record=>record.sourceEvent.away.id='9',record=>record.sourceEvent.season=20982099]){const g=hockey();applyOfficialSchedulePayload([g],{games:[hockeyEvent()]},options({provider:'NHL API'}));mutate(g.sourceCorroboration.matches[0]);assert.equal(predictionInputsAt(JSON.parse(JSON.stringify(g)),{},now).game.sourceCorroboration.matches.length,0);}
 });
 test('the same NHL feed can check consistency but cannot add independent-provider confidence',()=>{
  const g=hockey(),control=structuredClone(g),r=applyOfficialSchedulePayload([g],{games:[hockeyEvent()]},options({provider:'NHL API'}));assert.equal(r.matched,1);assert.equal(g.sourceCorroboration.matches.length,1);assert.equal(g.sourceCorroboration.matches[0].independentFromSchedule,false);assert.deepEqual(g.sourceCorroboration.providers,[]);const prediction=predictGame(g,1,{now});assert.equal(prediction.apiConfidenceValue,predictGame(control,1,{now}).apiConfidenceValue);assert.equal(prediction.evidenceCoverage.officialCorroboration[0].independentFromSchedule,false);
@@ -103,7 +104,7 @@ test('a rejected future official receipt does not erase a separate earlier provi
 });
 test('modified projected identities or positive confirmation fields cannot borrow a source binding',()=>{
  const original=game();apply(original);
- for(const mutate of [row=>row.confirmedStarter=true,row=>row.availability=100,row=>row.sourceAthleteId='mlb:99',row=>row.name='Other']){const g=structuredClone(original);mutate(player(g));assert.ok(officialProjectionInputState(g.autoPlayers[0],g,now));}
+ for(const mutate of [row=>row.confirmedStarter=true,row=>row.availability=100,row=>row.sourceAthleteId='mlb:99',row=>row.name='Other',row=>row.officialProjectionEvidence.eventId='other',row=>row.officialProjectionEvidence.sourceEvent.season='2098']){const g=structuredClone(original);mutate(player(g));assert.ok(officialProjectionInputState(g.autoPlayers[0],g,now));}
 });
 test('actual issued evidence retains official projection identity and unknown medical status',async()=>{
  const g=game();apply(g);const prediction=predictGame(g,1,{now}),file=join(process.env.OMNIMOD_SPORTS_DATA_DIR,'official-scope-journal.jsonl');await recordPredictionJournal({guildId:'official-scope-fixture',generatedAt:new Date(now).toISOString(),games:[g],predictions:[{...prediction,predictionGeneratedAt:new Date(now).toISOString()}]},{file,now});
