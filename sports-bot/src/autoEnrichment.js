@@ -14,6 +14,8 @@ import {collectNativeNhlHistory,mergeNativeNhlHistory} from './nativeNhlHistory.
 import { localDateKey } from './time.js';
 import {applyScoreboardStarters} from './scoreboardStarters.js';
 import {espnSummaryEventId,inspectSummarySourceIdentity,summaryTeamBinding} from './summarySourceIdentity.js';
+import {automaticPlayerImpact} from './summaryPlayerEvidence.js';
+import {reconcileAvailabilityRows} from './availabilityReconciliation.js';
 export {espnSummaryEventId} from './summarySourceIdentity.js';
 
 const DAY_MS = 86_400_000;
@@ -324,19 +326,6 @@ function injuryAvailability(status, type = {}) {
   return null; // Unrecognized reports are not measured participation probabilities.
 }
 
-function automaticPlayerImpact(game, position, starter) {
-  const profile = sportProfile(game);
-  const role = String(position || '').toLowerCase();
-  let impact = 1.2;
-  if (profile.key === 'baseball') impact = /starting pitcher|\bsp\b/.test(role) ? 6 : /pitcher|\brp\b|closer/.test(role) ? 2.2 : /catcher|\bc\b/.test(role) ? 2 : 1.2;
-  if (profile.key === 'basketball') impact = 2.3;
-  if (profile.key === 'football') impact = /quarterback|\bqb\b/.test(role) ? 6.5 : /tackle|\bot\b|receiver|\bwr\b|running back|\brb\b|corner/.test(role) ? 2.4 : 1.5;
-  if (profile.key === 'hockey') impact = /goalie|goaltender|\bg\b/.test(role) ? 5.5 : 1.8;
-  if (profile.key === 'soccer') impact = /goalkeeper|\bgk\b/.test(role) ? 4.5 : /forward|striker/.test(role) ? 2.8 : 1.8;
-  if (profile.key === 'tennis' || profile.key === 'combat') impact = 7;
-  return clamp(impact * (starter ? 1.35 : 1), 0.5, 9);
-}
-
 function americanToProbability(price) {
   if (price === null || price === undefined || typeof price === 'boolean' || !String(price).trim()) return null;
   const value = Number(price);
@@ -481,12 +470,13 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         active: row.active !== false,
         batOrder: finite(row.batOrder),
         formationPlace: row.formationPlace || '',
-        source: 'ESPN current event roster', updatedAt: fetchedAt
+        source: 'ESPN current event roster', updatedAt: fetchedAt,
+        summaryObservationType:'roster',leagueKey:game.leagueKey,league:game.league,sportGroup:game.sportGroup
       });
     }
   }
 
-  const playerMap = new Map();
+  const playerObservations = [];
   const competition = summary?.header?.competitions?.[0];
   for (const competitor of competition?.competitors || []) {
     if(!competitor||typeof competitor!=='object')continue;
@@ -506,6 +496,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         team: teamName,
         league: game.league,
         leagueKey: game.leagueKey,
+        sportGroup:game.sportGroup,summaryObservationType:'probable',
         role,
         impact: automaticPlayerImpact(game, role, true),
         availability: 100,
@@ -523,7 +514,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         updatedAt: fetchedAt,
         updatedBy: 'automatic-enrichment'
       };
-      playerMap.set(`${normalizeEntityName(teamName)}__${row.sourceAthleteId || normalizeEntityName(name)}`, row);
+      playerObservations.push(row);
     }
   }
 
@@ -547,6 +538,7 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         name,
         team: teamName,
         league: game.league,
+        leagueKey:game.leagueKey,sportGroup:game.sportGroup,summaryObservationType:'injury',
         role,
         impact: automaticPlayerImpact(game, role, starter),
         availability,
@@ -563,10 +555,10 @@ export function parseEspnSummary(summary, game, sourceMeta = {}) {
         updatedAt: fetchedAt,
         updatedBy: 'automatic-enrichment'
       };
-      playerMap.set(`${normalizeEntityName(teamName)}__${row.sourceAthleteId || normalizeEntityName(name)}`, row);
+      playerObservations.push(row);
     }
   }
-  const players = [...playerMap.values()];
+  const players = reconcileAvailabilityRows(playerObservations,lineups);
   const context = weatherContext(summary, fetchedAt);
   return {
     players,

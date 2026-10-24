@@ -1,6 +1,7 @@
 import {reconcilePlayerEvidence,samePlayerIdentity,isConfirmedStarter} from './playerEvidence.js';
 import {normalizeEntityName} from './intelligenceStore.js';
 import {hasAvailabilityObservation,finiteNumber,explicitlyUnavailable} from './dataValidation.js';
+import {applySummaryPlayerEvidence} from './summaryPlayerEvidence.js';
 const samePlayer=(a,b)=>normalizeEntityName(a.team)===normalizeEntityName(b.team)&&samePlayerIdentity(a,b);
 /** Materialized views retain original inputs so one provider cannot erase another source. */
 export const availabilitySourceRows=rows=>rows.flatMap(row=>Array.isArray(row.availabilitySourceRows)?structuredClone(row.availabilitySourceRows):[row]);
@@ -8,7 +9,7 @@ export function reconcileAvailabilityRows(rows,availability=[]){
  const views=reconcilePlayerEvidence(rows,availability,{retainAvailabilitySources:true});
  for(const view of views){
   const inputs=[...rows,...availability].filter(row=>samePlayer(view,row));
-  if(!inputs.some(row=>row.availabilityProvider))continue;
+  if(!inputs.some(row=>row.availabilityProvider)){applySummaryPlayerEvidence(view,inputs);continue;}
   const health=inputs.filter(hasAvailabilityObservation),numbers=health.map(row=>finiteNumber(row.availability)).filter(value=>value!==null);
   const denied=health.some(row=>row.active===false||explicitlyUnavailable(row)||finiteNumber(row.availability)===0);
   // A role-only report must never replace a negative or explicit health assertion.
@@ -16,6 +17,7 @@ export function reconcileAvailabilityRows(rows,availability=[]){
   if(health.length)view.availabilityEvidence='reconciled_observed_assertions_not_medical_verification';
   view.availabilityConflict=Boolean(view.availabilityConflict||new Set(numbers).size>1);
   view.source=[...new Set(inputs.map(row=>row.source).filter(Boolean))].sort().join(' + ');
+  applySummaryPlayerEvidence(view,inputs);
  }
  for(const team of new Set(views.map(row=>normalizeEntityName(row.team)))){
   const goalies=views.filter(row=>normalizeEntityName(row.team)===team&&/goalie|goaltender|\bg\b/i.test(row.role||'')&&isConfirmedStarter(row));

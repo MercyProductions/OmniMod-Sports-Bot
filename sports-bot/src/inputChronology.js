@@ -59,7 +59,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  const rawPlayers=availabilitySourceRows(game.autoPlayers||[]),rawLineups=availabilitySourceRows(game.autoLineups||[]);
  const playerInputs=rawPlayers.filter(row=>retain(row,'auto_player')),lineupInputs=rawLineups.filter(row=>retain(row,'auto_lineup_player'));
  const availabilityChanged=playerInputs.length!==rawPlayers.length||lineupInputs.length!==rawLineups.length;
- safe.autoPlayers=availabilityChanged?reconcileAvailabilityRows(playerInputs):(game.autoPlayers||[]).filter(row=>retain(row,'auto_player_view'));
+ safe.autoPlayers=availabilityChanged?reconcileAvailabilityRows(playerInputs,lineupInputs):(game.autoPlayers||[]).filter(row=>retain(row,'auto_player_view'));
  safe.autoLineups=availabilityChanged?reconcileAvailabilityRows(lineupInputs,playerInputs):(game.autoLineups||[]).filter(row=>retain(row,'auto_lineup_view'));
  safe.availabilityProviderEvidenceByProvider=Object.fromEntries(Object.entries(game.availabilityProviderEvidenceByProvider||{}).filter(([,row])=>retain(row,'availability_provider_state')));
  safe.participationProjections=(game.participationProjections||[]).filter(row=>retain(row,'participation_projection'));

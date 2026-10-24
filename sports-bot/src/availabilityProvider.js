@@ -45,7 +45,7 @@ export function applyAvailabilitySnapshot(games,payload,{now=Date.now()}={}){
   const legacy=game.availabilityProviderEvidence;if(legacy?.provider&&!Object.hasOwn(history,legacy.provider))history={...history,[legacy.provider]:legacy};
   const prior=Object.hasOwn(history,payload.provider)?history[payload.provider]:null,previous=quoteTimeEpoch(prior?.sourceObservationAt);
   let players=availabilitySourceRows(game.autoPlayers||[]),lineups=availabilitySourceRows(game.autoLineups||[]);
-  const materialize=()=>{game.autoPlayers=reconcileAvailabilityRows(players);game.autoLineups=reconcileAvailabilityRows(lineups,players);};
+  const materialize=()=>{game.autoPlayers=reconcileAvailabilityRows(players,lineups);game.autoLineups=reconcileAvailabilityRows(lineups,players);};
   const removeProvider=()=>{players=players.filter(row=>row.availabilityProvider!==payload.provider);lineups=lineups.filter(row=>row.availabilityProvider!==payload.provider);};
   if(prior?.provider===payload.provider&&Number.isFinite(previous)&&observed<=previous){
    if(observed===previous&&prior.snapshotHash!==snapshotHash){

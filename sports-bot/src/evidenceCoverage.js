@@ -118,6 +118,7 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
           historicalParticipationEvidence: row.participationProjection?.historicalParticipationEvidence || 'unknown',
           workloadBasis: row.participationProjection?.workloadBasis || null, workloadUnitMismatch: row.participationProjection?.workloadUnitMismatch || false, availabilityObserved: hasAvailabilityObservation(row),
           availabilityEvidence: row.availabilityEvidence || 'manual_or_legacy_assertion',
+          summaryRoleEvidence:row.summaryRoleEvidence||null,summaryStatEvidence:row.summaryStatEvidence||null,
           status: row.status || 'unknown', confirmedStarter: isConfirmedStarter(row) })) },
       injuryCoverage: summary.injuryCoveredSides.includes(side) ? 'team_report_received_not_a_clean_bill_of_health' : 'unknown',
       confirmedStarters: lineup.filter(isConfirmedStarter).length,

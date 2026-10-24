@@ -42,10 +42,12 @@ export function reconcilePlayerEvidence(rows = [], availabilityObservations = []
     const denied = [...group, ...rows, ...availabilityObservations].filter(row => sameTeamPlayer(merged, row) || group.includes(row)).some(unavailable);
     const starterConflict = confirmed && group.some(row => row.confirmedStarter === false || row.starter === false
       || row.confirmationStatus === 'projected');
+    const sourceDependent=group.some(row=>row.availabilityProvider||row.summaryObservationType)
+      ||availabilityObservations.some(row=>sameTeamPlayer(merged,row)&&(row.availabilityProvider||row.summaryObservationType));
     return { ...merged, ...(denied ? { active: false } : {}),
       confirmedStarter: confirmed && !denied && !starterConflict,
       availabilityConflict: group.some(row => row.availabilityConflict) || (confirmed && denied),
       starterEvidenceConflict: group.some(row => row.starterEvidenceConflict) || starterConflict,
-      ...(retainAvailabilitySources && group.some(row => row.availabilityProvider) ? { availabilitySourceRows: structuredClone(group) } : {}) };
+      ...(retainAvailabilitySources&&sourceDependent?{availabilitySourceRows:structuredClone(group)}:{}) };
   });
 }
