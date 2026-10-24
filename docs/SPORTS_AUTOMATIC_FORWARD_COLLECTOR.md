@@ -55,3 +55,7 @@ The previously saved native NHL landing and boxscore responses for the first tri
 ## Additional checked current-time run
 
 At 2026-10-24T08:03:07.820Z a due invocation completed after checking the prior terminal run, no live worker and no owner lock. It retained 12 games/one date/zero finals, appended receipt 3 and preserved 34 provider blobs; 10 ordinary free-provider requests/three failures were recorded. Cumulative requests across the three checked runs are 37. Original archived v52 source/plan/artifact and first forecasts remain unchanged; current v59 code was not substituted. This is no proof that every automatic hourly wake ran, and the worker interval counter is not continuity proof. [Current repair and limits](SPORTS_UNCERTAINTY_CUTOFF_LINEUPS.md).
+
+## Sixth checked capture
+
+At2026-10-24T11:11:31.870Z the original frozen v52 worker completed another due bounded run:10 public requests/three failures, six receipts/61 provider blobs,67 cumulative checked requests,12 distinct games/one date/zero finals. The104-file manifest, archive, plan/artifact and original forecasts verified unchanged. Repeat captures do not add independent games. This does not validate current v65 or prove every scheduled wake. No orders, Discord, paid requests or promotion; all three automation files including Stocks remain unchanged. [Independent input repair](SPORTS_INDEPENDENT_AVAILABILITY_INPUTS.md) stays outside this frozen trial.

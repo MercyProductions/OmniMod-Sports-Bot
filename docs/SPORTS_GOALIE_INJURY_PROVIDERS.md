@@ -64,3 +64,7 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 ## Explicit provider projections
 
 [Development v6.0.64](SPORTS_PROVIDER_GOALIE_PROJECTIONS.md) adds a separate projection assertion, conflict diagnostics and accepted-observation counts, and preserves same-player goalie role metadata during injury reconciliation. Existing identity/chronology/expiry/uncertainty policies remain. Twelve new cases/full1,126 pass; actual preferred-provider data remains unconnected and missing injury/confirmation coverage is not solved by an adapter.
+
+## Independent source retention
+
+[Development v6.0.65](SPORTS_INDEPENDENT_AVAILABILITY_INPUTS.md) retains valid provider assertions when an unrelated summary is unusable, while excluding summary-dependent rows/aggregates. The adapter emits internal event/snapshot bindings and inference rechecks each original source; unbound legacy provider rows require a fresh snapshot, not invented provenance. Per-provider receipts are frozen separately. Sixteen new scenarios/full1,142 pass; no real alternate injury/starter feed is connected.
