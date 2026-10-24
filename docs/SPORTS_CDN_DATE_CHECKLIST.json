@@ -1,0 +1,26 @@
+{
+  "phase": "cdn-date-selection-and-window-evidence",
+  "modelVersion": "v6.0.60",
+  "implementationCommit": "dd6a28295a20c7c9fd4e5169c32d02cd0ab42aa2",
+  "overallSportsStatus": "in progress",
+  "items": [
+    {"item": "Reproduce baseline", "status": "verified complete", "testsPassed": 1057},
+    {"item": "Confirm native selector and current-day NBA/MLB recovery", "status": "verified complete"},
+    {"item": "Preserve date/week metadata and structured source-row counts", "status": "verified complete"},
+    {"item": "Reject malformed starts while retaining minute precision and local-day filtering", "status": "verified complete"},
+    {"item": "Regression, syntax and archived-source checks", "status": "verified complete", "fullTestsPassed": 1066, "postcommitTestsPassed": 46, "syntaxFiles": 215},
+    {"item": "Bounded isolated current-source live-data integration", "status": "verified complete", "games": 21, "nhl": 12, "nba": 8, "mlb": 1, "workerRequests": 31, "selectorProbeRequests": 4},
+    {"item": "Later observed finals and adequate independent current-source validation", "status": "pending"},
+    {"item": "Current medical/confirmed-starter and broader league/timezone coverage", "status": "in progress"},
+    {"item": "Original frozen v52 trial", "status": "in progress"},
+    {"item": "Full queued Crypto then Stocks specifications", "status": "pending"}
+  ],
+  "newTests": 9,
+  "calibrationSamples": 0,
+  "independentSelectionTrial": false,
+  "originalStudiesChanged": false,
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "stocksScheduleChanged": false
+}
