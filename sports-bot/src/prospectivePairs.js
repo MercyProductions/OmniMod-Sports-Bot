@@ -101,6 +101,13 @@ export async function loadProspectiveCaptures(directory){
   const p=receipt.payload;if(!nameValid(p.filename))throw new Error('Invalid receipt filename');
   const bytes=await readFile(join(directory,'captures',p.filename));if(hash(bytes)!==p.captureHash)throw new Error('Frozen capture changed');
   const capture=JSON.parse(bytes);
+  if(!['baseline','challenger'].includes(capture.role))throw Error('Invalid research capture role');
+  if(manifest.profile?.networkPolicy==='sports-prospective-network-v1'){
+   const audit=capture.networkEvidence;
+   if(audit?.schema!=='sports-prospective-network-v1'||!/^network-[a-f0-9-]+\.jsonl$/.test(audit.file||'')||!/^[a-f0-9]{64}$/.test(audit.sha256||''))throw Error('Missing research request evidence');
+   const requestBytes=await readFile(join(directory,'network',capture.role,audit.file));
+   if(hash(requestBytes)!==audit.sha256||requestBytes.length!==audit.bytes)throw Error('Frozen research request evidence changed');
+  }
   if(capture.schema!=='sports-isolated-capture-v1'||capture.role!==p.role||!['baseline','challenger'].includes(capture.role)
    ||p.sourceCommit!==manifest.sources?.[p.role]?.commit||(capture.sampling?.dayOffset??0)!==(manifest.profile?.dayOffset??0)
    ||![capture.startedAt,capture.completedAt,receipt.recordedAt].every(value=>Number.isFinite(epoch(value)))

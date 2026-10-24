@@ -2,18 +2,22 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
+import {createProspectiveNetwork} from './prospective-network.mjs';
 const [root,role,mode,operation='collect',jobFile,jobHash]=process.argv.slice(2);
 if(!root||!['baseline','challenger'].includes(role)||!['offline','live'].includes(mode)||!['collect','reconcile'].includes(operation))throw new Error('Invalid isolated worker invocation');
 const state=join(root,'state',role);
-if(resolve(process.env.OMNIMOD_SPORTS_DATA_DIR||'')!==resolve(state)||process.env.DISCORD_TOKEN||process.env.ODDS_API_KEY)throw new Error('Invalid isolated environment');
+if(resolve(process.env.OMNIMOD_SPORTS_DATA_DIR||'')!==resolve(state)||process.env.DISCORD_TOKEN||process.env.ODDS_API_KEY
+ ||process.env.OMNIMOD_LIVE_TRADING_ENABLED!=='false'||process.env.OMNIMOD_EMERGENCY_STOP!=='true'||process.env.AUTO_LEARNING_ENABLED!=='false')throw new Error('Invalid isolated environment');
 const manifest=JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
+if(manifest.profile?.networkPolicy!=='sports-prospective-network-v1'||manifest.profile.maximumRequestsPerWorker!==32)throw Error('Unverified public research network policy');
+const startedAt=new Date().toISOString();
+const network=await createProspectiveNetwork({directory:join(root,'network',role),maxRequests:manifest.profile.maximumRequestsPerWorker,allowNetwork:mode==='live'});globalThis.fetch=network.fetch;
 const dayOffset=manifest.profile?.dayOffset??0;
 if(![0,1].includes(dayOffset))throw new Error('Invalid pinned sampling day');
 const source=join(root,role,'sports-bot','src');
 const {config,dataDir}=await import(pathToFileURL(join(source,'config.js')));
-if(resolve(dataDir)!==resolve(state)||config.discordToken||config.oddsApiKey||config.featureWarehouseEnabled||config.historicalReplayEnabled||config.localMlEnabled)throw new Error('Isolation configuration mismatch');
+if(resolve(dataDir)!==resolve(state)||config.discordToken||config.oddsApiKey||config.featureWarehouseEnabled||config.historicalReplayEnabled||config.localMlEnabled||config.autoLearningEnabled)throw new Error('Isolation configuration mismatch');
 const {buildDailySlate,refreshFinalGrades}=await import(pathToFileURL(join(source,'sportsData.js')));
-const startedAt=new Date().toISOString();
 let slate;
 if(operation==='collect'){
  let date=new Date();
@@ -34,7 +38,8 @@ if(operation==='collect'){
 }
 
 const completedAt=new Date().toISOString();
-const capture={schema:'sports-isolated-capture-v1',role,mode,purpose:operation==='reconcile'?'final_reconciliation':'market_scan',sampling:{dayOffset,targetDateKey:slate.dateKey},startedAt,completedAt,slate,discordDelivered:false,liveOrders:false};
+const networkEvidence=await network.summary();
+const capture={schema:'sports-isolated-capture-v1',role,mode,purpose:operation==='reconcile'?'final_reconciliation':'market_scan',sampling:{dayOffset,targetDateKey:slate.dateKey},startedAt,completedAt,slate,networkEvidence,discordDelivered:false,liveOrders:false,emergencyStop:true};
 const bytes=JSON.stringify(capture)+'\n',captureHash=createHash('sha256').update(bytes).digest('hex');
 await mkdir(join(root,'captures'),{recursive:true});
 const filename=role+'-'+Date.now()+'-'+randomUUID()+'.json';

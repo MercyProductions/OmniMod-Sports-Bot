@@ -18,7 +18,7 @@ test('archived baseline and challenger run independently without inherited crede
  t.after(()=>rm(parent,{recursive:true,force:true}));const directory=join(parent,'study');
  const manifest=await prepareProspectiveIsolation({directory,repository,baselineRef});
  assert.notEqual(manifest.sources.baseline.commit,manifest.sources.challenger.commit);
- assert.equal(manifest.profile.liveOrders,false);assert.equal(manifest.profile.discord,false);
+ assert.equal(manifest.profile.liveOrders,false);assert.equal(manifest.profile.discord,false);assert.equal(manifest.profile.emergencyStop,true);assert.equal(manifest.profile.autoLearning,false);assert.equal(manifest.profile.networkPolicy,'sports-prospective-network-v1');
  const dateKey=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  const game={id:'fixture',dateKey,startTime:new Date(Date.now()+3600000).toISOString(),league:'NBA',leagueKey:'nba',sportGroup:'Basketball',statusKey:'scheduled',awayTeam:'Fixture A',homeTeam:'Fixture H'};
  const store={version:2,teams:{},players:{},contexts:{},results:{},games:{fixture:game}};
@@ -30,10 +30,13 @@ test('archived baseline and challenger run independently without inherited crede
   assert.equal(row.games,1);assert.equal(row.pregameForecasts,1);
   const bytes=await readFile(join(directory,'captures',row.filename),'utf8');
   assert.equal(bytes.includes('SENSITIVE_ISOLATION_TEST_VALUE'),false);
-  const capture=JSON.parse(bytes);assert.equal(capture.discordDelivered,false);assert.equal(capture.mode,'offline');
+  const capture=JSON.parse(bytes);assert.equal(capture.discordDelivered,false);assert.equal(capture.mode,'offline');assert.equal(capture.emergencyStop,true);assert.equal(capture.networkEvidence.requests,0);
  }
  const loaded=await loadProspectiveCaptures(directory);assert.equal(loaded.captures.length,2);
  assert.equal(evaluateProspectiveCaptures(loaded.captures).pairedForecasts,0);
+ const first=loaded.captures[0].capture,audit=join(directory,'network',first.role,first.networkEvidence.file),auditBytes=await readFile(audit);
+ await appendFile(audit,' ');await assert.rejects(loadProspectiveCaptures(directory),/request evidence changed/);await writeFile(audit,auditBytes);
+ const helper=join(directory,'prospective-network.mjs'),helperBytes=await readFile(helper);await appendFile(helper,'\n// fixture mutation\n');await assert.rejects(inspectProspectiveIsolation(directory),/network support changed/);await writeFile(helper,helperBytes);
  await appendFile(join(directory,'captures',result.captures[0].filename),' ');
  await assert.rejects(loadProspectiveCaptures(directory),/Frozen capture changed/);
  await assert.rejects(prepareProspectiveIsolation({directory,repository,baselineRef}));
@@ -67,7 +70,7 @@ test('a pinned isolated worker refreshes prior-date finals without changing orig
   await writeFile(join(directory,'jobs',filename),bytes);
   const env={};for(const key of ['PATH','Path','SystemRoot','WINDIR','TEMP','TMP'])if(process.env[key])env[key]=process.env[key];
   Object.assign(env,{NODE_ENV:'research',OMNIMOD_DISABLE_DATA_MIGRATION:'true',OMNIMOD_SPORTS_DATA_DIR:join(directory,'state',role),DOTENV_CONFIG_PATH:join(directory,'empty.env'),
-   FEATURE_WAREHOUSE_ENABLED:'false',HISTORICAL_REPLAY_ENABLED:'false',LOCAL_ML_ENABLED:'false',LOCAL_ONLY:'true'});
+   OMNIMOD_LIVE_TRADING_ENABLED:'false',OMNIMOD_EMERGENCY_STOP:'true',AUTO_LEARNING_ENABLED:'false',FEATURE_WAREHOUSE_ENABLED:'false',HISTORICAL_REPLAY_ENABLED:'false',LOCAL_ML_ENABLED:'false',LOCAL_ONLY:'true'});
   const response=await promisify(execFile)(process.execPath,[join(directory,'worker.mjs'),directory,role,'offline','reconcile',filename,createHash('sha256').update(bytes).digest('hex')],{cwd:directory,env,timeout:20000,windowsHide:true});
   const summary=JSON.parse(response.stdout.trim().split('\n').at(-1)),capture=JSON.parse(await readFile(join(directory,'captures',summary.filename),'utf8'));
   assert.equal(summary.pregameForecasts,0);assert.equal(capture.purpose,'final_reconciliation');

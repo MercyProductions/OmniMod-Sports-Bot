@@ -10,6 +10,7 @@ const run=promisify(execFile);
 const contains=(root,path)=>{const r=relative(root,path);return r===''||!r.startsWith('..')&&!isAbsolute(r);};
 const git=(root,args)=>execFileSync('git',['-C',root,...args],{maxBuffer:25000000});
 const workerSource=fileURLToPath(new URL('../scripts/prospective-worker.mjs',import.meta.url));
+const networkSource=fileURLToPath(new URL('../scripts/prospective-network.mjs',import.meta.url));
 
 /** Archive tracked source only; a new explicitly isolated directory is mandatory. */
 export async function prepareProspectiveIsolation({directory,repository,baselineRef,challengerRef='HEAD',dayOffset=0}={}){
@@ -30,11 +31,12 @@ export async function prepareProspectiveIsolation({directory,repository,baseline
  }
  await mkdir(target,{mode:0o700}); // Never reuse an existing directory, production or research.
  const manifest={schema:'sports-prospective-isolation-v1',createdAt:new Date().toISOString(),dependencyLockHash:hash(lock),
-  workerCapabilities:['collect','reconcile'],
+  workerCapabilities:['collect','reconcile'],supportFiles:{'prospective-network.mjs':hash(await readFile(networkSource))},
   dependencyDirectory:await realpath(join(root,'sports-bot','node_modules')),workerHash:hash(await readFile(workerSource)),emptyEnvHash:hash('# Intentionally empty research environment\n'),sources:{},
   profile:{dayOffset,timezone:'America/Chicago',leagues:['nba','nhl','nfl','mlb'],summaryMaxGames:6,historyMaxLeagues:4,historyDays:90,
    boxscoreMaxEvents:0,paidOdds:false,advancedDatasets:false,officialSources:false,
-   historicalReplay:false,featureWarehouse:false,localMl:false,discord:false,liveOrders:false},
+   historicalReplay:false,featureWarehouse:false,localMl:false,autoLearning:false,discord:false,liveOrders:false,emergencyStop:true,
+   networkPolicy:'sports-prospective-network-v1',maximumRequestsPerWorker:32},
   limitations:['Controlled cold-start pipeline comparison, not a snapshot of the deployed learner or all market coverage.',
    'Installed dependencies are shared by path; workers have separate source, state and credential-free environments. This is not an OS security sandbox.']};
  for(const [name,pin] of Object.entries(pins)){
@@ -45,6 +47,7 @@ export async function prepareProspectiveIsolation({directory,repository,baseline
   manifest.sources[name]={commit:pin.commit,files};
  }
  await writeFile(join(target,'worker.mjs'),await readFile(workerSource),{flag:'wx'});
+ await writeFile(join(target,'prospective-network.mjs'),await readFile(networkSource),{flag:'wx'});
  await writeFile(join(target,'empty.env'),'# Intentionally empty research environment\n',{flag:'wx',mode:0o600});
  manifest.manifestHash=hash(JSON.stringify(manifest));
  await writeFile(join(target,'manifest.json'),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});
@@ -56,6 +59,7 @@ export async function inspectProspectiveIsolation(directory){
  const {manifestHash,...body}=manifest;
  if(body.schema!=='sports-prospective-isolation-v1'||hash(JSON.stringify(body))!==manifestHash||hash(await readFile(join(root,'worker.mjs')))!==body.workerHash)throw new Error('Research manifest or worker integrity failed');
  if(hash(await readFile(join(root,'empty.env')))!==body.emptyEnvHash)throw new Error('Research environment changed');
+ for(const [name,expected] of Object.entries(body.supportFiles||{}))if(name!=='prospective-network.mjs'||hash(await readFile(join(root,name)))!==expected)throw new Error('Pinned research network support changed');
  for(const [name,pin] of Object.entries(body.sources)){
   if(!contains(root,await realpath(join(root,'state',name))) || await realpath(join(root,name,'sports-bot','node_modules'))!==body.dependencyDirectory)throw new Error('Research state or dependencies redirected');
   if(!['baseline','challenger'].includes(name))throw new Error('Invalid source role');
@@ -86,6 +90,7 @@ export async function runProspectiveIsolation(directory,{live=false,timeout=1200
    Object.assign(env,{NODE_ENV:'research',OMNIMOD_DISABLE_DATA_MIGRATION:'true',OMNIMOD_SPORTS_DATA_DIR:join(root,'state',name),
     DOTENV_CONFIG_PATH:join(root,'empty.env'),DOTENV_CONFIG_QUIET:'true',POST_ON_START:'false',REGISTER_COMMANDS:'false',
     FEATURE_WAREHOUSE_ENABLED:'false',HISTORICAL_REPLAY_ENABLED:'false',LOCAL_ML_ENABLED:'false',ADVANCED_DATASETS_ENABLED:'false',
+    OMNIMOD_LIVE_TRADING_ENABLED:'false',OMNIMOD_EMERGENCY_STOP:'true',AUTO_LEARNING_ENABLED:'false',
     AUTO_OFFICIAL_SOURCES:'false',AUTO_SUMMARY_MAX_GAMES:'6',AUTO_HISTORY_MAX_LEAGUES:'4',AUTO_HISTORY_MAX_DAYS:'90',AUTO_BOXSCORE_MAX_EVENTS:'0',LOCAL_ONLY:live?'false':'true'});
    const args=[join(root,'worker.mjs'),root,name,live?'live':'offline',operation];
    if(operation==='reconcile'){
