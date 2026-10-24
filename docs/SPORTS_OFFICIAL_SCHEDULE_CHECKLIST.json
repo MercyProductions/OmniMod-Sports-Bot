@@ -1,0 +1,61 @@
+{
+  "phase": "official_schedule_identity_and_independence",
+  "status": "in_progress",
+  "modelVersion": "v6.0.66",
+  "implementationCommit": "1cd99169edd1616ea614259b9c0bba8766aaf909",
+  "items": [
+    {
+      "id": "baseline_and_reproductions",
+      "status": "verified_complete",
+      "evidence": "1142 baseline passes; two old-source doubleheader/name-namespace regressions fail"
+    },
+    {
+      "id": "exact_event_and_player_scope",
+      "status": "verified_complete",
+      "evidence": "unique ordered teams/start; native NHL IDs; explicit comparable seasons; separate MLB player namespace"
+    },
+    {
+      "id": "freshness_replacement_and_independence",
+      "status": "verified_complete",
+      "evidence": "15minute-or-start expiry; scoped inference/restart; withdrawn/legacy rows excluded; same feed adds no independent confidence"
+    },
+    {
+      "id": "preserve_restrictions_and_recover_inputs",
+      "status": "verified_complete",
+      "evidence": "current injuries/roles retained without name-based corroboration; unusable projections do not block new valid input"
+    },
+    {
+      "id": "actual_free_source_diagnostic",
+      "status": "verified_complete",
+      "evidence": "one HTTP200 free API request; at original11:26 receipt0to2 usable projected inputs; actual11:50 expiry check0; no forecasts or performance evidence"
+    },
+    {
+      "id": "verification",
+      "status": "verified_complete",
+      "evidence": "28 new cases; focused95/full1170/postcommit56/syntax226; zero failed/skipped; public secret checks passed"
+    },
+    {
+      "id": "original_studies_and_schedules",
+      "status": "verified_complete",
+      "evidence": "no frozen source/forecast substitution or schedule changes; v52 latest known6captures/12games/0finals"
+    },
+    {
+      "id": "actual_injury_and_confirmed_goalie_feed",
+      "status": "pending",
+      "evidence": "summary403 and unavailable clinical/starter source still unresolved; preferred provider unconnected"
+    },
+    {
+      "id": "full_current_model_validation",
+      "status": "in_progress",
+      "evidence": "independent adequate accuracy/calibration/model-selection/odds evidence remains incomplete; no promotion"
+    }
+  ],
+  "actualPublicAPIRequests": 1,
+  "paidRequests": 0,
+  "forecastsIssued": 0,
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false,
+  "initialImplementationCommit": "6225f30b0f187bd2dc0a82473211773d46a61d2e"
+}

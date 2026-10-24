@@ -14,6 +14,7 @@ From `sports-bot/`, targeted checks use `node --import ./test/setup.js --test te
 ## Architecture and invariants
 
 - `src/sportsData.js` collects schedules and builds slates. CDN and primary ESPN routes use different date selectors; see `scoreboardWindow.js` and the CDN report before changing them.
+- `src/officialSources.js` retains the existing MLB/NHL API and cache wrappers. `officialScheduleEvidence.js` binds exact events and projected pitchers, keeps provider namespaces separate, expires inputs and distinguishes same-source consistency from independent corroboration.
 - `src/autoEnrichment.js` gathers summaries/history. `summarySourceIdentity.js` checks declared event/start/team/season identity; `scoreboardStarters.js` preserves explicitly projected MLB starters separately from confirmation and health.
 - `src/summaryPlayerEvidence.js` composes player role/stat/health observations through `availabilityReconciliation.js`. `availabilitySourceRows` are original observations of the same player, not extra players; preserve them when rebuilding views or expiring dependencies.
 - `src/predictionEngine.js`, `sportModels.js`, `inputChronology.js` and `evidenceCoverage.js` select inputs, enforce information cutoffs and report missing evidence. `availabilityProviderScope.js` rechecks original provider event/snapshot binding; a rejected summary must not erase independently valid provider/scoreboard inputs. Keep unknown values distinct from zero and role projections distinct from medical assertions.

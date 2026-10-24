@@ -68,3 +68,7 @@ Sports is user-confirmed offline. No startup, merge, deployment, champion promot
 ## Independent source retention
 
 [Development v6.0.65](SPORTS_INDEPENDENT_AVAILABILITY_INPUTS.md) retains valid provider assertions when an unrelated summary is unusable, while excluding summary-dependent rows/aggregates. The adapter emits internal event/snapshot bindings and inference rechecks each original source; unbound legacy provider rows require a fresh snapshot, not invented provenance. Per-provider receipts are frozen separately. Sixteen new scenarios/full1,142 pass; no real alternate injury/starter feed is connected.
+
+## Existing official schedule path
+
+[Development v6.0.66](SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md) repairs the existing MLB/NHL schedule integration: exact doubleheader/event matching, native pitcher namespace,15minute receipt limits, separate candidate/input counters and no independent-provider credit for the same NHL feed. One actual MLB response supports2 projected pitchers at its original receipt time; it supplies no medical or confirmed-goalie coverage, and its expired receipt is rejected at the current clock. Full1,170 tests pass. The existing feed/configuration flags remain; no preferred provider is connected.
