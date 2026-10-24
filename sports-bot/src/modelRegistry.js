@@ -1,3 +1,4 @@
+import {withAuditFileLock} from './auditFileLock.js';
 import {selectionReviewVerified,readVerifiedSelectionReview} from './selectionProtocol.js';
 import {readPredictionJournal} from './predictionJournal.js';
 import { probabilityLogLoss, LOG_LOSS_PROTOCOL } from './probabilityLogLoss.js';
@@ -231,22 +232,24 @@ export function modelDecisionForSport(registry = {}, sport = 'default', {now=Dat
 
 export async function refreshModelRegistry(rows = [], options = {}) {
   const minimum = Math.max(30, Number(options.minimum ?? config.challengerMinSamples) || 75);
+  // Preserve all originals for shared first-issue/conflict/cohort validation.
+  // Freeze nested inputs before queued IO; callers cannot revise submitted evidence.
+  rows = structuredClone(rows);
   const grouped = new Map();
-  const dedupedRows = new Map();
   for (const row of rows) {
-    const key = `${row.source || 'replay'}:${row.modelVersion || 'legacy'}:${row.snapshotStage || 'daily'}:${row.dateKey}:${row.gameId}:${row.sport || row.sportProfile}`;
-    dedupedRows.set(key, row);
-  }
-  for (const row of dedupedRows.values()) {
     const sport = String(row.sport || row.sportProfile || 'default').toLowerCase();
     if (!grouped.has(sport)) grouped.set(sport, []);
     grouped.get(sport).push(row);
   }
-  const operation = writeChain.then(async () => {
+  const operation = writeChain.then(() => withAuditFileLock(registryFile,async () => {
     const registry = await readModelRegistry();
     for (const [sport, sportRows] of grouped) {
-      const sorted = [...sportRows].sort((a, b) => String(a.dateKey || '').localeCompare(String(b.dateKey || '')));
-      const evaluation = evaluateCandidateModels(sorted);
+      const evaluation = evaluateCandidateModels(sportRows);
+      const observed=row=>{
+        const value=instant(row.source==='historical-replay'?row.predictionGeneratedAt:row.recordedAt);
+        return Number.isFinite(value)?value:-Infinity;
+      };
+      const sorted=selectCandidateCohort(sportRows).rows.sort((a,b)=>observed(a)-observed(b)||String(a.gameId||'').localeCompare(String(b.gameId||'')));
       const recentEvaluation = evaluateCandidateModels(sorted.slice(-Math.min(75, Math.max(30, Math.floor(sorted.length / 3)))));
       const { entry: existing, action } = applyCandidateDecision(registry.sports[sport], sport, evaluation, recentEvaluation,
         { minimum, requireProspectiveRecords: true, allowPromotion: false });
@@ -257,7 +260,7 @@ export async function refreshModelRegistry(rows = [], options = {}) {
     registry.updatedAt = new Date().toISOString();
     await writeJson(registryFile, registry, { backup: true, mode: 0o600 });
     return registry;
-  });
+  }));
   writeChain = operation.catch(() => {});
   return operation;
 }
