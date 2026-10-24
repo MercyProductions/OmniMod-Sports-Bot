@@ -249,6 +249,8 @@ Independent availability inputs: [summary-parent isolation and original provider
 
 Official schedules: [exact event identity, fresh pitcher inputs and independent-source accounting](docs/SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md), development v6.0.66. Doubleheaders and player namespaces stay separate; expired projections cannot block current observations. Full1,170 tests pass. The one real-response diagnostic recovered projected inputs at its original receipt time; it was not a forecast or accuracy result.
 
+Preferred-provider refreshes: [v6.0.68 NHL availability acceptance](docs/SPORTS_AVAILABILITY_REFRESH.md), with [phase checklist](docs/SPORTS_AVAILABILITY_REFRESH_CHECKLIST.json). Fresh, new, event-bound inputs actually selected by the predictor can complete a pregame refresh independently of ESPN, subject to the existing issuance and risk gates. Full 1,247 tests and 235 syntax checks pass. No actual alternate feed is connected; clinical coverage and v68 forward performance remain unverified.
+
 Refresh diagnostics: [durable cache/source rejection reasons and legacy coverage](docs/SPORTS_REFRESH_REJECTION_EVIDENCE.md), with a [structured checklist](docs/SPORTS_REFRESH_REJECTION_CHECKLIST.json). Full 1,222 tests and 233 syntax checks pass. Existing freshness/issuance gates remain, and actual injury/confirmed-goalie coverage is still missing.
 
 Current validation: [governed v67 forward collection and the read-only injury/goalie audit](docs/SPORTS_GOVERNED_FORWARD_FAMILY.md), with a [structured phase checklist](docs/SPORTS_GOVERNED_FORWARD_CHECKLIST.json). Full 1,211 tests and 231 syntax checks pass. The later registered trial has no collected samples yet; missing clinical inputs and actual predictive performance remain unfinished.

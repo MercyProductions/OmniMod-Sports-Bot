@@ -6,6 +6,9 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 24, 2026
 
+Current source is v6.0.68: [NHL selected-snapshot refresh authority](SPORTS_AVAILABILITY_REFRESH.md), [checklist](SPORTS_AVAILABILITY_REFRESH_CHECKLIST.json). The real adapter/predictor old-source regression reproduced fresh selected data rejected solely for lacking an ESPN summary. A strictly bound alternate path now checks new/fresh observations, actual selected inputs and frozen journal evidence before issuance, with linked sanitized terminal proof. Formulas and risk/value thresholds remain; source/event/cache/journal vetoes and unknown-health semantics are preserved. Baseline 1222; 25 new cases; focused 107/full 1247/syntax 235 pass. No actual alternate feed or clinical recovery; v68 needs forward validation. Both old trials keep their exact source/artifacts and all four automations stay unchanged. Original ninth checked run at 14:29 UTC retains 12 games/one date/zero finals, nine receipts/88 blobs,97 cumulative requests. Earlier phase checkpoints follow.
+
+
 Latest durable-evidence repair: [refresh rejection causes and historical coverage](SPORTS_REFRESH_REJECTION_EVIDENCE.md), [checklist](SPORTS_REFRESH_REJECTION_CHECKLIST.json). The journal now retains source-identity/cache-change reasons, marks its reason policy and reports unknown omissions without raw text. Legacy retries preserve original bytes. Baseline 1211; focused 69/full 1222/syntax 233 pass. The real research-journal CLI reads 12 issued forecasts and zero terminal attempts without changing bytes; historical affected-case prevalence remains unknown. Model formulas and acceptance gates stay unchanged, but source/artifact identity changes; the two frozen trials and all four automations remain intact. Medical coverage, source-neutral refresh authority and adequate prospective model validation remain unfinished. Earlier phase checkpoints follow.
 
 
