@@ -183,8 +183,8 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
   const prediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', approvedArtifactId: model.artifactId,
-      selectionReview: {status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+    modelRegistry: { updatedAt: '2099-01-01T00:00:00Z', sports: { basketball: { evaluatedAt: '2099-01-01T00:00:00Z', promotedAt: '2099-01-01T00:00:00Z', champion: 'ml', approvedArtifactId: model.artifactId,
+      selectionReview: {finalizedAt: '2099-01-01T00:00:00Z', status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
       evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
     now: Date.parse('2100-01-01T00:00:00Z'),
     localMlModels: { sports: { basketball: model } }
@@ -198,8 +198,8 @@ test('prediction output carries v6 ML, projected participation, and play-by-play
   const rejectedPrediction = predictGame(game, 0, {
     intelligence: { teams: {}, players: {}, contexts: {} }, eloRatings: {}, externalResults: [],
     history: { overall: { sampleSize: 0 } }, calibration: {}, featureLearning: {}, drift: {},
-    modelRegistry: { sports: { basketball: { champion: 'ml', approvedArtifactId: model.artifactId,
-      selectionReview: {status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
+    modelRegistry: { updatedAt: '2099-01-01T00:00:00Z', sports: { basketball: { evaluatedAt: '2099-01-01T00:00:00Z', promotedAt: '2099-01-01T00:00:00Z', champion: 'ml', approvedArtifactId: model.artifactId,
+      selectionReview: {finalizedAt: '2099-01-01T00:00:00Z', status: 'review_ready', candidate: 'ml', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: model.artifactId}, championModelId: 'local-gbdt-hierarchical-v1', challenger: 'evidence', challengerModelId: 'evidence-ensemble-v6', status: 'champion_active',
       evaluation: { cohort: { prospectiveRecordsVerified: true, key: `production|${CURRENT_MODEL_VERSION}|Daily` } } } } },
     now: Date.parse('2100-01-01T00:00:00Z'),
     localMlModels: { sports: { basketball: { ...model, accepted: false } } }

@@ -41,8 +41,8 @@ test('dated legacy results remain one explicitly limited event and deterministic
  assert.deepEqual(selectEloResults(rows).rows,selectEloResults(rows.reverse()).rows);
 });
 
-function approved(){const artifactId=hybridArtifactId('basketball',.38);return {champion:'hybrid',championModelId:'sport-specialist-hybrid-v2',specialistWeight:.38,
- approvedArtifactId:artifactId,selectionReview:{status:'review_ready',candidate:'hybrid',sport:'basketball',modelVersion:CURRENT_MODEL_VERSION,reportHash:'b'.repeat(64),artifactId},
+function approved(){const artifactId=hybridArtifactId('basketball',.38);return {evaluatedAt:'2020-01-01T00:00:00Z',promotedAt:'2020-01-01T00:00:00Z',champion:'hybrid',championModelId:'sport-specialist-hybrid-v2',specialistWeight:.38,
+ approvedArtifactId:artifactId,selectionReview:{finalizedAt:'2020-01-01T00:00:00Z',status:'review_ready',candidate:'hybrid',sport:'basketball',modelVersion:CURRENT_MODEL_VERSION,reportHash:'b'.repeat(64),artifactId},
  evaluation:{cohort:{prospectiveRecordsVerified:true,key:`production|${CURRENT_MODEL_VERSION}|Daily`},models:{hybrid:{sampleSize:100}}}};}
 
 test('hybrid recipe artifact binds sport, source version and blend weight',()=>{
@@ -53,10 +53,10 @@ test('hybrid recipe artifact binds sport, source version and blend weight',()=>{
 });
 
 test('hybrid registry read rejects stale artifact approval and changed blend weight',()=>{
- const row=approved();assert.equal(modelDecisionForSport({sports:{basketball:row}},'basketball').champion,'hybrid');
+ const row=approved();assert.equal(modelDecisionForSport({updatedAt:'2020-01-01T00:00:00Z',sports:{basketball:row}},'basketball').champion,'hybrid');
  for(const change of [{approvedArtifactId:'c'.repeat(64)}, {specialistWeight:.45},
    {selectionReview:{...row.selectionReview,artifactId:'c'.repeat(64)},approvedArtifactId:'c'.repeat(64)}]){
-  const decision=modelDecisionForSport({sports:{basketball:{...row,...change}}},'basketball');
+  const decision=modelDecisionForSport({updatedAt:'2020-01-01T00:00:00Z',sports:{basketball:{...row,...change}}},'basketball');
   assert.equal(decision.champion,'evidence');assert.equal(decision.status,'provenance_revalidation_required');
  }
 });

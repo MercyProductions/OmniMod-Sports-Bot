@@ -147,7 +147,7 @@ test('champion registry promotes only proven improvement and rolls back recent d
     logLossImprovement: 0.01
   };
   const promoted = applyCandidateDecision({}, 'basketball', good, good, { minimum: 75, now: '2099-01-01T00:00:00Z', allowPromotion: true,
-    selectionReview: {status: 'review_ready', candidate: 'hybrid', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: hybridArtifactId('basketball',.38)} });
+    selectionReview: {finalizedAt: '2098-12-31T00:00:00Z', status: 'review_ready', candidate: 'hybrid', sport: 'basketball', modelVersion: CURRENT_MODEL_VERSION, reportHash: 'b'.repeat(64), artifactId: hybridArtifactId('basketball',.38)} });
   assert.equal(promoted.entry.champion, 'hybrid');
   assert.equal(promoted.action, 'promoted_hybrid');
   const badRecent = {

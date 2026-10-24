@@ -272,8 +272,8 @@ export async function trainAndPersistLocalMlModels(rows = [], options = {}) {
 
 export function predictLocalMlCandidate(model = null, featureVector = {}, evidence = {}, options = {}) {
   const asOf = options.now ?? Date.now();
-  if (!Number.isFinite(asOf) || model && (!Number.isFinite(Date.parse(model.trainedAt || '')) || Date.parse(model.trainedAt) > asOf
-    || !Number.isFinite(Date.parse(model.lastTrainingOutcomeAt || '')) || Date.parse(model.lastTrainingOutcomeAt) > Date.parse(model.trainedAt)))
+  if (!Number.isFinite(asOf) || model && (!Number.isFinite(instant(model.trainedAt)) || instant(model.trainedAt) > asOf
+    || !Number.isFinite(instant(model.lastTrainingOutcomeAt)) || instant(model.lastTrainingOutcomeAt) > instant(model.trainedAt)))
     return { available: false, modelId: model?.modelId || 'local-ml-collecting', probabilities: null, accepted: false, reason: 'model_not_available_at_forecast_cutoff' };
   if (!Array.isArray(model?.stumps) || !model.stumps.length) return { available: false, modelId: model?.modelId || 'local-ml-collecting', probabilities: null, accepted: false, sampleSize: model?.sampleSize || 0 };
   if (model.artifactFormat !== 'sports-local-ml-artifact-v2' || model.artifactId !== localMlArtifactId(model)

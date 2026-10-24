@@ -4,6 +4,7 @@ import path from 'node:path';
 import { config, dataDir } from './config.js';
 import { readJson, writeJson } from './storage.js';
 import { selectCandidateCohort, validCandidateVector } from './candidateCohorts.js';
+import {quoteTimeEpoch as instant} from './oddsPricing.js';
 import { CURRENT_MODEL_VERSION } from './modelIdentity.js';
 
 const registryFile = path.join(dataDir, 'model-registry.json');
@@ -85,9 +86,15 @@ export function evaluateCandidateModels(rows = []) {
   };
 }
 
-function approvedReview(row = {}, sport = row.sport) {
-  const review = row.selectionReview;
-  return review?.status === 'review_ready' && review.modelVersion === CURRENT_MODEL_VERSION
+function reviewAvailable(review,cutoff){
+  const finalized=instant(review?.finalizedAt);
+  return Number.isFinite(finalized)&&finalized<=cutoff;
+}
+function approvedReview(row = {}, sport = row.sport, cutoff = Date.now()) {
+  const review = row.selectionReview, promoted=instant(row.promotedAt), evaluated=instant(row.evaluatedAt);
+  const chronological=reviewAvailable(review,cutoff)&&Number.isFinite(promoted)&&instant(review.finalizedAt)<=promoted&&promoted<=cutoff
+    &&Number.isFinite(evaluated)&&evaluated>=promoted&&evaluated<=cutoff;
+  return chronological&&review?.status === 'review_ready' && review.modelVersion === CURRENT_MODEL_VERSION
     && review.candidate === row.champion && review.sport === sport
     && /^[a-f0-9]{64}$/.test(review.reportHash || '') && /^[a-f0-9]{64}$/.test(review.artifactId || '')
     && row.approvedArtifactId === review.artifactId
@@ -112,7 +119,8 @@ function defaultSportEntry(sport) {
 
 export function applyCandidateDecision(current = {}, sport = 'default', evaluation = {}, recentEvaluation = {}, options = {}) {
   const minimum = Math.max(30, Number(options.minimum) || 75);
-  const now = options.now || new Date().toISOString();
+  const now = options.now ?? new Date().toISOString(), cutoff=instant(now);
+  if(!Number.isFinite(cutoff))throw new Error('Valid model decision information cutoff required');
   const existing = { ...defaultSportEntry(sport), ...current };
   let action = '';
   const proposed = evaluation.bestChallenger || 'hybrid';
@@ -132,7 +140,7 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
   } : null);
   const provenanceEligible = !options.requireProspectiveRecords || evaluation.cohort?.prospectiveRecordsVerified === true;
   const review = options.selectionReview;
-  const reviewEligible = options.allowPromotion === true && review?.status === 'review_ready'
+  const reviewEligible = reviewAvailable(review,cutoff) && options.allowPromotion === true && review?.status === 'review_ready'
     && review.candidate === proposed && review.sport === sport
     && review.modelVersion === CURRENT_MODEL_VERSION && /^[a-f0-9]{64}$/.test(review.reportHash || '')
     && /^[a-f0-9]{64}$/.test(review.artifactId || '')
@@ -143,7 +151,7 @@ export function applyCandidateDecision(current = {}, sport = 'default', evaluati
     Number(recentComparison.brierImprovement ?? -1) > -0.004;
   const rollback = existing.champion !== 'evidence' && Number(championRecentComparison?.sampleSize || 0) >= 30 &&
     Number(championRecentComparison?.brierImprovement) < -0.009;
-  if ((!provenanceEligible || !approvedReview(existing, sport)) && existing.champion !== 'evidence') {
+  if ((!provenanceEligible || !approvedReview(existing, sport, cutoff)) && existing.champion !== 'evidence') {
     existing.champion = 'evidence';
     existing.championModelId = MODELS.evidence;
     existing.status = 'provenance_revalidation_required';
@@ -190,9 +198,11 @@ export async function readModelRegistry() {
   return stored?.version === 1 ? { ...emptyRegistry(), ...stored } : emptyRegistry();
 }
 
-export function modelDecisionForSport(registry = {}, sport = 'default') {
+export function modelDecisionForSport(registry = {}, sport = 'default', {now=Date.now()} = {}) {
+  if(!Number.isFinite(now))throw new Error('Valid model inference information cutoff required');
+  const updated=instant(registry.updatedAt), registryAvailable=Number.isFinite(updated)&&updated<=now;
   let row = registry.sports?.[sport] || defaultSportEntry(sport);
-  if (row.champion !== 'evidence' && (!approvedReview(row, sport) || !row.evaluation?.cohort?.prospectiveRecordsVerified
+  if (row.champion !== 'evidence' && (!registryAvailable || !approvedReview(row, sport, now) || !row.evaluation?.cohort?.prospectiveRecordsVerified
     || !String(row.evaluation.cohort.key || '').includes(`|${CURRENT_MODEL_VERSION}|`)))
     row = { ...defaultSportEntry(sport), status: 'provenance_revalidation_required' };
   return {

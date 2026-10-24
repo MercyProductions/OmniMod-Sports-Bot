@@ -6,7 +6,7 @@ The user excluded cPanel from further work. Deployed source, configuration, regi
 
 ## Current assessment — October 21, 2026
 
-Forecast model identity is now **v6.0.47**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v4`; it does not rewrite or relabel forecast captures. Current full suite: **826 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 818 passing tests. Test counts establish exercised code behavior, not forecasting quality.
+Forecast model identity is now **v6.0.48**. The read-only prospective evaluator/planner uses report schema `sports-isolated-paired-report-v4`; it does not rewrite or relabel forecast captures. Current full suite: **837 passed, zero failed/skipped**, plus syntax and whitespace checks. The latest reproduced prior suite had 826 passing tests. Test counts establish exercised code behavior, not forecasting quality.
 
 | Full requirement | Current authoritative evidence | Status and missing proof |
 | --- | --- | --- |
@@ -36,6 +36,8 @@ Latest receipt-order and actual final evidence: [capture receipt selection](SPOR
 Input eligibility update: [strict observation clocks and declared learning cutoffs](SPORTS_INPUT_OBSERVATION_CLOCKS.md), audit schema v2, 818 tests. Existing v6.0.45 studies remain frozen; no actual forward validation of v6.0.46 or improved predictive performance is established.
 
 Latest coverage/final evidence: [coverage clocks and completed prospective finals](SPORTS_COVERAGE_OBSERVATION_CLOCKS.md). Coverage schema v2 separates receipts from native observations; full 826 tests pass. The next-day v6.0.45 study now has 13 resolved games, both versions 10/13 correct with identical Brier/log loss. Earlier unresolved statements are dated checkpoints. Current v6.0.47 predictive superiority and economic value remain unverified.
+
+Latest model evidence: [model availability and missing-data causes](SPORTS_MODEL_AVAILABILITY_VALIDATION.md). Registry/review/promotion/evaluation and ML artifact clocks are now cutoff-checked; native-ID summary blockers are explicit. Full 837 tests pass. Missing provider data, full report/plan binding and independent current-version forward performance remain incomplete.
 
 ## Historical requirement matrix — original v6.0.7 checkpoint
 

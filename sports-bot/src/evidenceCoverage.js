@@ -25,6 +25,8 @@ export function summaryEvidence(game = {}, now = Date.now()) {
   const coveredSides = (usable ? ['away', 'home'] : []).filter(side => (meta.injuryTeams || []).some(team => matches(game[side], team)));
   return { fetchedAt, ageMinutes, receiptFresh, ...clocks, cacheState: meta.cacheState || 'unknown',
     injuryCoveredSides: coveredSides,
+    providerMapping: {provider: game.summaryIdentity?.provider || 'unknown', status: game.summaryIdentity?.status || 'unknown',
+      reason: game.summaryIdentity?.reason || null, verification: 'provided_mapping_assertion_not_independently_timestamped'},
     injuryCoverage: coveredSides.length === 2 ? 'reported_both_sides' : coveredSides.length ? 'reported_one_side' : 'unknown',
     sourceObservationAt: timestamp(meta.sourceObservationAt),
     underlyingFreshnessVerified: false };
@@ -48,6 +50,8 @@ export function buildEvidenceCoverage(game = {}, { now = Date.now(), players: se
     if (clocks.nativeObservationState !== 'observed_by_cutoff') missing.push(`${key}:native_observation_${clocks.nativeObservationState}`);
   }
   if (!summary.receiptFresh) missing.push('summary:fresh_receipt_not_verified');
+  if (!game.autoEnrichment && summary.providerMapping.status === 'unavailable') missing.push(summary.providerMapping.reason === 'provider_event_mapping_not_verified'
+    ? 'summary:provider_event_mapping_not_verified' : 'summary:provider_mapping_unavailable');
   const advancedObservationState = observedInputState(game.advancedDataset,now);
   if (game.advancedDataset && advancedObservationState !== 'observed_by_cutoff') missing.push(`advanced_dataset:observation_${advancedObservationState}`);
   const advancedReceipts = Array.isArray(game.advancedDataset?.sourceReceiptTimes) ? game.advancedDataset.sourceReceiptTimes.map(timestamp) : [];
