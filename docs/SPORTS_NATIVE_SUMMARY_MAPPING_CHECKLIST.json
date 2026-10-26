@@ -13,6 +13,11 @@
     {"item": "Recover genuine permitted injury and confirmed-goalie observations", "status": "blocked", "evidence": "No accepted fresh ESPN observation; native schedule is not medical/starter coverage; optional exporter remains unconnected"},
     {"item": "Verify live mapping acceptance when genuine matching provider observations are available", "status": "pending", "evidence": "Mocked integration passes; current free-feed probe recovered zero mappings"},
     {"item": "Complete independent validation of the exact new source", "status": "pending", "evidence": "The frozen v52 and preregistered v69 trials do not validate v70; no registration, archive or existing study was changed"},
+    {"item": "Verify user-authorized local pinned runtime", "status": "verified_complete", "evidence": "Archived 86f6d4b source, dependency lock, Discord identity/channel permissions, commands and running gateway/scheduler verified; no claim of actual scheduled delivery or unattended recovery"},
+    {"item": "Freeze current-source engineering observations against original baseline", "status": "verified_complete", "evidence": "2026-10-26 08:05 UTC: 14 challenger forecasts, four contemporaneous pairs, ten unmatched exclusions, zero finals, zero calibration samples; not a registered trial or independent selection holdout"},
+    {"item": "Audit active registry and production evidence without adopting legacy rows", "status": "verified_complete", "evidence": "Zero selected/trained sport models; 174 inherited prediction rows with zero warehouse results; zero production journal records before the daily slate means path not exercised"},
+    {"item": "Verify actual scheduled delivery and recovery", "status": "pending", "evidence": "Daily 08:00 America/Chicago with startup posting disabled; gateway presence alone does not prove delivery; no autostart supervisor installed"},
+    {"item": "Grade actual current-source outcomes", "status": "pending", "evidence": "Separate final-only checks preserve original probabilities/source identities and unmatched exclusions; no promotion or new forecast authorization"},
     {"item": "Complete full Sports requirements before Crypto then Stocks", "status": "pending", "evidence": "Clinical inputs, all-league/horizon proper scores/calibration, original-price/cost and operational verification remain required"}
   ],
   "liveTradingEnabled": false,
@@ -21,6 +26,7 @@
   "discordPosts": 0,
   "paidRequests": 0,
   "modelPromoted": false,
-  "productionChanged": false,
+  "productionChangedDuringMappingRepair": false,
+  "subsequentLocalRuntimeStartedWithUserAuthorization": true,
   "predictiveImprovementEstablished": false
 }

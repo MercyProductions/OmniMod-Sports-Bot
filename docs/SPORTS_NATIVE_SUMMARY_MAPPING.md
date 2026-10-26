@@ -37,3 +37,27 @@ Thirty new cases include the two prior-source failures, the normal mocked enrich
 Genuine injury/confirmed-goalie inputs, accessible exact provider observations, independent current-source forward evaluation, original offered-price/settlement/cost records and approved runtime verification remain unfinished. No threshold, circuit breaker, risk control or promotion criterion was relaxed. Existing v52 and v69 collectors and the Stocks test automation remain unchanged. Live trading stays disabled, emergency stop enabled; no production startup or model promotion occurred.
 
 See the [phase checklist](SPORTS_NATIVE_SUMMARY_MAPPING_CHECKLIST.json), [provider contract](SPORTS_GOALIE_INJURY_PROVIDERS.md), and [full requirement index](SPORTS_REQUIREMENT_EVIDENCE.md).
+
+## Current-source completion audit — 2026-10-26
+
+The user subsequently authorized local startup. The local worker runs the archived **`86f6d4b79bb331faaa3db10907ff82af1885f767`** v70 source with verified dependencies and a separate private data directory. Discord identity/channel permissions and registered commands were checked. At 08:11 UTC the gateway and scheduler were running; the configured daily slate is **08:00 America/Chicago**, with T-90/T-30/T-10 refreshes. Startup posting is disabled. Actual scheduled delivery and recovery remain unverified until observed. This local worker depends on the computer remaining awake and has no installed autostart supervisor. Automatic learning/training and live trading remain disabled, and emergency stop remains enabled. No cPanel deployment occurred.
+
+An account-free paired capture at **08:05:35–08:05:39 UTC** froze the original v6.0.0 baseline and v70 observations:
+
+| Observation | Actual count |
+| --- | ---: |
+| Current-source games | 14: nine NBA, three NHL, one MLB, one NFL |
+| Contemporaneous baseline pairs | 4: three NHL, one NFL |
+| Current forecasts without a baseline counterpart | 10, excluded from paired scoring |
+| Eligible final outcomes at capture | 0 |
+| Current-source requests / failures | 29 / 15 |
+| Baseline requests / failures | 15 / 11 |
+| Unknown team-side injury coverage | 28 / 28 |
+| Confirmed NHL goalie sides | 0 / 6 |
+| Current-source calibration sample size | 0 |
+
+Current summary routing recorded six request failures (five NBA, one MLB), five request-cap omissions (four NBA, one NFL), and three unverified NHL provider mappings. These are distinct causes: increasing the cap would not repair denied requests or missing identity proof. The bounded research profile caps summary work at six games and requests at 32 per worker; this is not a measurement of full production coverage. None of the 14 forecasts qualified as an actionable recommendation: nine were withheld and five were research leans. The original predictions, inputs, source receipts and exclusions are frozen privately. Separate final-only checks may grade subsequent actual outcomes; these overlapping engineering observations are **not** a registered selection trial or an independent final holdout.
+
+The active local registry has **zero selected sport models and zero trained local sport ML models**. Its inherited warehouse has 174 prediction rows but no results, box scores, lineups, plays or market rows; those legacy predictions are not adopted as validated current forecasts. Read-only operational and prediction audits found no production journal records yet, before the first scheduled daily slate. Zero records means the issuance/delivery/grading path has not been exercised in this runtime, not that all operational tests passed.
+
+The unchanged source retains its verified 1,322 passing tests and 245-file syntax check; those checks were not rerun for this documentation-only checkpoint. Original v52 and v69 registrations, archives and schedules, and the Stocks automation remain unchanged. Sports still requires genuine fresh medical/starter observations, actual delivery/recovery evidence, eligible original-price/cost records, adequate independent outcomes and calibration across the required leagues/horizons. Predictive improvement has not been established. The preserved implementation queue remains **Sports, then Crypto, then Stocks**; this checkpoint does not mark Sports complete.
