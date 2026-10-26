@@ -10,6 +10,7 @@ import {applyManualResults} from './manualResultMatching.js';
 export {applyManualResults} from './manualResultMatching.js';
 import {finalReplyMatches} from './finalResultRevision.js';
 import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
+import {espnScoreboardMappingSource,bindEspnSummaryMappings} from './espnEventMapping.js';
 import {journalGameIndex} from './journalEventMatch.js';
 import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
 import { config } from './config.js';
@@ -193,6 +194,8 @@ export function parseEspnEvent(event, league, sourceMeta = {}) {
   };
   const starters=parseScoreboardStarterEvidence(event,game);
   if(starters)game.scoreboardStarterEvidence=starters;
+  const mappingSource=espnScoreboardMappingSource(event,game);
+  if(mappingSource)game.summaryMappingSource=mappingSource;
   return game;
 }
 
@@ -573,11 +576,14 @@ export function carryForwardOdds(games, cachedSlate) {
 
 export function mergeTargetedGames(freshGames, cachedSlate) {
   if (!cachedSlate?.games?.length) return freshGames;
-  const merged = cachedSlate.games.flatMap((cached) => {
+  freshGames=freshGames.map(game=>structuredClone(game));
+  const cachedGames=cachedSlate.games.map(game=>structuredClone(game));
+  bindEspnSummaryMappings([...freshGames,...cachedGames],[...freshGames,...cachedGames]);
+  const merged = cachedGames.flatMap((cached) => {
     const match=matchSourceEvent(freshGames,cached),fresh=match.game;
     if(match.observations.length>1)return [structuredClone(cached),...match.observations.map(game=>({...game,id:cached.id,upstreamEventId:game.id}))];
     if (!fresh) return structuredClone(cached);
-    return {
+    const mergedGame={
       ...cached,
       ...fresh,
       manualResultEvidence:fresh.manualResultEvidence||null,manualResultConflict:fresh.manualResultConflict||null,
@@ -585,6 +591,8 @@ export function mergeTargetedGames(freshGames, cachedSlate) {
       home: { ...cached.home, ...fresh.home },
       odds: fresh.odds || cached.odds || null
     };
+    if(['ESPN','ESPN CDN'].includes(fresh.sourceMeta?.provider)){delete mergedGame.espnEventMapping;delete mergedGame.espnEventId;}
+    return mergedGame;
   });
   for (const fresh of freshGames) {
     if (!merged.some((cached) => sourceEventsMatch(cached, fresh))) merged.push(fresh);
@@ -710,6 +718,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   ]);
   let games = mergeLocalGames(scoreboard.games, intelligence, dateKey);
   if (options.targetedPregame) games = mergeTargetedGames(games, options.cachedSlate);
+  const summaryMapping=bindEspnSummaryMappings(games,[...scoreboard.games,...(options.cachedSlate?.games||[])]);
   const manualResultAudit=[];
   games = applyManualResults(games, intelligence, dateKey,{audit:manualResultAudit});
   games = carryForwardOdds(games, options.cachedSlate);
@@ -820,6 +829,7 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     games,
     predictions,
     scoreboardCoverage:scoreboard.coverage||[],
+    summaryEventMapping:summaryMapping,
     modelSummary: {
       version: MODEL_VERSION,
       frozenLegacyPredictions: predictions.filter((prediction) => !/^OmniMod Evidence Ensemble v(?:3|4|5|6)/.test(String(prediction.modelVersion || ''))).length,

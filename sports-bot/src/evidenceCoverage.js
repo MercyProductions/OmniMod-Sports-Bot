@@ -4,6 +4,7 @@ import { ADVANCED_PROVENANCE_METADATA_FIELDS } from './advancedProvenance.js';
 import { finiteNumber,hasAvailabilityObservation } from './dataValidation.js';
 import { quoteTimeEpoch } from './oddsPricing.js';
 import { observedInputState } from './inputChronology.js';
+import {espnEventMappingState} from './espnEventMapping.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
 import {scoreboardStarterCoverage} from './scoreboardStarters.js';
 import { isConfirmedStarter, reconcilePlayerEvidence } from './playerEvidence.js';
@@ -27,10 +28,11 @@ export function summaryEvidence(game = {}, now = Date.now()) {
     && ['network', 'revalidated', 'fresh'].includes(meta.cacheState);
   const identityObservationState=observedInputState(game.summaryIdentity,now);
   const sourceIdentity=meta.sourceIdentity||(!['invalid_observation_time','after_information_cutoff'].includes(identityObservationState)?game.summaryIdentity?.sourceIdentity:null)||null;
-  const usable = sourceIdentity?.status!=='conflict'&&!['invalid_observation_time','after_information_cutoff'].includes(clocks.observationState);
+  const mappingState=sourceIdentity?.espnEventMapping?espnEventMappingState(sourceIdentity.espnEventMapping,game,now):null;
+  const usable = !mappingState&&sourceIdentity?.status!=='conflict'&&!['invalid_observation_time','after_information_cutoff'].includes(clocks.observationState);
   const reportedInjurySides=['away','home'].filter(side=>(meta.injuryTeams||[]).some(team=>matches(game[side],team)));
   const coveredSides = usable&&receiptFresh?reportedInjurySides:[];
-  return { fetchedAt, ageMinutes, receiptFresh,usableForInference:usable,sourceIdentity,identityObservationState, ...clocks, cacheState: meta.cacheState || 'unknown',
+  return { fetchedAt, ageMinutes, receiptFresh,usableForInference:usable,sourceIdentity,identityObservationState,mappingState, ...clocks, cacheState: meta.cacheState || 'unknown',
     injuryCoveredSides: coveredSides,
     reportedInjurySides,
     injuryReceiptStatus:usable&&receiptFresh?'current_receipt_not_publication_verification':'unusable_or_stale_receipt',

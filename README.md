@@ -250,6 +250,7 @@ Independent availability inputs: [summary-parent isolation and original provider
 Official schedules: [exact event identity, fresh pitcher inputs and independent-source accounting](docs/SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md), development v6.0.66. Doubleheaders and player namespaces stay separate; expired projections cannot block current observations. Full1,170 tests pass. The one real-response diagnostic recovered projected inputs at its original receipt time; it was not a forecast or accuracy result.
 
 - [Exact current-candidate trial and retained prior plans](docs/SPORTS_PRETRIAL_SUPERSESSION.md): guarded pre-start replacement, 1,292 tests, scheduled November window and pending forward evidence.
+- [Native NHL/ESPN summary mapping](docs/SPORTS_NATIVE_SUMMARY_MAPPING.md): exact fresh event/team bindings, injury/goalie semantics, chronological checks and the remaining actual feed-access limit.
 - [Actual validation readiness and measured data blockers](docs/SPORTS_VALIDATION_READINESS.md): mapping, access and cap omissions; exact trial/source limits and unfinished model validation.
 - [Historical replay date ordering and verification](docs/SPORTS_REPLAY_DATE_ORDER.md): 1,272 tests; future-label isolation, explicit unknown clocks and unchanged real-history scores.
 - [Local price-receipt chronology and report v3](docs/SPORTS_PRICE_RECEIPT_CHRONOLOGY.md): 1,264 tests; original fetch clocks, unchanged legacy records and unfinished value validation.

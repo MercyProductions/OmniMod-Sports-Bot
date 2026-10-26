@@ -1,4 +1,5 @@
 import {quoteTimeEpoch} from './oddsPricing.js';
+import {espnEventMappingState} from './espnEventMapping.js';
 import {availabilitySourceRows,reconcileAvailabilityRows} from './availabilityReconciliation.js';
 import {nativeNhlRecordInputState} from './teamRecordEvidence.js';
 import {retainedGoalieContextState} from './nhlGoalieFreshness.js';
@@ -41,6 +42,7 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
   if(!row)return row;
   if(legacyOfficialProjection(row)){const key=path+':official_projection_binding_unknown';excluded[key]=(excluded[key]||0)+1;return null;}
   if(path==='autoEnrichment'&&row.sourceIdentity?.status==='conflict'){excluded['autoEnrichment:source_identity_conflict']=1;return null;}
+  if(path==='autoEnrichment'&&row.sourceIdentity?.espnEventMapping){const reason=espnEventMappingState(row.sourceIdentity.espnEventMapping,game,cutoff);if(reason){excluded['autoEnrichment:event_mapping_'+reason]=1;return null;}}
   if(row.officialProjection){const reason=officialProjectionInputState(row,game,cutoff);if(reason){const key=path+':official_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.availabilityProvider){const reason=availabilityProviderInputState(row,game,cutoff);if(reason){const key=path+':provider_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
   if(row.scoreboardProjection){const reason=scoreboardStarterInputState(row,game,cutoff);if(reason){const key=path+':scoreboard_'+reason;excluded[key]=(excluded[key]||0)+1;return null;}}
@@ -58,7 +60,8 @@ export function predictionInputsAt(game={},context={},cutoff=Date.now()){
  let corroborationChanged=false;
  const corroboration=selectOfficialCorroboration(game.sourceCorroboration,game,cutoff,reason=>{corroborationChanged=true;excluded[reason]=(excluded[reason]||0)+1;});
  safe.sourceCorroboration=retain(corroboration,'sourceCorroboration');
- for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence','summaryIdentity'])safe[field]=retain(game[field],field);
+ for(const field of ['autoEnrichment','autoHistory','autoContext','autoLineup','advancedDataset','eventEnvironment','participationSummary','goalieResearch','nhlTeamIdentity','availabilityProviderEvidence','scoreboardStarterEvidence','summaryIdentity','espnEventMapping','summaryMappingSource'])safe[field]=retain(game[field],field);
+ if(game.espnEventMapping&&!safe.espnEventMapping)delete safe.espnEventId;
  const officialState=game.officialStarterEvidence&&officialCorroborationInputState(game.officialStarterEvidence,game,cutoff);
  safe.officialStarterEvidence=officialState?null:retain(game.officialStarterEvidence,'official_starter_evidence');
  if(officialState)excluded['official_starter_evidence:'+officialState]=1;

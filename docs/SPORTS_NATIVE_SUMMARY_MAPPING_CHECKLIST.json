@@ -1,0 +1,26 @@
+{
+  "phase": "native-nhl-espn-summary-mapping",
+  "status": "in_progress",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.70",
+  "baselineCommit": "92cb2da8e91139c209e1edded0a1bc85aaf83314",
+  "items": [
+    {"item": "Reproduce native fallback duplication and incompatible season comparison", "status": "verified_complete", "evidence": "Two preceding-source regressions failed; both now pass"},
+    {"item": "Bind exact fresh ESPN observations without guessing native IDs or making discovery requests", "status": "verified_complete", "evidence": "Provider namespace, clock, expiry, season, ordered-team, conflict and ambiguity tests"},
+    {"item": "Keep injury, projected-goalie and confirmed-starter assertions separate", "status": "verified_complete", "evidence": "Mapped injury vetoes, explicit roster starter assertions and unknown health verified with fixtures and the normal mocked enrichment client"},
+    {"item": "Prevent later mapping evidence from leaking into earlier forecasts or coverage reports", "status": "verified_complete", "evidence": "Parent/source mapping proof and receipt validation; earlier-cutoff regressions"},
+    {"item": "Run regression and syntax checks", "status": "verified_complete", "evidence": "30 new cases; 1322 full tests, zero failed/skipped; 245 syntax files"},
+    {"item": "Verify actual existing free-feed access", "status": "verified_complete", "evidence": "Two ordinary requests at 2026-10-26T06:42Z: ESPN scoreboard403, NHL score200/three games; zero mappings recovered; no retry/bypass or paid query"},
+    {"item": "Recover genuine permitted injury and confirmed-goalie observations", "status": "blocked", "evidence": "No accepted fresh ESPN observation; native schedule is not medical/starter coverage; optional exporter remains unconnected"},
+    {"item": "Verify live mapping acceptance when genuine matching provider observations are available", "status": "pending", "evidence": "Mocked integration passes; current free-feed probe recovered zero mappings"},
+    {"item": "Complete independent validation of the exact new source", "status": "pending", "evidence": "The frozen v52 and preregistered v69 trials do not validate v70; no registration, archive or existing study was changed"},
+    {"item": "Complete full Sports requirements before Crypto then Stocks", "status": "pending", "evidence": "Clinical inputs, all-league/horizon proper scores/calibration, original-price/cost and operational verification remain required"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "orders": 0,
+  "discordPosts": 0,
+  "paidRequests": 0,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "predictiveImprovementEstablished": false
+}

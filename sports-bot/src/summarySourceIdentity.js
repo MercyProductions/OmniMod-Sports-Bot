@@ -1,9 +1,11 @@
 import {normalizeEntityName} from './intelligenceStore.js';
 import {capturedEventTime} from './capturedEventTime.js';
 import {finiteNumber} from './dataValidation.js';
+import {espnEventMappingState,espnExpectedSeasonYear,mappedEspnTeams} from './espnEventMapping.js';
 
 /** Native IDs route to ESPN only when an explicit mapping or ESPN origin exists. */
 export function espnSummaryEventId(row={}){
+ if(row.espnEventMapping)return espnEventMappingState(row.espnEventMapping,row)?null:row.espnEventMapping.sourceEvent.id;
  if(row.espnEventId!==undefined)return /^\d+$/.test(String(row.espnEventId))?String(row.espnEventId):null;
  const id=String(row.id||''),origin=row.sourceMeta?.provider==='ESPN'||/ESPN/i.test(row.source||'')||id.startsWith('espn:');
  const candidate=id.replace(/^espn:/,'');return origin&&/^\d+$/.test(candidate)?candidate:null;
@@ -19,7 +21,8 @@ export function summaryTeamBinding(team={},subject={}){
  if(sourceId===false)return {side:null,reason:'invalid_team_id'};
  const teams=['away','home'].map(side=>({side,team:teamOf(subject,side)}));
  const byName=teams.filter(row=>[row.team?.name,row.team?.abbr,...(row.team?.aliases||[])].map(normalizeEntityName).filter(Boolean).some(name=>sourceNames.includes(name)));
- const knownIds=espnOrigin(subject)?teams.filter(row=>identity(row.team?.id)):[];
+ const mapped=mappedEspnTeams(subject);
+ const knownIds=espnOrigin(subject)?teams.filter(row=>identity(row.team?.id)):mapped?teams.map(row=>({...row,team:{...row.team,id:mapped[row.side].id}})):[];
  const byId=sourceId?knownIds.filter(row=>identity(row.team.id)===sourceId):[];
  if(byId.length>1||byName.length>1)return {side:null,reason:'ambiguous_team_identity'};
  if(byId.length===1&&byName.length===1&&byId[0].side!==byName[0].side)return {side:null,reason:'team_id_name_conflict'};
@@ -35,8 +38,11 @@ export function summaryTeamBinding(team={},subject={}){
 export function inspectSummarySourceIdentity(summary,subject={},options={}){
  const reasons=[],observed={eventIds:[],startTimes:[]},checks={eventId:'not_reported',startTime:'not_reported',orderedTeams:'not_reported',season:'not_reported',league:'not_reported'};
  const finish=()=>({schema:'sports-summary-identity-v1',status:reasons.length?'conflict':checks.eventId==='matched'&&checks.startTime==='matched'&&checks.orderedTeams==='matched'?'matched_assertions':'partial',
-  expectedEventId:espnSummaryEventId(subject),reasons:[...new Set(reasons)],checks,observed,independentlyVerified:false,publicationTimeVerified:false});
+  expectedEventId:espnSummaryEventId(subject),reasons:[...new Set(reasons)],checks,observed,
+  ...(subject.espnEventMapping?{espnEventMapping:structuredClone(subject.espnEventMapping)}:{}),independentlyVerified:false,publicationTimeVerified:false});
  if(!summary||typeof summary!=='object'||Array.isArray(summary)){reasons.push('invalid_summary_object');return finish();}
+ if(subject.espnEventMapping&&espnEventMappingState(subject.espnEventMapping,subject))reasons.push('event_mapping_unverified');
+ if(subject.leagueKey==='nhl'&&/^\d{8}$/.test(String(subject.seasonYear))&&espnExpectedSeasonYear(subject)===null)reasons.push('invalid_expected_season');
  const header=summary.header;
  if(header!==undefined&&(!header||typeof header!=='object'||Array.isArray(header))){reasons.push('invalid_header');return finish();}
  const competitions=header?.competitions;
@@ -71,7 +77,7 @@ export function inspectSummarySourceIdentity(summary,subject={},options={}){
  }
  for(const season of [header?.season,competition?.season])if(season!==undefined&&season!==null){
   if(typeof season!=='object'||Array.isArray(season)){reasons.push('invalid_season');continue;}
-  for(const [key,expectedValue]of [['year',subject.seasonYear],['type',subject.seasonType]]){
+  for(const [key,expectedValue]of [['year',espnExpectedSeasonYear(subject)],['type',subject.seasonType]]){
    const raw=key==='type'&&typeof season.type==='object'?season.type?.id:season[key];if(raw===undefined||raw===null)continue;
    const value=finiteNumber(raw),target=finiteNumber(expectedValue);if(value===null||!Number.isInteger(value))reasons.push('invalid_season');
    else if(target!==null&&value!==target)reasons.push('season_mismatch');else checks.season=target===null?'expected_season_unknown':'matched';

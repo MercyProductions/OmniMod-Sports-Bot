@@ -1,5 +1,9 @@
 # Sports requirement-to-evidence checkpoint
 
+## Current development follow-up — October 26, 2026
+
+[Native NHL/ESPN mapping v6.0.70](SPORTS_NATIVE_SUMMARY_MAPPING.md) repairs two reproduced failures: targeted fallback duplication and incompatible native/ESPN season comparisons. Fresh exact source bindings retain both event/team namespaces, route accepted injury/roster groups to the local team, and reject later-cutoff, expired, ambiguous or conflicting mappings. Thirty new cases pass; full **1,322 tests** and **245 syntax files** pass. The actual two-request existing-feed probe still receives ESPN403 and NHL200/three games, with zero recovered mappings, injury assertions or confirmed goalies. This is verified software behavior, not recovered medical coverage or predictive improvement. The [checklist](SPORTS_NATIVE_SUMMARY_MAPPING_CHECKLIST.json) preserves unfinished source, model and operational requirements. Original v52 and registered v69 source/forecasts/plans remain unchanged; they do not authorize v70. Stocks scheduling is unchanged, live trading disabled and emergency stop enabled. No paid query, order, Discord post, deployment or promotion occurred.
+
 This is a current-state index for the Sports reliability assignment, not a completion certificate. Earlier audit reports retain their original version, test count and historical observations. At the original checkpoint the implementation identified itself as v6.0.7; the archived prospective challenger remains commit `d73fd5f0c097c5c0cfa57f48801dce505c415073`. A later source repair does not retroactively change that experiment.
 
 The user excluded cPanel from further work. Deployed source, configuration, registry and scheduler remain unverified. No deployment, live Discord modification, promotion or wager is authorized by this report.
