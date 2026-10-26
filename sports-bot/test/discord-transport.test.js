@@ -7,6 +7,7 @@ import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {fakeDiscord} from '../test-support/discord-transport.mjs';
+import {Collection} from 'discord.js';
 
 const directory=await mkdtemp(join(tmpdir(),'sports-transport-'));
 process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
@@ -76,6 +77,54 @@ test('bounded history exhaustion remains unknown rather than permission to send'
  const remote=await fakeDiscord(path,{historyFull:true});
  await assert.rejects(postDailySlate(remote.client,value),/Cannot verify daily slate history/);
  assert.equal(remote.counters.sends,0);
+});
+
+test('daily publication recovers an existing slate beyond the first 500 messages without sending a duplicate',async t=>{
+ const path=await remoteDirectory(t),value=slate('deep-history-existing');
+ const remote=await fakeDiscord(path);const posted=await postDailySlate(remote.client,value);
+ const actual=await remote.channel.messages.fetch(posted.messageId);let pages=0;
+ remote.channel.messages.fetch=async()=>{
+  pages++;
+  return pages<=5?new Collection(Array.from({length:100},(_,i)=>[`older-${pages}-${i}`,{id:`older-${pages}-${i}`,author:{id:'bot'},embeds:[]}]))
+   :new Collection([[actual.id,actual]]);
+ };
+ const recovered=await postDailySlate(remote.client,{...posted,messageId:'',channelId:''});
+ assert.equal(pages,6);assert.equal(recovered.messageId,posted.messageId);assert.equal(remote.counters.sends,1);
+});
+
+test('daily publication can establish absence in a complete history longer than 500 messages',async t=>{
+ const path=await remoteDirectory(t),value=slate('deep-history-absent'),remote=await fakeDiscord(path);let pages=0;
+ remote.channel.messages.fetch=async()=>{
+  pages++;const count=pages<=5?100:78;
+  return new Collection(Array.from({length:count},(_,i)=>[`older-${pages}-${i}`,{id:`older-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ const posted=await postDailySlate(remote.client,value);
+ assert.equal(pages,6);assert.ok(posted.messageId);assert.equal(remote.counters.sends,1);
+});
+
+test('non-advancing history cursors remain unknown and cannot authorize a send',async t=>{
+ const path=await remoteDirectory(t),value=slate('history-cursor'),remote=await fakeDiscord(path,{historyFull:true});
+ await assert.rejects(postDailySlate(remote.client,value),{code:'DAILY_HISTORY_CURSOR_INVALID'});
+ assert.equal(remote.counters.sends,0);
+});
+
+test('advancing but incomplete history stops at its request budget without sending',async t=>{
+ const path=await remoteDirectory(t),value=slate('history-budget'),remote=await fakeDiscord(path);let pages=0;
+ remote.channel.messages.fetch=async()=>{
+  pages++;return new Collection(Array.from({length:100},(_,i)=>[`older-${pages}-${i}`,{id:`older-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ await assert.rejects(postDailySlate(remote.client,value),{code:'DAILY_HISTORY_LIMIT_REACHED'});
+ assert.equal(pages,25);assert.equal(remote.counters.sends,0);
+});
+
+test('a later history permission failure cannot be mistaken for an empty last page',async t=>{
+ const path=await remoteDirectory(t),value=slate('history-late-denial'),remote=await fakeDiscord(path);let pages=0;
+ remote.channel.messages.fetch=async()=>{
+  pages++;if(pages===6)throw Object.assign(Error('Synthetic history denied'),{code:50013});
+  return new Collection(Array.from({length:100},(_,i)=>[`older-${pages}-${i}`,{id:`older-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ await assert.rejects(postDailySlate(remote.client,value),{code:'DAILY_HISTORY_UNAVAILABLE'});
+ assert.equal(pages,6);assert.equal(remote.counters.sends,0);
 });
 
 test('finding an older post does not acknowledge new forecast content that was never written',async t=>{

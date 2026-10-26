@@ -30,6 +30,8 @@ const QUOTA_COLOR = 0xf97316;
 const DISCORD_EMBED_TOTAL_LIMIT = 6000;
 const DAILY_SLATE_CORE_BUDGET = 5200;
 const DAILY_SLATE_TOTAL_BUDGET = 5900;
+// Bound requests while still covering established channels with more than 500 posts.
+const DAILY_HISTORY_MAX_PAGES = 25;
 
 export const LOG_COLORS = {
   brand: BRAND_COLOR,
@@ -323,7 +325,7 @@ export async function findDailySlateMessage(client, dateKey, guildId = '', { str
     const resources = await setupGuildResources(client, guildId);
     const expectedTitle = `OmniMod Sports Daily Slate | ${dateKey}`;
     let before;
-    for (let page = 0; page < 5; page += 1) {
+    for (let page = 0; page < DAILY_HISTORY_MAX_PAGES; page += 1) {
       const messages = await resources.sportsChannel.messages.fetch({ limit: 100, before });
       const match = messages.find((message) =>
         message.author?.id === client.user?.id &&
@@ -331,16 +333,18 @@ export async function findDailySlateMessage(client, dateKey, guildId = '', { str
       );
       if (match) return match;
       if (messages.size < 100) return null;
-      before = messages.last()?.id;
-      if (!before) {
-        if (strict) throw new Error('Daily slate history search could not establish completeness.');
+      const next = messages.last()?.id;
+      if (!next || next === before) {
+        if (strict) throw Object.assign(new Error('Daily slate history cursor did not advance; publication deferred.'), { code: 'DAILY_HISTORY_CURSOR_INVALID' });
         return null;
       }
+      before = next;
     }
-    if (strict) throw new Error('Daily slate history search limit reached; publication deferred.');
+    if (strict) throw Object.assign(new Error('Daily slate history search limit reached; publication deferred.'), { code: 'DAILY_HISTORY_LIMIT_REACHED' });
     return null;
   } catch (error) {
-    if (strict) throw new Error('Cannot verify daily slate history; publication deferred.', { cause: error });
+    if (strict) throw Object.assign(new Error('Cannot verify daily slate history; publication deferred.', { cause: error }),
+      { code: ['DAILY_HISTORY_CURSOR_INVALID', 'DAILY_HISTORY_LIMIT_REACHED'].includes(error?.code) ? error.code : 'DAILY_HISTORY_UNAVAILABLE' });
     return null;
   }
 }

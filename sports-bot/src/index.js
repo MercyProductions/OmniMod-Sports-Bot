@@ -19,7 +19,8 @@ import { buildDailySlate, refreshFinalGrades, supportedLeagues } from './sportsD
 import { duePregameRefreshes, buildJournaledPregameRefresh, nextPregameRefresh } from './pregameRefresh.js';
 import { recordSlateSnapshot } from './featureWarehouse.js';
 import { pendingFinalDateKeys } from './finalReconciliation.js';
-import { localDateKey, isDailyPostTime } from './time.js';
+import { localDateKey } from './time.js';
+import { createDailyPostScheduler } from './dailyPostScheduler.js';
 import {
   claimDailyProviderUsage,
   finishDailyProviderUsage,
@@ -64,6 +65,7 @@ const runtimeState = {
   lastDisconnectAt: '',
   lastInteractionAt: '',
   lastSchedulerAt: '',
+  dailyPublication: null,
   lastPregameRefreshAt: '',
   nextPregameRefreshAt: '',
   lastError: '',
@@ -74,7 +76,8 @@ const slateRefreshRunning = new Set();
 const finalRefreshRunning = new Set();
 const pregameRefreshRunning = new Set();
 const dailyBuildPromises = new Map();
-const lastScheduledPostKey = new Map();
+const dailyPostScheduler = createDailyPostScheduler({timezone:config.timezone,
+  publish:guildId=>refreshAndPostDailySlate('daily_schedule',{forceNew:false,guildId,throwOnError:true})});
 const lastFinalCheckAt = new Map();
 const lastProviderAlertAt = new Map();
 let shutdownRequested = false;
@@ -305,7 +308,9 @@ async function refreshAndPostDailySlate(reason, options = {}) {
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     console.error(`[${nowLabel()}] Daily slate post failed: ${message}`);
+    updateRuntimeState({state:'degraded',phase:'daily_slate_delivery',lastError:`Daily slate delivery failed (${error?.code || 'DAILY_POST_FAILED'}).`});
     await logBotEvent(client, `Daily slate post failed (${reason}): ${message}`, guildId);
+    if(options.throwOnError)throw error;
     return null;
   } finally {
     slateRefreshRunning.delete(runningKey);
@@ -420,13 +425,10 @@ function startSchedulers() {
       recordPostingConfiguration(guildIds);
       for (const guildId of guildIds) {
         const settings = await getGuildSettings(guildId);
-        const dateKey = localDateKey();
-        const minuteKey = `${dateKey}-${guildId}-${new Date().getUTCHours()}-${new Date().getUTCMinutes()}`;
-        if (!isDailyPostTime(new Date(), { hour: settings.dailyPostHour, minute: settings.dailyPostMinute })) continue;
-        if (lastScheduledPostKey.get(guildId) === minuteKey) continue;
-
-        lastScheduledPostKey.set(guildId, minuteKey);
-        await refreshAndPostDailySlate('daily_schedule', { forceNew: false, guildId });
+        const delivery=await dailyPostScheduler.tick(guildId,{hour:settings.dailyPostHour,minute:settings.dailyPostMinute});
+        const recovered=delivery.status==='delivered'&&runtimeState.lastError.startsWith('Daily slate delivery failed');
+        updateRuntimeState({dailyPublication:dailyPostScheduler.snapshot(guildId),
+          ...(recovered?{state:client.isReady()?'running':runtimeState.state,lastError:''}:{})});
       }
     });
   }, 30_000);
