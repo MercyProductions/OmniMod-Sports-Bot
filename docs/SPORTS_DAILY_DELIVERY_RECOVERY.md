@@ -25,8 +25,14 @@ Commands: `npm test`, `npm run check`, and `git -c core.whitespace=cr-at-eol dif
 
 - [x] Diagnose actual duplicate-search failure with authorized read-only Discord requests.
 - [x] Reproduce the preceding-source failures and pass regression/syntax checks.
-- [ ] Install a pinned local release while preserving the old process/data evidence.
-- [ ] Verify today's remote sheet, durable acknowledgement and unchanged original forecasts.
+- [x] Install a pinned local release while preserving the old process/data evidence.
+- [x] Verify today's remote sheet, durable acknowledgement and unchanged original forecasts.
 - [ ] Verify the next automatic schedule in actual operation; a recovery today does not prove tomorrow's delivery.
 
 Injury/goalie source gaps, independent calibration, original-price/cost evidence and model-validation requirements remain open. This operational repair does not establish predictive improvement.
+
+## Actual recovery
+
+The local worker was replaced with archived source **`5b20dc98da484e2601b501f6d41ba4a6c08fd98b`**, preserving the old runtime, copied data and journal prefix. The original credential file and registered-trial/Stocks automation files were unchanged. The new worker's first scheduled catch-up sent the sheet at **15:05:08 UTC (09:05 America/Chicago)**. A subsequent read of the actual Discord message verified its author, date and embeds; its cache and scheduler acknowledge delivery.
+
+The daily cache still has the same 17 original forecasts generated at **13:00:28 UTC**. Discord's existing character budget displayed 14 game fields in three embeds; only those 14 received new delivery acknowledgements. The other three are not counted as delivered. No extra forecast was issued, original probability changed, paid batch repeated, order sent or model promoted. Future delivery, source availability and predictive quality remain distinct validation requirements.
