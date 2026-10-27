@@ -26,8 +26,18 @@ The status-only text addition is syntax-checked separately. Passing software tes
 
 - [x] Verify actual final grades, missing acknowledgements and complete Discord history.
 - [x] Reproduce preceding-source failures and verify the shared traversal and final lifecycle.
-- [ ] Install the pinned repair while preserving the previous runtime/data/claims.
-- [ ] Verify actual result replies, durable acknowledgements and unchanged original predictions.
+- [x] Install the pinned repair while preserving the previous runtime/data/claims.
+- [x] Verify actual result replies, durable acknowledgements and unchanged original predictions.
 - [ ] Observe later automatic follow-ups as remaining games reach eligible final status.
 
 Live trading remains disabled, emergency stop enabled and automatic learning/training disabled. Registered v52/v69 studies, frozen v70 observations and Stocks scheduling remain unchanged. Medical/starter coverage, independent calibration and economic validation are still unfinished; result delivery is not evidence of predictive improvement.
+
+## Actual recovery
+
+The pinned local release **`57e2d79eeb80eec3ed9f555d738bf151b79ab17f`** started after the previous known worker released its event claims. Its archived predecessor, claim generations/decisions and copied data remain private and intact. The original credential file and protected research sources/schedules were unchanged.
+
+The first normal final-check cycle completed at **02:44:24 UTC on October 27 (21:44 America/Chicago on October 26)**. It posted eight result replies and persisted eight acknowledgements, with zero remaining delivery failures. An independent authorized REST read verified every reply's bot identity, original daily-message reference and event/result digest. Both matched and missed forecasts were delivered; no outcome was selected for being favorable. The other nine games remained unresolved at that refresh and were not assigned results.
+
+All 17 original pregame forecasts and their issuance records remain unchanged. The journal retains its exact prior prefix, and original issued-forecast count remains 17. Recovered result messages retain source-observation clocks and actual delivery times. Eight follow-ups describe delivery coverage, not an estimate of accuracy or profitability. Later automatic finals and correction handling still need continued observation; the runtime remains dependent on the local computer staying awake.
+
+The initial private read-only verification helper used an SDK-normalized reference name against raw REST JSON and failed; that evidence was retained. Correcting the observer to the installed SDK's `message_reference` contract required no bot restart, resend, forecast change or source-data rewrite. The subsequent eight-message verification passed.
