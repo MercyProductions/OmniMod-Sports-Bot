@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
-import {EmbedBuilder} from 'discord.js';
+import {EmbedBuilder,Collection} from 'discord.js';
 import {fakeDiscord} from '../test-support/discord-transport.mjs';
 const directory=await mkdtemp(join(tmpdir(),'sports-final-delivery-'));process.env.OMNIMOD_SPORTS_DATA_DIR=directory;
 const {postFinalResult}=await import('../src/discordPublisher.js');
@@ -59,6 +59,63 @@ test('unreadable history blocks final send rather than establishing absence',asy
 test('bounded history exhaustion blocks final send',async t=>{
  const value=slate(),service=await remote(t,{historyFull:true});await assert.rejects(postFinalResult(service.client,value,final(value)),/history is incomplete/);assert.equal(service.counters.sends,0);
 });
+
+test('final delivery recovers an existing result beyond 500 messages without duplicating it',async t=>{
+ const value=slate(),service=await remote(t),posted=await postFinalResult(service.client,value,final(value));
+ const actual=await service.channel.messages.fetch(posted.id);let pages=0;
+ service.channel.messages.fetch=async()=>{
+  pages++;return pages<=5?new Collection(Array.from({length:100},(_,i)=>[`old-${pages}-${i}`,{id:`old-${pages}-${i}`,author:{id:'bot'},embeds:[]}]))
+   :new Collection([[actual.id,actual]]);
+ };
+ assert.equal((await postFinalResult(service.client,value,final(value))).id,posted.id);
+ assert.equal(pages,6);assert.equal(service.counters.sends,1);
+});
+
+test('final delivery establishes absence after a complete history longer than 500 messages',async t=>{
+ const value=slate(),service=await remote(t);let pages=0;
+ service.channel.messages.fetch=async()=>{
+  pages++;return new Collection(Array.from({length:pages<=5?100:79},(_,i)=>[`old-${pages}-${i}`,{id:`old-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ assert.ok((await postFinalResult(service.client,value,final(value))).id);
+ assert.equal(pages,6);assert.equal(service.counters.sends,1);
+});
+
+test('final history with advancing pages remains blocked when the shared request budget is exhausted',async t=>{
+ const value=slate(),service=await remote(t);let pages=0;
+ service.channel.messages.fetch=async()=>{
+  pages++;return new Collection(Array.from({length:100},(_,i)=>[`old-${pages}-${i}`,{id:`old-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ await assert.rejects(postFinalResult(service.client,value,final(value)),{code:'FINAL_HISTORY_LIMIT_REACHED'});
+ assert.equal(pages,25);assert.equal(service.counters.sends,0);
+});
+
+test('final history cannot treat a repeated cursor as a complete empty page',async t=>{
+ const value=slate(),service=await remote(t,{historyFull:true});
+ await assert.rejects(postFinalResult(service.client,value,final(value)),{code:'FINAL_HISTORY_CURSOR_INVALID'});
+ assert.equal(service.counters.sends,0);
+});
+
+test('a denial on a later final-history page keeps the result pending',async t=>{
+ const value=slate(),service=await remote(t);let pages=0;
+ service.channel.messages.fetch=async()=>{
+  pages++;if(pages===6)throw Object.assign(Error('Synthetic denial'),{code:50013});
+  return new Collection(Array.from({length:100},(_,i)=>[`old-${pages}-${i}`,{id:`old-${pages}-${i}`,author:{id:'bot'},embeds:[]} ]));
+ };
+ await assert.rejects(postFinalResult(service.client,value,final(value)),{code:'FINAL_HISTORY_UNAVAILABLE'});
+ assert.equal(pages,6);assert.equal(service.counters.sends,0);
+});
+
+for(const [code,reason] of Object.entries({FINAL_HISTORY_LIMIT_REACHED:'final_history_limit_reached_retry_pending',
+ FINAL_HISTORY_CURSOR_INVALID:'final_history_cursor_invalid_retry_pending',FINAL_HISTORY_UNAVAILABLE:'final_history_unavailable_retry_pending',
+ FINAL_HISTORY_EVENT_AMBIGUOUS:'final_history_event_ambiguous_retry_pending'})){
+ test(`final delivery retains the structured ${code} rejection without raw transport data`,async t=>{
+  const value=slate(),service=await remote(t);value.games[0].id=code;value.predictions[0].gameId=code;value.newFinals=[final(value)];
+  const result=await deliverFinalBatch(service.client,value,{post:async()=>{throw Object.assign(Error('private request context'),{code});}});
+  assert.equal(result.postedCount,0);assert.equal(result.failures.length,1);assert.equal(result.failures[0].reason,reason);
+  assert.equal(result.failures[0].retryable,true);assert.ok(!JSON.stringify(result).includes('private request context'));
+  assert.equal(service.counters.sends,0);
+ });
+}
 
 test('an ambiguous legacy footer is not an acknowledgement or permission to create a replacement',async t=>{
  const value=slate(),service=await remote(t);await service.channel.send({embeds:[new EmbedBuilder().setTitle('Old result').setFooter({text:'OmniMod Sports result | 2026-10-20 | same'})]});

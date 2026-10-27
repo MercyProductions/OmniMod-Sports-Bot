@@ -15,6 +15,7 @@ import {
 import { config } from './config.js';
 import { writeDailyCache } from './storage.js';
 import { withDailyPublication } from './dailyPublication.js';
+import { findInChannelHistory } from './discordHistory.js';
 import { getGuildSettings } from './guildSettings.js';
 import { refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
 
@@ -30,8 +31,6 @@ const QUOTA_COLOR = 0xf97316;
 const DISCORD_EMBED_TOTAL_LIMIT = 6000;
 const DAILY_SLATE_CORE_BUDGET = 5200;
 const DAILY_SLATE_TOTAL_BUDGET = 5900;
-// Bound requests while still covering established channels with more than 500 posts.
-const DAILY_HISTORY_MAX_PAGES = 25;
 
 export const LOG_COLORS = {
   brand: BRAND_COLOR,
@@ -324,27 +323,14 @@ export async function findDailySlateMessage(client, dateKey, guildId = '', { str
   try {
     const resources = await setupGuildResources(client, guildId);
     const expectedTitle = `OmniMod Sports Daily Slate | ${dateKey}`;
-    let before;
-    for (let page = 0; page < DAILY_HISTORY_MAX_PAGES; page += 1) {
-      const messages = await resources.sportsChannel.messages.fetch({ limit: 100, before });
-      const match = messages.find((message) =>
+    return await findInChannelHistory(resources.sportsChannel,(message) =>
         message.author?.id === client.user?.id &&
         message.embeds?.some((embed) => embed.title === expectedTitle)
       );
-      if (match) return match;
-      if (messages.size < 100) return null;
-      const next = messages.last()?.id;
-      if (!next || next === before) {
-        if (strict) throw Object.assign(new Error('Daily slate history cursor did not advance; publication deferred.'), { code: 'DAILY_HISTORY_CURSOR_INVALID' });
-        return null;
-      }
-      before = next;
-    }
-    if (strict) throw Object.assign(new Error('Daily slate history search limit reached; publication deferred.'), { code: 'DAILY_HISTORY_LIMIT_REACHED' });
-    return null;
   } catch (error) {
     if (strict) throw Object.assign(new Error('Cannot verify daily slate history; publication deferred.', { cause: error }),
-      { code: ['DAILY_HISTORY_CURSOR_INVALID', 'DAILY_HISTORY_LIMIT_REACHED'].includes(error?.code) ? error.code : 'DAILY_HISTORY_UNAVAILABLE' });
+      { code: ['DISCORD_HISTORY_CURSOR_INVALID','DISCORD_HISTORY_LIMIT_REACHED'].includes(error?.code)
+        ? error.code.replace('DISCORD_','DAILY_') : 'DAILY_HISTORY_UNAVAILABLE' });
     return null;
   }
 }
@@ -426,21 +412,18 @@ async function publishDailySlate(client, slate, options, resources, verify) {
 export async function findFinalResultMessage(client, slate, prediction, existingResources = null) {
   let resources;
   try { resources = existingResources || await setupGuildResources(client, slate.guildId); }
-  catch { throw new Error('Final-result history is unavailable; a new send is blocked'); }
+  catch { throw Object.assign(new Error('Final-result history is unavailable; a new send is blocked'),{code:'FINAL_HISTORY_UNAVAILABLE'}); }
   const channels = [];
-  let uncertain=false;
+  let uncertain=false,failureCode='FINAL_HISTORY_UNAVAILABLE';
   for (const channelId of [slate.channelId, resources.resultsChannel?.id]) {
     if (!channelId || channels.some((channel) => channel.id === channelId)) continue;
     const channel = await client.channels.fetch(channelId).catch(() => null);
     if(channel?.isTextBased?.()&&(!channel.guildId||channel.guildId===slate.guildId))channels.push(channel);else uncertain=true;
   }
-  if(!channels.length)throw new Error('Final-result history has no readable channel; a new send is blocked');
+  if(!channels.length)throw Object.assign(new Error('Final-result history has no readable channel; a new send is blocked'),{code:'FINAL_HISTORY_UNAVAILABLE'});
   for (const channel of channels) {
     try {
-      let before;
-      for (let page = 0; page < 5; page += 1) {
-        const messages = await channel.messages.fetch({ limit: 100, before });
-        const found = messages.find((message) => {
+      const found = await findInChannelHistory(channel,(message) => {
           if (message.author?.id !== client.user?.id) return false;
           return message.embeds.some((embed) => {
             if (matchesFinalResultFooter(embed.footer?.text,slate,prediction)) return true;
@@ -448,21 +431,21 @@ export async function findFinalResultMessage(client, slate, prediction, existing
             if(embed.footer?.text===`OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`){
               const fields=embed.fields||[],league=fields.find(row=>row.name==='League')?.value,started=fields.find(row=>row.name==='Started')?.value;
               const game=resolveSlateGame(journalGameIndex(slate.games||[]),prediction).game;
-              if(!game||!league||!started||(league===game.league&&started===prediction.startTimeLocal))uncertain=true;
+              if(!game||!league||!started||(league===game.league&&started===prediction.startTimeLocal)){
+                uncertain=true;failureCode='FINAL_HISTORY_EVENT_AMBIGUOUS';
+              }
             }
             return false;
           });
         });
-        if (found) return found;
-        if (messages.size < 100) break;
-        before = messages.last()?.id;
-        if(!before||page===4)uncertain=true;
-      }
-    } catch {
+      if (found) return found;
+    } catch(error) {
       uncertain=true; // Still search the other channel for a definitive match.
+      failureCode=['DISCORD_HISTORY_CURSOR_INVALID','DISCORD_HISTORY_LIMIT_REACHED'].includes(error?.code)
+        ? error.code.replace('DISCORD_','FINAL_') : 'FINAL_HISTORY_UNAVAILABLE';
     }
   }
-  if(uncertain)throw new Error('Final-result history is incomplete; a new send is blocked');
+  if(uncertain)throw Object.assign(new Error('Final-result history is incomplete; a new send is blocked'),{code:failureCode});
   return null;
 }
 

@@ -3,6 +3,10 @@ import {postFinalResult} from './discordPublisher.js';
 import {finalResultKey,finalResultScope,finalReplyFor} from './finalResultIdentity.js';
 import {prepareFinalRevision,correctionEvidence,mergeFinalReplies} from './finalResultRevision.js';
 
+const historyFailureReasons={FINAL_HISTORY_LIMIT_REACHED:'final_history_limit_reached_retry_pending',
+ FINAL_HISTORY_CURSOR_INVALID:'final_history_cursor_invalid_retry_pending',FINAL_HISTORY_UNAVAILABLE:'final_history_unavailable_retry_pending',
+ FINAL_HISTORY_EVENT_AMBIGUOUS:'final_history_event_ambiguous_retry_pending'};
+
 /** Event-local failures remain pending; all revisions share the event's owner-fenced claim chain. */
 export async function deliverFinalBatch(client,slate,{reason='',post=postFinalResult}={}){
  slate=structuredClone(slate);
@@ -41,6 +45,7 @@ export async function deliverFinalBatch(client,slate,{reason='',post=postFinalRe
    await finishFinalResult(slate.dateKey,slate.guildId,key,reply,lease);finalReplies=mergeFinalReplies(finalReplies,{[key]:reply});postedCount++;if(prior)correctedCount++;
   }catch(error){
    if(error?.code==='CORRECTION_BASELINE_UNVERIFIED')failureReason='correction_baseline_unverified';
+   else if(historyFailureReasons[error?.code])failureReason=historyFailureReasons[error.code];
    if(claimed)await releaseFinalResultClaim(slate.dateKey,slate.guildId,key,lease).catch(()=>{});
    failures.push({eventKey:key||null,gameId:String(final.prediction?.gameId||''),reason:error?.code===10008?'correction_target_missing':error?.code===50013?'delivery_access_denied':failureReason,retryable:failureReason!=='correction_baseline_unverified'});
   }

@@ -66,6 +66,7 @@ const runtimeState = {
   lastInteractionAt: '',
   lastSchedulerAt: '',
   dailyPublication: null,
+  finalDelivery: null,
   lastPregameRefreshAt: '',
   nextPregameRefreshAt: '',
   lastError: '',
@@ -339,6 +340,12 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
     const {postedCount}=delivery;
 
     const durableFinals = await persistFinalRefresh(cached, refreshed, delivery);
+    const finalDelivery={dateKey,checkedAt:nowLabel(),confirmedFinals:refreshed.newFinals?.length||0,
+      postedCount:delivery.postedCount,recoveredCount:delivery.recoveredCount,correctedCount:delivery.correctedCount,
+      pendingCount:delivery.failures.length,reasons:[...new Set(delivery.failures.map(row=>row.reason))]};
+    const recovered=delivery.failures.length===0&&runtimeState.lastError.startsWith('Final-result delivery pending:');
+    updateRuntimeState({finalDelivery,...(delivery.failures.length?{state:'degraded',lastError:`Final-result delivery pending: ${delivery.failures.length} event(s).`}
+      :recovered?{state:client.isReady()?'running':runtimeState.state,lastError:''}:{})});
     if (config.featureWarehouseEnabled) await recordSlateSnapshot(durableFinals);
 
     if (postedCount > 0) {
@@ -348,6 +355,7 @@ async function checkFinalScores(reason = 'timer', guildId = config.guildId || ''
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     console.error(`[${nowLabel()}] Final-score check failed: ${message}`);
+    updateRuntimeState({state:'degraded',phase:'final_score_delivery',lastError:'Final-score refresh or delivery failed; inspection required.'});
     await logBotEvent(client, `Final-score check failed (${reason}): ${message}`, guildId);
   } finally {
     finalRefreshRunning.delete(runningKey);
@@ -1394,7 +1402,7 @@ async function handleSportsCommand(interaction) {
         { name: 'Lineups + official checks', value: `${cached?.modelSummary?.automatic?.confirmedLineups ?? 0} lineup side(s) / ${cached?.modelSummary?.automatic?.officialStarters ?? 0} official starter(s) / ${cached?.modelSummary?.automatic?.starterRestMatches ?? 0} rest match(es) / ${cached?.modelSummary?.automatic?.officialMatches ?? 0} matched game(s)`, inline: false },
         { name: 'Learning + drift', value: `${acceptedModels}/${learnedModels.length} sport model(s) accepted; ${worstDrift ? `${worstDrift[0]} ${worstDrift[1]?.status}` : 'collecting history'}`, inline: true },
         { name: 'Today provider batch', value: providerUsage?.state ? `${providerUsage.state}${providerUsage.result ? ` (${providerUsage.result})` : ''}` : 'not claimed', inline: true },
-        { name: 'Final checks', value: `${settings.finalCheckMinutes} minute(s)`, inline: true },
+        { name: 'Final checks', value: `${settings.finalCheckMinutes} minute(s)\nLast delivery check: ${runtime.finalDelivery?.checkedAt || 'not observed'}\nPending deliveries: ${runtime.finalDelivery?.pendingCount ?? cached?.finalDeliveryFailures?.length ?? 'unknown'}\n${runtime.finalDelivery?.reasons?.join(', ') || ''}`.slice(0,1000), inline: false },
         { name: 'Pregame refresh', value: config.pregameRefreshEnabled ? `${config.pregameRefreshWindows.map((window) => `T-${window}`).join('/')} enabled\nLast: ${runtime.lastPregameRefreshAt || 'none'}\nNext: ${runtime.nextPregameRefreshAt || 'waiting for slate'}` : 'disabled', inline: false },
         { name: 'Feature warehouse', value: cached?.modelSummary?.warehouse ? `${cached.modelSummary.warehouse.results} finals / ${cached.modelSummary.warehouse.boxscores} boxes / ${cached.modelSummary.warehouse.plays || 0} compact plays / ${cached.modelSummary.warehouse.predictions} prediction snapshots / ${cached.modelSummary.warehouse.markets} market snapshots` : 'waiting for v6 slate', inline: false },
         { name: 'Replay + challengers', value: cached?.modelSummary?.replay ? `${cached.modelSummary.replay.predictions} leakage-safe replay predictions; ${Object.values(cached?.modelSummary?.championModels || {}).filter((row) => !/evidence/i.test(String(row.champion || ''))).length} promoted challenger(s); ${Object.values(cached?.modelSummary?.localMl || {}).filter((row) => row.accepted).length} validated local ML model(s)` : 'waiting for replay', inline: false },
