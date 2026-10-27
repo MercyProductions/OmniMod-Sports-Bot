@@ -1,22 +1,32 @@
 import path from 'node:path';
+import { checkedHockeyTeamRows, hockeyMeasurementEvidence } from './hockeyDatasetEvidence.js';
+import { planSourceCollectionPeriods } from './sourceCollectionPeriods.js';
+import { checkedNbaTeamRows, nbaGameSeasonEvidence, nbaTeamSampleEvidence } from './nbaDatasetEvidence.js';
+import { replaceBaseballRole, lookupBaseballStat, baseballSampleMeasurement } from './baseballStatIdentity.js';
 import { config, dataDir } from './config.js';
 import { normalizeEntityName } from './intelligenceStore.js';
 import { corroborateScheduleRows } from './sourceIntelligence.js';
 import { readJson, writeJson } from './storage.js';
+import { selectMlbBatters, observationReceiptTimes } from './mlbLineupEvidence.js';
+import { composeAdvancedProvenance } from './advancedProvenance.js';
+import { finiteNumber, measuredCalculation, measuredPerGame as perGame, teamGameSampleEvidence } from './dataValidation.js';
+import { advancedDatasetRequest, calendarDay, checkedDatasetRows, checkedBaseballSeasonRows, mlbGameSeasonEvidence, checkedNflSeasonRows, nflGameSeasonEvidence, nhlGameSeasonEvidence, nonemptyText } from './advancedDatasetContracts.js';
+export { advancedDatasetRequest } from './advancedDatasetContracts.js';
 
 const snapshotFile = path.join(dataDir, 'advanced-datasets.json');
 const DAY_MS = 86_400_000;
 let syncPromise = null;
+let syncRequestKey = null;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function finite(value, fallback = null) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
+  return finiteNumber(value, fallback);
 }
+
+const difference = (home, away, scale = 1) => measuredCalculation([home, away], (h, a) => (h - a) / scale);
 
 export function parseCsv(text = '') {
   const rows = [];
@@ -92,20 +102,31 @@ export function buildTennisDataset(rows = [], tour = 'atp') {
   }]));
 }
 
-async function fetchText(url, fetchImpl, timeoutMs = 25_000) {
+async function fetchText(url, fetchImpl, timeoutMs = 25_000, clock = Date.now) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl(url, { signal: controller.signal, headers: { 'user-agent': 'OmniModSportsBot/6.0', accept: 'text/csv,application/json' } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const raw = response.headers?.get?.('retry-after');
+      const delay = raw && /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) * 1000 : Date.parse(raw || '') - clock();
+      const error = new Error(`HTTP ${response.status}`);
+      error.retryAfterMs = Number.isFinite(delay) && delay > 0 ? delay : 0;
+      throw error;
+    }
     return await response.text();
   } finally {
     clearTimeout(timer);
   }
 }
 
-function sourceStatus(id, url, ok, details = {}) {
-  return { id, url, ok, checkedAt: new Date().toISOString(), ...details };
+function sourceStatus(id, url, ok, details = {}, previous = {}, now = Date.now()) {
+  const failures = ok ? 0 : Math.min(16, Math.max(0, Number(previous.failures) || 0) + 1);
+  const providerDelay = Math.max(0, Number(details.retryAfterMs) || 0);
+  return { id, url, ok, checkedAt: new Date(now).toISOString(), ...details, failures,
+    lastSuccessAt: ok ? new Date(now).toISOString() : previous.lastSuccessAt || (previous.ok ? previous.checkedAt : null) || null,
+    retryAfter: ok ? null : new Date(now + Math.max(Math.min(24, 2 ** (failures - 1)) * 3600000, providerDelay)).toISOString(),
+    providerRetryAfter: providerDelay ? new Date(now + providerDelay).toISOString() : null };
 }
 
 export async function readAdvancedDatasetSnapshot() {
@@ -113,20 +134,51 @@ export async function readAdvancedDatasetSnapshot() {
 }
 
 export async function syncAdvancedDatasets(options = {}) {
+  const request = advancedDatasetRequest(options);
   if (!config.advancedDatasetsEnabled || options.localOnly || config.localOnly) {
-    return { snapshot: await readAdvancedDatasetSnapshot(), externalCalls: 0, diagnostics: ['Advanced dataset sync skipped by configuration/local-only mode.'] };
+    return { ...request, snapshot: await readAdvancedDatasetSnapshot(), externalCalls: 0, diagnostics: ['Advanced dataset sync skipped by configuration/local-only mode.'] };
   }
-  if (syncPromise) return syncPromise;
+  const requestKey = JSON.stringify({identities:request.requestIdentities,periodConflicts:options.collectionPeriodConflicts||[]});
+  if (syncPromise) {
+    if (syncRequestKey === requestKey) return syncPromise;
+    await syncPromise;
+    return syncAdvancedDatasets(options);
+  }
+  syncRequestKey = requestKey;
   syncPromise = (async () => {
     const current = await readAdvancedDatasetSnapshot();
-    const age = Date.now() - new Date(current.updatedAt || '').getTime();
-    if (!options.force && Number.isFinite(age) && age < config.advancedDatasetSyncDays * DAY_MS) {
-      return { snapshot: current, externalCalls: 0, diagnostics: [`Advanced datasets: cached snapshot from ${current.updatedAt}.`] };
-    }
-    const fetchImpl = options.fetchImpl || fetch;
-    const year = Number(options.year || new Date().getUTCFullYear());
-    const snapshot = { tennis: {}, baseballPlayers: {}, footballTeams: {}, footballSchedules: [], hockeyTeams: {}, basketballTeams: {}, soccerCompetitions: [], ...current, version: 2, sources: [], updatedAt: new Date().toISOString() };
+    const clock = options.clock || Date.now, { now, year, requestIdentities } = request;
+    const statuses = new Map((current.sources || []).map(row => [row.id, row]));
+    const sourceDue = id => {
+      if(options.collectionPeriodConflicts?.includes(id))return false;
+      const row = statuses.get(id), checked = Date.parse(row?.checkedAt || '');
+      if (Date.parse(row?.providerRetryAfter || '') > now) return false;
+      if (options.force) return true;
+      if (row?.requestKey !== requestIdentities[id]) return true;
+      if (!Number.isFinite(checked) || checked > now) return true;
+      if (row.ok === false) return !(Date.parse(row.retryAfter || '') > now);
+      if (row.ok !== true) return true;
+      const success = Date.parse(row.lastSuccessAt || row.checkedAt || '');
+      return !Number.isFinite(success) || success > now || now - success >= config.advancedDatasetSyncDays * DAY_MS;
+    };
+    const sourceIds = ['tennis-atp', 'tennis-wta', 'baseball-savant-batter', 'baseball-savant-pitcher',
+      'nflverse-team-stats', 'nflverse-schedules', 'moneypuck-team-xg', 'statsbomb-open-data',
+      ...(config.advancedNbaStatsEnabled ? ['nba-advanced-teams'] : [])];
+    if (!sourceIds.some(sourceDue)) return { ...request, snapshot: current, externalCalls: 0,
+      diagnostics: ['Advanced datasets: each enabled source is within its success cache or retry delay; retained row receipts are unchanged.'] };
+    const snapshot = { tennis: {}, baseballPlayers: {}, footballTeams: {}, footballSchedules: [], hockeyTeams: {}, basketballTeams: {}, soccerCompetitions: [], ...current,
+      version: 2, receiptPolicy: 'per-source-received-rows-v1', sources: [...statuses.values()], updatedAt: new Date(now).toISOString() };
     let externalCalls = 0;
+    const providerFetch = options.fetchImpl || fetch;
+    const fetchImpl = (...args) => { externalCalls += 1; return providerFetch(...args); };
+    const sourceText = (url, timeoutMs) => fetchText(url, fetchImpl, timeoutMs, clock);
+    const recordStatus = (id, url, ok, details) => {
+      const previous = statuses.get(id);
+      const row = sourceStatus(id, url, ok, { ...details, requestKey: requestIdentities[id],
+        lastSuccessRequestKey: ok ? requestIdentities[id] : previous?.lastSuccessRequestKey || (previous?.ok ? previous.requestKey : null) || null }, previous, clock());
+      statuses.set(id, row); snapshot.sources = [...statuses.values()];
+    };
+    const stamp = (row, sourceDatasetId) => ({ ...row, sourceDatasetId, sourceRequestKey: requestIdentities[sourceDatasetId], sourceFetchedAt: new Date(clock()).toISOString() });
     const diagnostics = [];
 
     const tennisSources = [
@@ -134,161 +186,189 @@ export async function syncAdvancedDatasets(options = {}) {
       ['wta', `https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_${year}.csv`, 'https://raw.githubusercontent.com/36-SURE/2026/main/data/wta_matches_2021_2026.csv']
     ];
     for (const [tour, primaryUrl, fallbackUrl] of tennisSources) {
+      if (!sourceDue(`tennis-${tour}`)) continue;
       try {
         let text;
         let usedUrl = primaryUrl;
         try {
-          text = await fetchText(primaryUrl, fetchImpl);
+          text = await sourceText(primaryUrl);
         } catch (primaryError) {
-          if (!fallbackUrl) throw primaryError;
-          text = await fetchText(fallbackUrl, fetchImpl);
+          if (!fallbackUrl || primaryError.retryAfterMs > 0 || /HTTP (401|403|429)/.test(primaryError.message)) throw primaryError;
+          text = await sourceText(fallbackUrl);
           usedUrl = fallbackUrl;
         }
-        externalCalls += 1;
-        const rows = parseCsv(text);
-        snapshot.tennis[tour] = buildTennisDataset(rows, tour);
-        snapshot.sources.push(sourceStatus(`tennis-${tour}`, usedUrl, true, { rows: rows.length, players: Object.keys(snapshot.tennis[tour]).length, license: 'non-commercial attribution/share-alike; see source repository' }));
+        const parsed = checkedDatasetRows(parseCsv(text), { source: `tennis-${tour}`,
+          keys: [['winner_name'],['loser_name'],['tourney_date']],
+          identity: row => nonemptyText(row.winner_name) && nonemptyText(row.loser_name) && Boolean(calendarDay(row.tourney_date)) });
+        const rows = parsed.rows.filter(row => calendarDay(row.tourney_date).startsWith(String(year)))
+          .map(row => ({ ...row, tourney_date: calendarDay(row.tourney_date).replaceAll('-', '') }));
+        if (!rows.length) throw new Error(`Advanced source tennis-${tour}: no observations for requested year`);
+        snapshot.tennis[tour] = Object.fromEntries(Object.entries(buildTennisDataset(rows, tour)).map(([key, row]) => [key, stamp(row, `tennis-${tour}`)]));
+        recordStatus(`tennis-${tour}`, usedUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows,
+          excludedPeriodRows: parsed.rows.length - rows.length, players: Object.keys(snapshot.tennis[tour]).length, license: 'non-commercial attribution/share-alike; see source repository' });
         diagnostics.push(`${tour.toUpperCase()} advanced snapshot: ${rows.length} match(es), ${Object.keys(snapshot.tennis[tour]).length} player(s).`);
       } catch (error) {
-        snapshot.sources.push(sourceStatus(`tennis-${tour}`, primaryUrl, false, { error: error.message }));
+        recordStatus(`tennis-${tour}`, primaryUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
         diagnostics.push(`${tour.toUpperCase()} advanced snapshot unavailable; retained prior data (${error.message}).`);
       }
     }
 
-    const statcastSources = [
-      ['batter', `https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=batter&year=${year}&position=&team=&min=25&csv=true`],
-      ['pitcher', `https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=pitcher&year=${year}&position=&team=&min=25&csv=true`]
-    ];
-    for (const [role, url] of statcastSources) {
+    for (const role of ['batter','pitcher']) {
+      const year=JSON.parse(requestIdentities[`baseball-savant-${role}`]).year;
+      const url=`https://baseballsavant.mlb.com/leaderboard/expected_statistics?type=${role}&year=${year}&position=&team=&min=25&csv=true`;
+      if (!sourceDue(`baseball-savant-${role}`)) continue;
       try {
-        const rows = parseCsv(await fetchText(url, fetchImpl)); externalCalls += 1;
+        const parsed = checkedBaseballSeasonRows(parseCsv(await sourceText(url)), year, role);
+        const rows = parsed.rows, records = [];
         for (const row of rows) {
           const name = row['last_name, first_name'] || row.player_name || '';
           if (!name) continue;
           const parts = name.split(',').map((value) => value.trim());
           const displayName = parts.length === 2 ? `${parts[1]} ${parts[0]}` : name;
-          snapshot.baseballPlayers[normalizeEntityName(displayName)] = {
-            name: displayName, role, playerId: row.player_id,
+          records.push(stamp({
+            name: displayName, role, playerId: row.player_id, seasonYear: finite(row.year) ?? finite(row.season),
             expectedAverage: finite(row.est_ba), expectedSlugging: finite(row.est_slg), expectedWoba: finite(row.est_woba),
-            sampleSize: finite(row.pa ?? row.bip, 0)
-          };
+            plateAppearances: finite(row.pa), battedBallEvents: finite(row.bip),
+            sampleSize: finite(row.pa) ?? finite(row.bip), sampleSizeKind: finite(row.pa)!==null ? 'pa' : finite(row.bip)!==null ? 'bip' : 'unknown'
+          }, `baseball-savant-${role}`));
         }
-        snapshot.sources.push(sourceStatus(`baseball-savant-${role}`, url, true, { rows: rows.length, license: 'MLB Baseball Savant public CSV' }));
+        const identity = replaceBaseballRole(snapshot, role, records);
+        recordStatus(`baseball-savant-${role}`, url, true, { ...identity, rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'MLB Baseball Savant public CSV' });
         diagnostics.push(`Baseball Savant ${role}: ${rows.length} expected-stat row(s).`);
       } catch (error) {
-        snapshot.sources.push(sourceStatus(`baseball-savant-${role}`, url, false, { error: error.message }));
+        recordStatus(`baseball-savant-${role}`, url, false, { error: error.message, retryAfterMs: error.retryAfterMs });
         diagnostics.push(`Baseball Savant ${role} unavailable; retained prior data (${error.message}).`);
       }
     }
 
-    const footballSeason = new Date().getUTCMonth() < 8 ? year - 1 : year;
+    const footballSeason = JSON.parse(requestIdentities['nflverse-team-stats']).seasonStart;
+    const scheduleMinimumSeason = JSON.parse(requestIdentities['nflverse-schedules']).minimumSeason;
     const nflUrl = `https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_reg_${footballSeason}.csv`;
-    try {
-      const rows = parseCsv(await fetchText(nflUrl, fetchImpl)); externalCalls += 1;
-      snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').toUpperCase(), {
-        team: String(row.team || '').toUpperCase(), games: finite(row.games, 0),
-        epaPerGame: (finite(row.passing_epa, 0) + finite(row.rushing_epa, 0)) / Math.max(1, finite(row.games, 1)),
-        passingEpaPerGame: finite(row.passing_epa, 0) / Math.max(1, finite(row.games, 1)),
-        rushingEpaPerGame: finite(row.rushing_epa, 0) / Math.max(1, finite(row.games, 1)),
-        cpoe: finite(row.passing_cpoe, 0)
-      }]));
-      snapshot.sources.push(sourceStatus('nflverse-team-stats', nflUrl, true, { rows: rows.length, license: 'CC BY 4.0' }));
-      diagnostics.push(`nflverse team stats: ${rows.length} team row(s) for ${footballSeason}.`);
-    } catch (error) {
-      snapshot.sources.push(sourceStatus('nflverse-team-stats', nflUrl, false, { error: error.message }));
-      diagnostics.push(`nflverse team stats unavailable; retained prior data (${error.message}).`);
+    if (sourceDue('nflverse-team-stats')) {
+      try {
+        const parsed = checkedNflSeasonRows(parseCsv(await sourceText(nflUrl)), footballSeason);
+        const rows = parsed.rows;
+        snapshot.footballTeams = Object.fromEntries(rows.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
+          team: String(row.team || '').trim().toUpperCase(), season: finite(row.season), seasonType: row.season_type, games: finite(row.games),
+          epaPerGame: perGame(measuredCalculation([row.passing_epa, row.rushing_epa], (passing, rushing) => passing + rushing), row.games),
+          passingEpaPerGame: perGame(row.passing_epa, row.games),
+          rushingEpaPerGame: perGame(row.rushing_epa, row.games),
+          cpoe: finite(row.passing_cpoe)
+        }, 'nflverse-team-stats')]));
+        recordStatus('nflverse-team-stats', nflUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows, license: 'CC BY 4.0' });
+        diagnostics.push(`nflverse team stats: ${rows.length} team row(s) for ${footballSeason}.`);
+      } catch (error) {
+        recordStatus('nflverse-team-stats', nflUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
+        diagnostics.push(`nflverse team stats unavailable; retained prior data (${error.message}).`);
+      }
     }
 
     const nflScheduleUrl = 'https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv';
-    try {
-      const rows = parseCsv(await fetchText(nflScheduleUrl, fetchImpl)); externalCalls += 1;
-      snapshot.footballSchedules = rows
-        .filter((row) => finite(row.season, 0) >= footballSeason - 1)
-        .map((row) => ({
-          game_id: row.game_id,
-          season: finite(row.season),
-          game_type: row.game_type,
-          week: finite(row.week),
-          gameday: row.gameday,
-          gametime: row.gametime,
-          away_team: row.away_team,
-          home_team: row.home_team,
-          roof: row.roof,
-          surface: row.surface,
-          temp: finite(row.temp),
-          wind: finite(row.wind),
-          referee: row.referee,
-          stadium: row.stadium
-        }));
-      snapshot.sources.push(sourceStatus('nflverse-schedules', nflScheduleUrl, true, { rows: snapshot.footballSchedules.length, license: 'CC BY 4.0' }));
-      diagnostics.push(`nflverse schedule redundancy: ${snapshot.footballSchedules.length} recent game row(s).`);
-    } catch (error) {
-      snapshot.sources.push(sourceStatus('nflverse-schedules', nflScheduleUrl, false, { error: error.message }));
-      diagnostics.push(`nflverse schedule redundancy unavailable; retained prior data (${error.message}).`);
+    if (sourceDue('nflverse-schedules')) {
+      try {
+        const parsed = checkedDatasetRows(parseCsv(await sourceText(nflScheduleUrl)), { source: 'nflverse-schedules',
+          keys: [['season'],['gameday'],['away_team'],['home_team']],
+          identity: row => finite(row.season) !== null && Boolean(calendarDay(row.gameday)) && nonemptyText(row.away_team) && nonemptyText(row.home_team) });
+        const rows = parsed.rows;
+        const schedules = rows
+          .filter((row) => finite(row.season, 0) >= scheduleMinimumSeason)
+          .map((row) => stamp({
+            game_id: row.game_id,
+            season: finite(row.season),
+            game_type: row.game_type,
+            week: finite(row.week),
+            gameday: row.gameday,
+            gametime: row.gametime,
+            away_team: row.away_team,
+            home_team: row.home_team,
+            roof: row.roof,
+            surface: row.surface,
+            temp: finite(row.temp),
+            wind: finite(row.wind),
+            referee: row.referee,
+            stadium: row.stadium
+          }, 'nflverse-schedules'));
+        if (!schedules.length) throw new Error('Advanced source nflverse-schedules: no observations for requested seasons');
+        snapshot.footballSchedules = schedules;
+        recordStatus('nflverse-schedules', nflScheduleUrl, true, { rows: schedules.length, rejectedRows: parsed.rejectedRows, excludedPeriodRows: rows.length - schedules.length, license: 'CC BY 4.0' });
+        diagnostics.push(`nflverse schedule redundancy: ${snapshot.footballSchedules.length} recent game row(s).`);
+      } catch (error) {
+        recordStatus('nflverse-schedules', nflScheduleUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
+        diagnostics.push(`nflverse schedule redundancy unavailable; retained prior data (${error.message}).`);
+      }
     }
 
-    const hockeySeason = new Date().getUTCMonth() < 8 ? year - 1 : year;
+    const hockeySeason = JSON.parse(requestIdentities['moneypuck-team-xg']).seasonStart;
     const moneyPuckUrl = `https://moneypuck.com/moneypuck/playerData/seasonSummary/${hockeySeason}/regular/teams.csv`;
-    try {
-      const rows = parseCsv(await fetchText(moneyPuckUrl, fetchImpl)); externalCalls += 1;
-      const allSituations = rows.filter((row) => String(row.situation).toLowerCase() === 'all');
-      snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').toUpperCase(), {
-        team: String(row.team || '').toUpperCase(), games: finite(row.games_played, 0),
-        xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
-        flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
-        goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)
-      }]));
-      snapshot.sources.push(sourceStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, attribution: 'MoneyPuck.com' }));
-      diagnostics.push(`MoneyPuck team xG: ${allSituations.length} team row(s) for ${hockeySeason}.`);
-    } catch (error) {
-      snapshot.sources.push(sourceStatus('moneypuck-team-xg', moneyPuckUrl, false, { error: error.message }));
-      diagnostics.push(`MoneyPuck team xG unavailable; retained prior data (${error.message}).`);
+    if (sourceDue('moneypuck-team-xg')) {
+      try {
+        const parsed = checkedHockeyTeamRows(parseCsv(await sourceText(moneyPuckUrl)));
+        const allSituations = parsed.rows;
+        snapshot.hockeyTeams = Object.fromEntries(allSituations.map((row) => [String(row.team || '').trim().toUpperCase(), stamp({
+          team: String(row.team || '').trim().toUpperCase(), games: finite(row.games_played),
+          xGoalsFor: finite(row.xGoalsFor), xGoalsAgainst: finite(row.xGoalsAgainst),
+          flurryXgFor: finite(row.flurryAdjustedxGoalsFor), flurryXgAgainst: finite(row.flurryAdjustedxGoalsAgainst),
+          goalsFor: finite(row.goalsFor), goalsAgainst: finite(row.goalsAgainst)
+        }, 'moneypuck-team-xg')]));
+        recordStatus('moneypuck-team-xg', moneyPuckUrl, true, { rows: allSituations.length, rejectedRows: parsed.rejectedRows, excludedSituationRows:parsed.excludedSituationRows, attribution: 'MoneyPuck.com' });
+        diagnostics.push(`MoneyPuck team xG: ${allSituations.length} team row(s) for ${hockeySeason}.`);
+      } catch (error) {
+        recordStatus('moneypuck-team-xg', moneyPuckUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
+        diagnostics.push(`MoneyPuck team xG unavailable; retained prior data (${error.message}).`);
+      }
     }
 
-    if (config.advancedNbaStatsEnabled) {
-      const seasonStart = new Date().getUTCMonth() < 8 ? year - 1 : year;
-      const seasonLabel = `${seasonStart}-${String(seasonStart + 1).slice(-2)}`;
+    if (config.advancedNbaStatsEnabled && sourceDue('nba-advanced-teams')) {
+      const nbaSeasonStart=JSON.parse(requestIdentities['nba-advanced-teams']).seasonStart;
+      const seasonLabel = `${nbaSeasonStart}-${String(nbaSeasonStart + 1).slice(-2)}`;
       const nbaUrl = `https://stats.nba.com/stats/leaguedashteamstats?Conference=&DateFrom=&DateTo=&Division=&GameScope=&GameSegment=&LastNGames=0&LeagueID=00&Location=&MeasureType=Advanced&Month=0&OpponentTeamID=0&Outcome=&PORound=0&PaceAdjust=N&PerMode=PerGame&Period=0&PlusMinus=N&Rank=N&Season=${seasonLabel}&SeasonType=Regular%20Season&TeamID=0`;
       try {
-        const payload = JSON.parse(await fetchText(nbaUrl, fetchImpl, 8_000)); externalCalls += 1;
+        const payload = JSON.parse(await sourceText(nbaUrl, 8_000));
         const resultSet = payload.resultSets?.[0] || payload.resultSet || {};
-        const headers = resultSet.headers || [];
-        const rows = (resultSet.rowSet || []).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]])));
-        snapshot.basketballTeams = Object.fromEntries(rows.map((row) => [normalizeEntityName(row.TEAM_NAME), {
-          team: row.TEAM_NAME, teamId: row.TEAM_ID, games: row.GP, pace: row.PACE,
-          offensiveRating: row.OFF_RATING, defensiveRating: row.DEF_RATING, netRating: row.NET_RATING
-        }]));
-        snapshot.sources.push(sourceStatus('nba-advanced-teams', nbaUrl, true, { rows: rows.length }));
+        const headers = resultSet.headers, dataRows = resultSet.rowSet;
+        if (!Array.isArray(headers) || !Array.isArray(dataRows) || dataRows.some(row => !Array.isArray(row))) throw new Error('Advanced source nba-advanced-teams: unsupported payload schema');
+        const parsed = checkedNbaTeamRows(dataRows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index]]))), nbaSeasonStart);
+        const rows = parsed.rows;
+        snapshot.basketballTeams = Object.fromEntries(rows.map((row) => [normalizeEntityName(row.TEAM_NAME), stamp({
+          team: row.TEAM_NAME, teamId: row.TEAM_ID, games: finite(row.GP), pace: finite(row.PACE), nativeSeasonLabel: row.SEASON_YEAR || null,
+          offensiveRating: finite(row.OFF_RATING), defensiveRating: finite(row.DEF_RATING), netRating: finite(row.NET_RATING)
+        }, 'nba-advanced-teams')]));
+        recordStatus('nba-advanced-teams', nbaUrl, true, { rows: rows.length, rejectedRows: parsed.rejectedRows });
         diagnostics.push(`NBA advanced teams: ${rows.length} team row(s) for ${seasonLabel}.`);
       } catch (error) {
-        snapshot.sources.push(sourceStatus('nba-advanced-teams', nbaUrl, false, { error: error.message }));
+        recordStatus('nba-advanced-teams', nbaUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
         diagnostics.push(`NBA advanced teams unavailable; retained prior data (${error.message}).`);
       }
-    } else {
+    } else if (!config.advancedNbaStatsEnabled) {
       diagnostics.push('NBA.com advanced-team adapter is available but disabled; cached ESPN possession/efficiency features remain active.');
     }
 
     const statsBombUrl = 'https://raw.githubusercontent.com/statsbomb/open-data/master/data/competitions.json';
-    try {
-      const text = await fetchText(statsBombUrl, fetchImpl); externalCalls += 1;
-      const rows = JSON.parse(text);
-      snapshot.soccerCompetitions = Array.isArray(rows) ? rows.map((row) => ({
-        competitionId: row.competition_id,
-        seasonId: row.season_id,
-        competition: row.competition_name,
-        season: row.season_name,
-        matchAvailable: row.match_available
-      })) : [];
-      snapshot.sources.push(sourceStatus('statsbomb-open-data', statsBombUrl, true, { competitions: snapshot.soccerCompetitions.length, license: 'StatsBomb Open Data terms' }));
-      diagnostics.push(`StatsBomb open-data catalog: ${snapshot.soccerCompetitions.length} competition-season record(s).`);
-    } catch (error) {
-      snapshot.sources.push(sourceStatus('statsbomb-open-data', statsBombUrl, false, { error: error.message }));
-      diagnostics.push(`StatsBomb catalog unavailable; retained prior data (${error.message}).`);
+    if (sourceDue('statsbomb-open-data')) {
+      try {
+        const text = await sourceText(statsBombUrl);
+        const parsed = checkedDatasetRows(JSON.parse(text), { source: 'statsbomb-open-data', keys: [['competition_id'],['season_id']],
+          identity: row => Number.isInteger(finite(row.competition_id)) && Number.isInteger(finite(row.season_id)) });
+        const rows = parsed.rows;
+        snapshot.soccerCompetitions = rows.map((row) => stamp({
+          competitionId: row.competition_id,
+          seasonId: row.season_id,
+          competition: row.competition_name,
+          season: row.season_name,
+          matchAvailable: row.match_available
+        }, 'statsbomb-open-data'));
+        recordStatus('statsbomb-open-data', statsBombUrl, true, { competitions: snapshot.soccerCompetitions.length, rejectedRows: parsed.rejectedRows, license: 'StatsBomb Open Data terms' });
+        diagnostics.push(`StatsBomb open-data catalog: ${snapshot.soccerCompetitions.length} competition-season record(s).`);
+      } catch (error) {
+        recordStatus('statsbomb-open-data', statsBombUrl, false, { error: error.message, retryAfterMs: error.retryAfterMs });
+        diagnostics.push(`StatsBomb catalog unavailable; retained prior data (${error.message}).`);
+      }
     }
     await writeJson(snapshotFile, snapshot, { compact: true, backup: true, mode: 0o600 });
-    return { snapshot, externalCalls, diagnostics };
+    return { ...request, snapshot, externalCalls, diagnostics };
   })();
-  try { return await syncPromise; } finally { syncPromise = null; }
+  const operation = syncPromise;
+  try { return await operation; } finally { if (syncPromise === operation) { syncPromise = null; syncRequestKey = null; } }
 }
 
 function playerRecord(snapshot, tour, name) {
@@ -296,80 +376,162 @@ function playerRecord(snapshot, tour, name) {
   return snapshot.tennis?.[tour]?.[key] || null;
 }
 
+const sourceFeatureFields = {
+ 'baseball-savant-batter':['awayLineupXwoba','homeLineupXwoba','lineupXwobaCoverage','lineupXwobaDifference','lineupXwobaEvidence'],
+ 'nflverse-team-stats':['epaDifference','passingEpaDifference','rushingEpaDifference','cpoeDifference','teamSampleEvidence'],
+ 'moneypuck-team-xg':['awayXg','homeXg','xgDifference','gsaxDifference','teamSampleEvidence'],
+ 'nba-advanced-teams':['pace','efficiencyDifference','teamSampleEvidence'],
+ 'tennis-atp':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches'],
+ 'tennis-wta':['surface','surfaceEloDifference','serveReturnDifference','awayMatches','homeMatches']
+};
+
+const sourceProviders = {'baseball-savant-batter':'MLB Baseball Savant','nflverse-team-stats':'nflverse team stats',
+ 'moneypuck-team-xg':'MoneyPuck.com','nba-advanced-teams':'NBA.com advanced team stats','tennis-atp':'Jeff Sackmann tennis datasets','tennis-wta':'Jeff Sackmann tennis datasets'};
+function ownsSource(previous, sourceId) {
+ return Boolean(previous && ((Array.isArray(previous.sourceContributions) && previous.sourceContributions.some(row=>row?.sourceId===sourceId))
+  || (Array.isArray(previous.sourceRequestKeys) && previous.sourceRequestKeys.some(key=>{try{return JSON.parse(key)?.source===sourceId;}catch{return false;}}))
+  || previous.provider===sourceProviders[sourceId]));
+}
+
 export async function attachAdvancedDatasetContext(games = [], options = {}) {
-  const sync = await syncAdvancedDatasets(options);
+  const collectionPlan=planSourceCollectionPeriods(games,options);
+  const sync = await syncAdvancedDatasets(collectionPlan.options);
+  const explicitPeriod = options.year !== undefined || options.seasonStart !== undefined;
+  const eligibleRow = (row, sourceId) => !row||collectionPlan.conflicts.includes(sourceId) ? null : row.sourceRequestKey
+    ? row.sourceRequestKey === sync.requestIdentities[sourceId] ? row : null : explicitPeriod||Object.hasOwn(options.sourcePeriods||{},sourceId) ? null : row;
+  const hasPeriodRelevantCache=(source,rows)=>Boolean(collectionPlan.selection[source]?.gameSeasons.length&&rows.some(Boolean));
   let matched = 0;
-  const sourceCorroborations = config.sourceRedundancyEnabled ? corroborateScheduleRows(games.filter((game) => game.leagueKey === 'nfl'), sync.snapshot.footballSchedules || [], {
-    provider: 'nflverse independent schedule',
-    fetchedAt: sync.snapshot.updatedAt
+  const periodRejections = [];
+  const provenance = (previous, rows, sourceId, dependencyReceiptTimes=[]) => {
+    const status = (sync.snapshot.sources || []).find(row => row.id === sourceId);
+    return composeAdvancedProvenance(previous, {sourceId, fields:sourceFeatureFields[sourceId] || [], rows, dependencyReceiptTimes,
+      requestKey:sync.requestIdentities[sourceId], refreshStatus:{
+      sourceId, state: status?.ok === true ? 'success' : status?.ok === false ? 'failed' : 'unknown',
+      requestKey: status?.requestKey || null, lastSuccessRequestKey: status?.lastSuccessRequestKey || null,
+      checkedAt: status?.checkedAt || null, lastSuccessAt: status?.lastSuccessAt || (status?.ok ? status.checkedAt : null) || null,
+      retryAfter: status?.retryAfter || null, providerRetryAfter: status?.providerRetryAfter || null
+    }});
+  };
+  const sourceCorroborations = config.sourceRedundancyEnabled ? corroborateScheduleRows(games.filter((game) => game.leagueKey === 'nfl'),
+    (sync.snapshot.footballSchedules || []).filter(row => eligibleRow(row, 'nflverse-schedules')), {
+    provider: 'nflverse independent schedule'
   }) : 0;
   for (const game of games) {
+    if (game.advancedDataset) {
+      const keys = Array.isArray(game.advancedDataset.sourceRequestKeys) ? game.advancedDataset.sourceRequestKeys : [];
+      const incompatible = keys.some(key => {
+        if (!key) return explicitPeriod;
+        try { const source = JSON.parse(key).source; return sync.requestIdentities[source] !== key; }
+        catch { return true; }
+      });
+      if (incompatible || explicitPeriod && !keys.length || game.advancedDataset.sourceRequestKeys && !Array.isArray(game.advancedDataset.sourceRequestKeys)) delete game.advancedDataset;
+    }
     const leagueKey = String(game.leagueKey || '').toLowerCase();
     if (leagueKey === 'mlb') {
-      const sideMetric = (side) => {
-        const team = normalizeEntityName(game[side]?.name);
-        const rows = (game.autoPlayers || []).filter((row) => normalizeEntityName(row.team) === team)
-          .map((row) => sync.snapshot.baseballPlayers?.[normalizeEntityName(row.name)])
-          .filter((row) => row?.role === 'batter' && Number.isFinite(row.expectedWoba));
-        return rows.length ? rows.reduce((sum, row) => sum + row.expectedWoba, 0) / rows.length : null;
+      const sideMetric = side => {
+        const selection=selectMlbBatters(game,side),matched=[],statRejections={};
+        for(const batter of selection.batters){
+          const lookup=lookupBaseballStat(sync.snapshot,batter.name,'batter');
+          if(lookup.reason)statRejections[lookup.reason]=(statRejections[lookup.reason]||0)+1;
+          const row=eligibleRow(lookup.row,'baseball-savant-batter');
+          if(row?.role==='batter'&&Number.isFinite(row.expectedWoba)&&row.expectedWoba>=0)matched.push({row,identity:String(row.playerId||normalizeEntityName(row.name||batter.name))});
+        }
+        const identities=matched.map(item=>item.identity),unique=new Set(identities);
+        const sampleMeasurements=matched.map(item=>baseballSampleMeasurement(item.row)),positiveSampleStats=sampleMeasurements.filter(row=>row.positiveSample).length;
+        return {...selection,rows:matched.map(item=>item.row),identities,
+          value:matched.length?matched.reduce((sum,item)=>sum+item.row.expectedWoba,0)/matched.length:null,
+          evidence:{...selection.evidence,statRejections,sampleMeasurements,positiveSampleStats,sampleAdequacyValidated:false,matchedStats:matched.length,distinctStatIdentities:unique.size,complete:selection.batters.length===9&&matched.length===9&&positiveSampleStats===9&&unique.size===9&&!selection.evidence.duplicateBattingSlots.length}};
       };
-      const awayXwoba = sideMetric('away');
-      const homeXwoba = sideMetric('home');
-      if (awayXwoba !== null || homeXwoba !== null) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'MLB Baseball Savant', awayLineupXwoba: awayXwoba, homeLineupXwoba: homeXwoba, lineupXwobaDifference: (homeXwoba || 0) - (awayXwoba || 0) };
-        matched += 1;
-      }
+      const away=sideMetric('away'),home=sideMetric('home'),shared=away.identities.filter(id=>home.identities.includes(id));
+      const sourcePeriodEvidence=mlbGameSeasonEvidence(game,[...away.rows,...home.rows]);
+      if(sourcePeriodEvidence.blocked)periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
+      if(shared.length||sourcePeriodEvidence.blocked){away.evidence.complete=false;home.evidence.complete=false;}
+      const dependencies=[...away.dependencyReceiptTimes,...home.dependencyReceiptTimes];
+      game.advancedDataset={...(game.advancedDataset||{}),...provenance(game.advancedDataset,[...away.rows,...home.rows],'baseball-savant-batter',dependencies),
+        provider:'MLB Baseball Savant',sourcePeriodEvidence,awayLineupXwoba:sourcePeriodEvidence.blocked?null:away.value,homeLineupXwoba:sourcePeriodEvidence.blocked?null:home.value,
+        lineupXwobaCoverage:sourcePeriodEvidence.blocked?'blocked_period':away.evidence.complete&&home.evidence.complete?'both_sides':away.rows.length||home.rows.length?'partial':'none',
+        lineupXwobaDifference:away.evidence.complete&&home.evidence.complete?home.value-away.value:null,
+        lineupXwobaEvidence:{away:away.evidence,home:home.evidence,sharedStatIdentities:shared,identityMatchBasis:'normalized_name_only',
+          nativeIdentityMappingVerified:false,partialAverages:'research_only_not_a_complete_lineup_factor'}};
+      if(!sourcePeriodEvidence.blocked&&(away.rows.length||home.rows.length))matched+=1;
       continue;
     }
     if (leagueKey === 'nfl') {
-      const away = sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()];
-      const home = sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()];
-      if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'nflverse team stats', epaDifference: (home.epaPerGame - away.epaPerGame) / 60, passingEpaDifference: (home.passingEpaPerGame - away.passingEpaPerGame) / 38, rushingEpaDifference: (home.rushingEpaPerGame - away.rushingEpaPerGame) / 24, cpoeDifference: home.cpoe - away.cpoe };
-        matched += 1;
+      const away = eligibleRow(sync.snapshot.footballTeams?.[String(game.away?.abbr || '').toUpperCase()], 'nflverse-team-stats');
+      const home = eligibleRow(sync.snapshot.footballTeams?.[String(game.home?.abbr || '').toUpperCase()], 'nflverse-team-stats');
+      if (away || home || hasPeriodRelevantCache('nflverse-team-stats',[sync.snapshot.footballTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.footballTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'nflverse-team-stats')) {
+        const sourcePeriodEvidence = nflGameSeasonEvidence(game, [away, home]);
+        const teamSampleEvidence=teamGameSampleEvidence(away,home);
+        const usable = away && home && !sourcePeriodEvidence.blocked && teamSampleEvidence.away.positiveSample && teamSampleEvidence.home.positiveSample;
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nflverse-team-stats'),
+          provider: 'nflverse team stats', sourcePeriodEvidence,teamSampleEvidence,
+          epaDifference: usable ? difference(home.epaPerGame, away.epaPerGame, 60) : null,
+          passingEpaDifference: usable ? difference(home.passingEpaPerGame, away.passingEpaPerGame, 38) : null,
+          rushingEpaDifference: usable ? difference(home.rushingEpaPerGame, away.rushingEpaPerGame, 24) : null,
+          cpoeDifference: usable ? difference(home.cpoe, away.cpoe) : null };
+        if (usable) matched += 1;
+        if (sourcePeriodEvidence.blocked) periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }
     if (leagueKey === 'nhl') {
-      const away = sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()];
-      const home = sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()];
-      if (away && home) {
-        const awayGames = Math.max(1, away.games || 1);
-        const homeGames = Math.max(1, home.games || 1);
-        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'MoneyPuck.com', awayXg: away.xGoalsFor / awayGames, homeXg: home.xGoalsFor / homeGames, xgDifference: (home.xGoalsFor / homeGames - home.xGoalsAgainst / homeGames) - (away.xGoalsFor / awayGames - away.xGoalsAgainst / awayGames), gsaxDifference: ((home.xGoalsAgainst - home.goalsAgainst) / homeGames) - ((away.xGoalsAgainst - away.goalsAgainst) / awayGames) };
-        matched += 1;
+      const away = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.away?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
+      const home = eligibleRow(sync.snapshot.hockeyTeams?.[String(game.home?.abbr || '').toUpperCase()], 'moneypuck-team-xg');
+      if (away || home || hasPeriodRelevantCache('moneypuck-team-xg',[sync.snapshot.hockeyTeams?.[String(game.away?.abbr||'').toUpperCase()],sync.snapshot.hockeyTeams?.[String(game.home?.abbr||'').toUpperCase()]]) || ownsSource(game.advancedDataset, 'moneypuck-team-xg')) {
+        const sourcePeriodEvidence = nhlGameSeasonEvidence(game, [away, home]);
+        const teamSampleEvidence=teamGameSampleEvidence(away,home);
+        const usable = away && home && !sourcePeriodEvidence.blocked && teamSampleEvidence.away.positiveSample && teamSampleEvidence.home.positiveSample;
+        const awayMeasurements=hockeyMeasurementEvidence(away),homeMeasurements=hockeyMeasurementEvidence(home);
+        for(const [side,measurements] of [['away',awayMeasurements],['home',homeMeasurements]])Object.assign(teamSampleEvidence[side],{invalidMeasurements:measurements.invalidMeasurements,missingMeasurements:measurements.missingMeasurements});
+        const netRate = (values,games,forField,againstField) => perGame(difference(values[forField], values[againstField]), games);
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'moneypuck-team-xg'), provider: 'MoneyPuck.com', sourcePeriodEvidence,teamSampleEvidence,
+          awayXg: usable ? perGame(awayMeasurements.values.xGoalsFor, away.games) : null, homeXg: usable ? perGame(homeMeasurements.values.xGoalsFor, home.games) : null,
+          xgDifference: usable ? difference(netRate(homeMeasurements.values,home.games, 'xGoalsFor', 'xGoalsAgainst'), netRate(awayMeasurements.values,away.games, 'xGoalsFor', 'xGoalsAgainst')) : null,
+          gsaxDifference: usable ? difference(netRate(homeMeasurements.values,home.games, 'xGoalsAgainst', 'goalsAgainst'), netRate(awayMeasurements.values,away.games, 'xGoalsAgainst', 'goalsAgainst')) : null };
+        if (usable) matched += 1;
+        if (sourcePeriodEvidence.blocked) periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }
     if (leagueKey === 'nba') {
-      const away = sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)];
-      const home = sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)];
-      if (away && home) {
-        game.advancedDataset = { ...(game.advancedDataset || {}), provider: 'NBA.com advanced team stats', pace: (Number(away.pace) + Number(home.pace)) / 2, efficiencyDifference: Number(home.netRating) - Number(away.netRating) };
-        matched += 1;
+      const away = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)], 'nba-advanced-teams');
+      const home = eligibleRow(sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)], 'nba-advanced-teams');
+      if (away || home || hasPeriodRelevantCache('nba-advanced-teams',[sync.snapshot.basketballTeams?.[normalizeEntityName(game.away?.name)],sync.snapshot.basketballTeams?.[normalizeEntityName(game.home?.name)]]) || ownsSource(game.advancedDataset, 'nba-advanced-teams')) {
+        const sourcePeriodEvidence=nbaGameSeasonEvidence(game,[away,home]);
+        const teamSampleEvidence=nbaTeamSampleEvidence(away,home);
+        const usable=away&&home&&!sourcePeriodEvidence.blocked&&teamSampleEvidence.away.positiveSample&&teamSampleEvidence.home.positiveSample&&!teamSampleEvidence.sharedTeamIdentity;
+        game.advancedDataset = { ...(game.advancedDataset || {}), ...provenance(game.advancedDataset, [away, home], 'nba-advanced-teams'),
+          provider: 'NBA.com advanced team stats',sourcePeriodEvidence,teamSampleEvidence,
+          pace: usable?measuredCalculation([away.pace, home.pace], (a, h) => (a + h) / 2):null, efficiencyDifference:usable?difference(home.netRating, away.netRating):null };
+        if (usable) matched += 1;
+        if(sourcePeriodEvidence.blocked)periodRejections.push({gameId:String(game.id||''),...sourcePeriodEvidence});
       }
       continue;
     }
     if (!['atp', 'wta'].includes(leagueKey)) continue;
     const tour = String(game.leagueKey).toLowerCase();
-    const away = playerRecord(sync.snapshot, tour, game.away?.name);
-    const home = playerRecord(sync.snapshot, tour, game.home?.name);
-    if (!away || !home) continue;
+    const away = eligibleRow(playerRecord(sync.snapshot, tour, game.away?.name), `tennis-${tour}`);
+    const home = eligibleRow(playerRecord(sync.snapshot, tour, game.home?.name), `tennis-${tour}`);
+    if (!away && !home && !ownsSource(game.advancedDataset, `tennis-${tour}`)) continue;
     const surface = String(game.autoContext?.surface || game.autoContext?.factors?.surface || '').toLowerCase();
-    const awaySurface = finite(away.surfaces?.[surface], away.elo);
-    const homeSurface = finite(home.surfaces?.[surface], home.elo);
-    game.advancedDataset = {
+    const awaySurface = finite(away?.surfaces?.[surface], finite(away?.elo));
+    const homeSurface = finite(home?.surfaces?.[surface], finite(home?.elo));
+    game.advancedDataset = { ...(game.advancedDataset || {}),
       provider: 'Jeff Sackmann tennis datasets',
-      updatedAt: sync.snapshot.updatedAt,
+      ...provenance(game.advancedDataset, [away, home], `tennis-${tour}`, surface ? observationReceiptTimes(game.autoContext) : []),
       surface,
-      surfaceEloDifference: homeSurface - awaySurface,
-      serveReturnDifference: ((home.serveWon || 0.6) + (home.returnWon || 0.4)) - ((away.serveWon || 0.6) + (away.returnWon || 0.4)),
-      awayMatches: away.matches,
-      homeMatches: home.matches
+      surfaceEloDifference: difference(homeSurface, awaySurface),
+      serveReturnDifference: measuredCalculation([home?.serveWon, home?.returnWon, away?.serveWon, away?.returnWon], (homeServe, homeReturn, awayServe, awayReturn) => homeServe + homeReturn - awayServe - awayReturn),
+      awayMatches: away?.matches ?? null,
+      homeMatches: home?.matches ?? null
     };
-    matched += 1;
+    if (away && home) matched += 1;
   }
-  return { ...sync, matched, sourceCorroborations };
+  for(const game of games){
+    const evidence=game.advancedDataset?.sourcePeriodEvidence;
+    if(evidence)evidence.collectionSelection=collectionPlan.selection[evidence.sourceId]||null;
+  }
+  return { ...sync, matched, sourceCorroborations, periodRejections,collectionPeriodPlan:collectionPlan.selection };
 }
 
 export { snapshotFile as advancedDatasetSnapshotFile };

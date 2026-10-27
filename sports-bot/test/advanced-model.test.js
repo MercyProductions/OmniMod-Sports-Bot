@@ -1,3 +1,4 @@
+import { CURRENT_MODEL_VERSION } from '../src/modelIdentity.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -132,7 +133,7 @@ test('opponent adjustment distinguishes schedule strength from raw results', () 
   assert.ok(profiles.Strong.stats.opponentAdjustedSample >= 3);
 });
 
-test('current lineups inherit learned player impact and report confirmed coverage', () => {
+test('current lineups inherit learned impact without counting an unavailable starter as confirmed coverage', () => {
   const samples = Array.from({ length: 5 }, (_, index) => parseHistoricalEventSummary(
     basketballSummary(index), basketballResult(`line-${index}`, `2099-01-${String(index + 1).padStart(2, '0')}`)
   ));
@@ -172,14 +173,20 @@ test('current lineups inherit learned player impact and report confirmed coverag
   const outcome = applyPlayerProfilesAndLineups([game], profiles);
   const learnedHomeStar = game.autoPlayers[0];
   assert.equal(outcome.learnedInjuries, 1);
-  assert.equal(outcome.confirmedLineups, 2);
+  assert.equal(outcome.confirmedLineups, 1);
   assert.ok(learnedHomeStar.impact > 4);
-  assert.equal(game.autoLineup.confirmedSides, 2);
+  assert.equal(game.autoLineup.confirmedSides, 1);
   assert.equal(game.autoLineup.away.coverage, 1);
-  assert.ok(game.autoLineup.home.pairCoverage > 0);
-  assert.ok(game.autoLineup.home.interactionRating > 50);
+  assert.equal(game.autoLineup.home.coverage, 0.8);
+  assert.equal(game.autoLineup.home.pairCoverage, 0);
+  assert.equal(game.autoLineup.home.interactionRating, 50);
   assert.ok(game.autoLineup.rosterTransitionRisk > 0);
   assert.ok(Number.isFinite(game.autoLineup.ratingDifference));
+  game.autoPlayers[0].availability=100;
+  applyPlayerProfilesAndLineups([game],profiles);
+  assert.equal(game.autoLineup.confirmedSides,2);
+  assert.ok(game.autoLineup.home.pairCoverage>0);
+  assert.ok(game.autoLineup.home.interactionRating>50);
 });
 
 test('schedule automation derives travel, time zones, altitude, fatigue, and playoff context locally', () => {
@@ -256,7 +263,8 @@ test('official MLB source corroborates games and probable starters, then reuses 
   const first = await corroborateOfficialSources([firstGame], '2099-07-01');
   const second = await corroborateOfficialSources([makeGame()], '2099-07-01');
   assert.equal(first.matched, 1);
-  assert.equal(first.confirmedStarters, 2);
+  assert.equal(first.confirmedStarters, 0);
+  assert.equal(first.probableStarters, 2);
   assert.equal(firstGame.sourceCorroboration.conflicts.length, 0);
   assert.equal(firstGame.autoPlayers.filter((row) => row.starter).length, 2);
   assert.equal(calls, 1);
@@ -287,13 +295,18 @@ test('sport-specific feature learning is accepted only after walk-forward improv
     const outcome = index % 2;
     return {
       dateKey: `2099-${String(Math.floor(index / 28) + 1).padStart(2, '0')}-${String(index % 28 + 1).padStart(2, '0')}`,
+      gameId: `feature-${index}`,league:'nba',
+      predictionGeneratedAt:new Date(Date.UTC(2099,0,1+index,8)).toISOString(),
+      startTime:new Date(Date.UTC(2099,0,1+index,12)).toISOString(),
+      resolvedAt:new Date(Date.UTC(2099,0,1+index,16)).toISOString(),
       sport: 'basketball', outcome,
       factors: { 'Useful signal': outcome ? 0.35 : -0.35, 'Misleading signal': outcome ? -0.75 : 0.75 }
     };
   });
-  const model = buildWalkForwardFeatureModels(rows, { minSamples: 20 }).basketball;
+  const model = buildWalkForwardFeatureModels(rows, { minSamples: 20,asOf:Date.parse("2100-01-01T00:00:00Z") }).basketball;
   assert.equal(model.trained, true);
-  assert.equal(model.accepted, true);
+  assert.equal(model.accepted, false);
+  assert.equal(model.researchAccepted, true);
   assert.ok(model.learnedBrier < model.baselineBrier);
   assert.ok(model.weights['Misleading signal'] < 1);
 });
@@ -319,7 +332,8 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
     games: [{ id, statusKey: 'final', leagueKey: 'nba', sportGroup: 'Basketball', away: { name: 'A', score: 90 }, home: { name: 'H', score: 100 } }],
     predictions: [{
       gameId: id, predictionCorrect: true, eligibleForCalibration: true, predictionMode: 'pregame',
-      modelVersion: 'OmniMod Evidence Ensemble v4.0.0', predictionProbability: 0.7,
+      modelVersion: CURRENT_MODEL_VERSION, predictionProbability: 0.7,
+      predictionGeneratedAt: `${dateKey}T08:00:00Z`, startTime: `${dateKey}T20:00:00Z`,
       sportProfile: 'basketball', factors: [{ label: 'Power', value: 0.2 }]
     }]
   });
@@ -328,8 +342,9 @@ test('historical rebuild excludes same-day and future caches to prevent leakage'
   await writeDailyCache('2099-03-03', makeSlate('2099-03-03', 'future'));
   const context = await loadModelContext('', 365, { asOfDateKey: '2099-03-02', intelligence: { teams: {}, players: {}, results: {} } });
   assert.equal(context.cacheCount, 1);
-  assert.equal(context.history.rows, 1);
-  assert.equal(context.featureLearning.basketball.sampleSize, 1);
+  assert.equal(context.history.rows, 0);
+  assert.equal(context.featureLearning.basketball, undefined);
+  assert.equal(context.learningInputAudit.calibrationRowsExcludedForAvailabilityOrDuplicateConflict, 1);
 });
 
 test('Elo ratings regress toward neutral when a new season begins', () => {

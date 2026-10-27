@@ -1,13 +1,15 @@
+import {acquireFinalClaim,completeFinalClaim,abandonFinalClaim,verifyFinalClaim,preserveFinalClaimMigration,inspectFinalClaim} from './finalClaimStore.js';
 import fs from 'node:fs/promises';
+import { withAuditFileLock } from './auditFileLock.js';
 import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { dataDir, legacyDataDir } from './config.js';
 
 let migrationChecked = false;
 
-async function ensureDataDir() {
+async function ensureDataDir({skipMigration=false} = {}) {
   await fs.mkdir(dataDir, { recursive: true });
-  if (process.env.NODE_ENV === 'test' || process.env.OMNIMOD_DISABLE_DATA_MIGRATION === 'true'
+  if (skipMigration || process.env.NODE_ENV === 'test' || process.env.OMNIMOD_DISABLE_DATA_MIGRATION === 'true'
     || migrationChecked || path.resolve(dataDir) === path.resolve(legacyDataDir)) return;
   migrationChecked = true;
 
@@ -17,6 +19,7 @@ async function ensureDataDir() {
     if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
     const source = path.join(legacyDataDir, entry.name);
     const destination = path.join(dataDir, entry.name);
+    if(entry.name.startsWith('final-result-')&&await preserveFinalClaimMigration(source,destination))continue;
     await fs.copyFile(source, destination, fsConstants.COPYFILE_EXCL).catch((error) => {
       if (error?.code !== 'EEXIST') throw error;
     });
@@ -46,12 +49,13 @@ export function dailyCachePath(dateKey, guildId = '') {
 }
 
 export async function readJson(file, fallback = null, options = {}) {
-  await ensureDataDir();
+  if(!options.readOnly)await ensureDataDir();
   try {
     const raw = await fs.readFile(file, 'utf8');
     return JSON.parse(raw);
   } catch (error) {
     if (options.throwOnError && error?.code !== 'ENOENT') {
+      if(options.redactErrors)throw new Error(`Could not read valid JSON from ${path.basename(file)}`);
       throw new Error(`Could not read valid JSON from ${path.basename(file)}: ${error.message}`, { cause: error });
     }
     return fallback;
@@ -59,7 +63,7 @@ export async function readJson(file, fallback = null, options = {}) {
 }
 
 export async function writeJson(file, value, options = {}) {
-  await ensureDataDir();
+  await ensureDataDir({skipMigration:options.skipDataMigration===true});
   await fs.mkdir(path.dirname(file), { recursive: true });
   if (options.backup) {
     await fs.copyFile(file, `${file}.bak`).catch((error) => {
@@ -123,53 +127,23 @@ export async function finishDailyProviderUsage(dateKey, guildId = '', provider =
   return updated;
 }
 
-export async function claimFinalResult(dateKey, guildId, gameId, details = {}, options = {}) {
+// options.staleMs is retained for compatibility; time does not authorize ownership transfer.
+export async function claimFinalResult(dateKey,guildId,gameId,details={},options={}){
+  const frozenDetails=structuredClone(details),frozenOptions=structuredClone(options);
   await ensureDataDir();
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const staleMs = Math.max(60_000, Number(options.staleMs) || 30 * 60_000);
-  const now = new Date();
-  const claim = {
-    dateKey, guildId: String(guildId || ''), gameId: String(gameId || ''),
-    state: 'claimed', claimedAt: now.toISOString(), processId: process.pid, ...details
-  };
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = await fs.open(file, 'wx', 0o600);
-      try { await handle.writeFile(`${JSON.stringify(claim, null, 2)}\n`, 'utf8'); }
-      finally { await handle.close(); }
-      return { claimed: true, claim };
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      const current = await readJson(file, null, { throwOnError: true });
-      const claimedAt = Date.parse(current?.claimedAt || '');
-      if (current?.state === 'posted' || !Number.isFinite(claimedAt) || now.getTime() - claimedAt < staleMs) {
-        return { claimed: false, claim: current };
-      }
-      const stale = `${file}.stale-${process.pid}-${Date.now()}`;
-      try { await fs.rename(file, stale); }
-      catch (renameError) {
-        if (renameError?.code === 'ENOENT') continue;
-        return { claimed: false, claim: await readJson(file, current) };
-      }
-    }
-  }
-  return { claimed: false, claim: await readJson(file, null) };
+  return acquireFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},frozenDetails,frozenOptions);
 }
-
-export async function finishFinalResult(dateKey, guildId, gameId, patch = {}) {
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const current = await readJson(file, null, { throwOnError: true });
-  if (!current) return null;
-  const updated = { ...current, ...patch, state: 'posted', postedAt: patch.postedAt || new Date().toISOString() };
-  await writeJson(file, updated, { mode: 0o600 });
-  return updated;
+export async function readFinalResultClaim(dateKey,guildId,gameId){
+  return inspectFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')});
 }
-
-export async function releaseFinalResultClaim(dateKey, guildId, gameId) {
-  const file = finalResultClaimPath(dateKey, guildId, gameId);
-  const current = await readJson(file, null).catch(() => null);
-  if (current?.state === 'claimed' && Number(current.processId) === process.pid) await fs.unlink(file).catch(() => {});
+export async function verifyFinalResultClaim(dateKey,guildId,gameId,lease){
+  return verifyFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},lease);
+}
+export async function finishFinalResult(dateKey,guildId,gameId,patch={},lease){
+  return completeFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},patch,lease);
+}
+export async function releaseFinalResultClaim(dateKey,guildId,gameId,lease){
+  return abandonFinalClaim(finalResultClaimPath(dateKey,guildId,gameId),{dateKey,guildId:String(guildId||''),gameId:String(gameId||'')},lease);
 }
 
 export async function readDailyCache(dateKey, guildId = '') {
@@ -178,8 +152,59 @@ export async function readDailyCache(dateKey, guildId = '') {
   return readJson(dailyCachePath(dateKey), null, { throwOnError: true });
 }
 
-export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?? '') {
-  await writeJson(dailyCachePath(dateKey, guildId), slate);
+const dailyCacheWrites = new Map();
+
+function cacheRevision(slate) {
+  const revision = slate?.cacheRevision ?? 0;
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('Invalid daily cache revision.');
+  return revision;
+}
+
+// Both replacement and read/modify/write transactions share the same queue and owner lock.
+async function withDailyCacheWrite(file, operation) {
+  const previous = dailyCacheWrites.get(file) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(() => withAuditFileLock(file, operation));
+  dailyCacheWrites.set(file, pending);
+  try { return await pending; }
+  finally { if (dailyCacheWrites.get(file) === pending) dailyCacheWrites.delete(file); }
+}
+
+export async function writeDailyCache(dateKey, slate, guildId = slate?.guildId ?? '', options = {}) {
+  const snapshot = structuredClone(slate);
+  const expected = options.expectedRevision ?? cacheRevision(snapshot);
+  if (!Number.isSafeInteger(expected) || expected < 0) throw new Error('Invalid expected daily cache revision.');
+  const file = dailyCachePath(dateKey, guildId);
+  return withDailyCacheWrite(file, async () => {
+    const current = await readJson(file, null, { throwOnError: true, redactErrors: true });
+    const revision = cacheRevision(current);
+    if (expected !== revision) {
+      const error = new Error('Daily cache changed during this operation; reload before retrying.');
+      error.code = 'DAILY_CACHE_CONFLICT';
+      throw error;
+    }
+    if (revision === Number.MAX_SAFE_INTEGER) throw new Error('Daily cache revision exhausted.');
+    const persisted = { ...snapshot, cacheRevision: revision + 1 };
+    await writeJson(file, persisted);
+    return persisted;
+  });
+}
+
+// Callback may perform bounded local journal I/O, never provider or Discord requests.
+export async function updateDailyCache(dateKey, guildId, update) {
+  const file = dailyCachePath(dateKey, guildId);
+  return withDailyCacheWrite(file, async () => {
+    const current = await readJson(file, null, { throwOnError: true, redactErrors: true });
+    if (!current) throw new Error('Daily cache disappeared; reload before updating.');
+    const revision = cacheRevision(current);
+    if (revision === Number.MAX_SAFE_INTEGER) throw new Error('Daily cache revision exhausted.');
+    const proposal = await update(structuredClone(current));
+    if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) throw new Error('Daily cache updater must return a slate.');
+    if (cacheRevision(proposal) !== revision) throw new Error('Daily cache updater changed the revision.');
+    if (proposal.dateKey !== current.dateKey || String(proposal.guildId || '') !== String(current.guildId || '')) throw new Error('Daily cache updater changed the scope.');
+    const persisted = { ...structuredClone(proposal), cacheRevision: revision + 1 };
+    await writeJson(file, persisted);
+    return persisted;
+  });
 }
 
 export async function listDailyCaches(limit = 30, guildId = '') {

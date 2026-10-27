@@ -1,0 +1,23 @@
+{
+  "phase": "price-provider-receipt-chronology",
+  "status": "in_progress",
+  "predictiveModelVersion": "OmniMod Evidence Ensemble v6.0.69",
+  "priceReportSchema": "sports-frozen-price-research-v3",
+  "items": [
+    {"item": "Reproduce lost fetch metadata and accepted late-receipt scenarios", "status": "verified_complete", "evidence": "Six prior-source regression failures; eight total new regression cases"},
+    {"item": "Freeze local fetch receipt for new initial and linked price-only observations", "status": "verified_complete", "evidence": "Actual journal write/read integration and distinct receipt assertions"},
+    {"item": "Enforce quote update <= receipt <= decision <= observation < start", "status": "verified_complete", "evidence": "Price-receipt chronology, identity, original-price and CLI regressions"},
+    {"item": "Keep valid non-wager forecasts and legacy bytes unchanged", "status": "verified_complete", "evidence": "Missing/invalid receipt issuance and hash-chain-preserving legacy retry tests"},
+    {"item": "Run full tests and syntax checks", "status": "verified_complete", "evidence": "1264 full / 68 focused / 238 syntax files, zero failures or skips"},
+    {"item": "Audit actual frozen journals without requests or mutation", "status": "verified_complete", "evidence": "12 v52 and 21 v69 forecasts separately; no qualified decisions, no supported scenarios, unchanged SHA256 values"},
+    {"item": "Obtain genuine permitted clinical/confirmed-goalie input coverage", "status": "pending", "evidence": "No connected alternate provider; prior official denial remains, unknown health stays unknown"},
+    {"item": "Validate actual offered-price availability, settlement and costs", "status": "pending", "evidence": "Local consistency and assumed counterfactuals cannot prove acceptance, fills, bookmaker terms or profitability"},
+    {"item": "Complete independent multi-date forecast and model-selection validation", "status": "in_progress", "evidence": "Existing source-pinned trials continue; no promotion or changed frozen source"},
+    {"item": "Complete full Sports scope before queued Crypto and Stocks", "status": "pending", "evidence": "This research-provenance phase is not a goal completion certificate"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "profitabilityEstablished": false
+}

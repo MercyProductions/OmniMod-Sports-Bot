@@ -1,0 +1,25 @@
+{
+  "phase": "native-record-and-availability-freshness",
+  "modelVersion": "v6.0.57",
+  "overallSportsStatus": "in progress",
+  "items": [
+    {"item": "Reproduce existing baseline", "status": "verified complete", "testsPassed": 998},
+    {"item": "Restore scoped native regular-season records and full-game OTL semantics", "status": "verified complete"},
+    {"item": "Recheck retained record clocks, values and event/team bindings", "status": "verified complete"},
+    {"item": "Preserve native alerts, strict event starts and explicit neutral-site flags", "status": "verified complete"},
+    {"item": "Exclude stale injury coverage without clearing unavailable players", "status": "verified complete"},
+    {"item": "Recheck retained goalie context expiry and native identity", "status": "verified complete"},
+    {"item": "Bounded public score observation and retrospective landing review", "status": "verified complete", "games": 12, "sideRecords": 24, "goalieSeasonCandidateRows": 47, "confirmedGoalies": 0},
+    {"item": "Current real injury and confirmed-goalie coverage", "status": "in progress", "limitation": "No inspected native landing assertion supplies it; earlier injury endpoint access denied; optional provider adapter has no configured live source."},
+    {"item": "Final regression/syntax checks", "status": "verified complete", "testsPassed": 1016, "syntaxFiles": 209},
+    {"item": "Frozen v6.0.52 forward trial", "status": "in progress", "limitation": "Twelve games, one date, zero finals at latest checked capture; requires 75 games/eight dates/14 days. Hourly scheduler depends on this machine/Codex."},
+    {"item": "Independent v6.0.57 forward and economic validation", "status": "pending"},
+    {"item": "Full queued Crypto specification", "status": "pending"},
+    {"item": "Full queued Stocks specification", "status": "pending"}
+  ],
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "frozenTrialRewritten": false,
+  "productionChanged": false,
+  "stocksScheduleChanged": false
+}

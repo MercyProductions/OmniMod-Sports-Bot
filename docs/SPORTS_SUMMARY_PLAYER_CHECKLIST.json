@@ -1,0 +1,21 @@
+{
+  "phase": "summary_player_reconciliation",
+  "status": "in_progress",
+  "modelVersion": "v6.0.63",
+  "implementationCommit": "11dda749dbc33061a7c3204901149e5859066072",
+  "items": [
+    {"id":"baseline_and_old_source_reproduction","status":"verified_complete","evidence":"1100 baseline passes; three old-source role/order/specialist cases fail"},
+    {"id":"preserve_source_and_critical_metadata","status":"verified_complete","evidence":"raw source rows retained; known roles/measurements survive missing fields; incompatible roles/statistics remain conflicts"},
+    {"id":"conservative_health_and_preferred_provider_interoperation","status":"verified_complete","evidence":"order-independent restrictions; unknown medical state stays unknown; independent provider roles preserved"},
+    {"id":"expiry_restart_and_frozen_evidence","status":"verified_complete","evidence":"valid remaining roster dependency, original-input retention, JSON restart and actual journal tests"},
+    {"id":"verification","status":"verified_complete","evidence":"14 new scenarios; focused79/full1114/postcommit69/syntax221; zero failures/skips"},
+    {"id":"existing_study_and_schedule_preservation","status":"verified_complete","evidence":"three archived studies inspected read-only with no eligible finals; all three automation hashes unchanged"},
+    {"id":"real_injury_and_confirmed_goalie_coverage","status":"pending","evidence":"existing free source limitations unchanged; preferred external provider not connected"},
+    {"id":"current_model_performance_and_full_goal","status":"in_progress","evidence":"no adequate real v63 accuracy/calibration/value evidence; full Sports requirements remain before Crypto then Stocks"}
+  ],
+  "providerRequests": 0,
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}

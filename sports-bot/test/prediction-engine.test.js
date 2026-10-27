@@ -145,7 +145,8 @@ test('evaluation reports proper scoring and calibration metrics', () => {
 test('legacy heuristic caches cannot contaminate v3/v4 calibration', () => {
   const rows = collectGradedRows([{ dateKey: '2099-01-01', slate: { predictions: [
     { gameId: 'old', confidenceValue: 80, predictionCorrect: true, modelVersion: 'OmniMod Sports source-model parity v2' },
-    { gameId: 'new', confidenceValue: 60, predictionCorrect: false, modelVersion: 'OmniMod Evidence Ensemble v3.0.0', predictionMode: 'pregame', eligibleForCalibration: true }
+    { gameId: 'new', confidenceValue: 60, predictionCorrect: false, modelVersion: 'OmniMod Evidence Ensemble v3.0.0', predictionMode: 'pregame', eligibleForCalibration: true,
+      predictionGeneratedAt: '2099-01-01T08:00:00Z', startTime: '2099-01-01T20:00:00Z' }
   ] } }]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].prediction.gameId, 'new');
@@ -157,6 +158,7 @@ test('walk-forward home-away learning treats a soccer draw as neutral evidence',
     predictions: [{
       gameId: 'draw', predictionCorrect: false, eligibleForCalibration: true, predictionMode: 'pregame',
       modelVersion: 'OmniMod Evidence Ensemble v4.0.0', sportProfile: 'soccer',
+      predictionGeneratedAt: '2099-01-01T08:00:00Z', startTime: '2099-01-01T20:00:00Z',
       factors: [{ label: 'Elo strength', value: 0.1 }]
     }]
   } }];
@@ -178,13 +180,14 @@ test('automatic external results update Elo and bounded recent head-to-head', ()
   const externalResults = Array.from({ length: 6 }, (_, index) => ({
     id: `external-${index}`, dateKey: `2098-12-${String(index + 1).padStart(2, '0')}`,
     startTime: `2098-12-${String(index + 1).padStart(2, '0')}T20:00:00Z`,
+    observedAt:`2098-12-${String(index+1).padStart(2,'0')}T23:00:00Z`,
     league: 'NBA', leagueKey: 'nba', sportGroup: 'Basketball',
     awayTeam: 'Away Team', homeTeam: 'Home Team', awayScore: 90, homeScore: 110
   }));
   const ratings = buildEloRatings({ teams: {}, results: {} }, [], externalResults);
   assert.ok(lookupElo(ratings, 'nba', 'Home Team') > 1500);
 
-  const baselineContext = context();
+  const baselineContext = {...context(),now:Date.parse('2099-01-01T12:00:00Z')};
   const baseline = predictGame(game(), 0, baselineContext);
   const enriched = predictGame(game(), 0, { ...baselineContext, externalResults });
   assert.ok(enriched.outcomeProbabilities.home > baseline.outcomeProbabilities.home);

@@ -1,0 +1,20 @@
+{
+  "schema": "sports-implementation-phase-v1",
+  "phase": "durable-refresh-rejection-evidence",
+  "status": "in_progress",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.67",
+  "liveTradingEnabled": false,
+  "items": [
+    {"id": "baseline", "status": "verified_complete", "evidence": "1211 passing tests reproduced"},
+    {"id": "reproduction", "status": "verified_complete", "evidence": "Initial six-case old-source test: five failures demonstrate lost source/cache reasons"},
+    {"id": "serializer", "status": "verified_complete", "evidence": "Fixed code registry, explicit reason policy and omitted-input counts; no raw error text persisted"},
+    {"id": "historical_integrity", "status": "verified_complete", "evidence": "Identical legacy retries preserve bytes; different causes/omission counts reject; no backfill"},
+    {"id": "audit", "status": "verified_complete", "evidence": "Operational v3 exposes policy coverage and strict omission counters; historical completeness stays unverified"},
+    {"id": "tests", "status": "verified_complete", "evidence": "69 focused / 1222 full / 233 syntax files pass"},
+    {"id": "actual_cli", "status": "verified_complete", "evidence": "12 issued research forecasts, no terminal attempts; original journal bytes unchanged; zero requests"},
+    {"id": "source_neutral_refresh", "status": "pending", "evidence": "Independent availability data still cannot replace a revalidated summary; alternative source authority needs a validated receipt/completeness contract"},
+    {"id": "clinical_coverage", "status": "blocked", "evidence": "No actual authorized explicit injury or confirmed-goalie observations recovered; optional provider unconnected"},
+    {"id": "forward_model_validation", "status": "in_progress", "evidence": "Trials retained; current diagnostic games not started at actual check; no predictive improvement established"},
+    {"id": "complete_sports_scope", "status": "in_progress", "evidence": "All original reliability, accuracy, operational and odds requirements remain; Crypto then Stocks queued"}
+  ]
+}

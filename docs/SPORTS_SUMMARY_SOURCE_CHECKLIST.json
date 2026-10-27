@@ -1,0 +1,22 @@
+{
+  "phase": "summary_source_identity_and_accepted_coverage",
+  "status": "in_progress",
+  "modelVersion": "v6.0.62",
+  "implementationCommit": "e90425ded1ac623a6d2e9cd276cb7ad9a27954be",
+  "items": [
+    {"id":"reproduce_baseline_and_wrong_source_inputs","status":"verified_complete","evidence":"1079 baseline; four old-source failures"},
+    {"id":"identity_preservation_and_rejection","status":"verified_complete","evidence":"explicit event/start/ordered-team/season/league checks; v2 cache namespaces; missing declarations partial"},
+    {"id":"group_binding_and_historical_contract","status":"verified_complete","evidence":"native-ID display canonicalization; foreign group rejection; nullable conflicting historical sample and guarded caller"},
+    {"id":"cutoff_refresh_and_independent_source_protection","status":"verified_complete","evidence":"stored/future identity, refresh refusal and independent scoreboard tests"},
+    {"id":"accepted_vs_attempted_coverage","status":"verified_complete","evidence":"additive counters and per-game provider/cap/mapping reasons; backward compatible selected-slot scalar; offline eligibility null"},
+    {"id":"regressions_and_archived_source","status":"verified_complete","evidence":"21 new scenarios; focused121/full1100/postcommit70/syntax219; zero failures/skips"},
+    {"id":"actual_saved_source_absence_audit","status":"verified_complete","evidence":"hash-verified v61 capture: six summary slots/six HTTP403/zero accepted metadata/zero injuries; no new provider request"},
+    {"id":"actual_medical_and_confirmed_goalie_coverage","status":"pending","evidence":"existing sources lack verified assertions; preferred provider not connected"},
+    {"id":"current_model_accuracy_and_value","status":"pending","evidence":"no adequate independent v62 forward results or established calibration/economic improvement"},
+    {"id":"full_goal","status":"in_progress","evidence":"entire Sports specification remains; Crypto then Stocks queued; no completion/promotion/deployment"}
+  ],
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}

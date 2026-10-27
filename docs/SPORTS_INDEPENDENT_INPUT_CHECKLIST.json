@@ -1,0 +1,60 @@
+{
+  "phase": "independent_availability_parent_isolation",
+  "status": "in_progress",
+  "modelVersion": "v6.0.65",
+  "implementationCommit": "736aefb38f34ebf3cdc47cece1af5bc59b9eed10",
+  "items": [
+    {
+      "id": "baseline_and_old_source_regression",
+      "status": "verified_complete",
+      "evidence": "1126 baseline passes; independent provider lost under future summary reproduced against old source"
+    },
+    {
+      "id": "independent_source_selection",
+      "status": "verified_complete",
+      "evidence": "valid provider and scoreboard inputs survive unusable summary; dependent and unclassified rows/aggregates excluded"
+    },
+    {
+      "id": "native_event_snapshot_and_clock_binding",
+      "status": "verified_complete",
+      "evidence": "new internal identity; import side uniqueness; inference rejects wrong event/team/player/snapshot/clock, expiry and unbound legacy rows"
+    },
+    {
+      "id": "original_receipts_and_issuance",
+      "status": "verified_complete",
+      "evidence": "per-provider clocks/bindings copied into prediction/journal evidence; same-player health and role dependencies tested"
+    },
+    {
+      "id": "verification",
+      "status": "verified_complete",
+      "evidence": "16 new cases; focused112/full1142/postcommit68/syntax224; zero failed/skipped"
+    },
+    {
+      "id": "saved_actual_capture_filter_check",
+      "status": "verified_complete",
+      "evidence": "21 v61 games at original cutoffs retain2 pitcher projections; zero alternate-provider rows/unusable parents; original bytes unchanged; not full forecasting validation"
+    },
+    {
+      "id": "original_trial_and_schedules",
+      "status": "verified_complete",
+      "evidence": "sixth v52 capture at11:11UTC;12games/0finals;6receipts/61blobs; archived source/plan/artifact unchanged; automation hashes unchanged"
+    },
+    {
+      "id": "actual_medical_and_confirmed_starter_feed",
+      "status": "pending",
+      "evidence": "unconnected preferred provider and existing summary403s; no new medical coverage"
+    },
+    {
+      "id": "full_sports_and_current_model_validation",
+      "status": "in_progress",
+      "evidence": "adequate current-model accuracy/calibration/economic evidence remains unavailable; no promotion"
+    }
+  ],
+  "newVersionForecastsIssued": 0,
+  "codeAndSavedInputCheckProviderRequests": 0,
+  "separateOriginalTrialProviderRequests": 10,
+  "liveTradingEnabled": false,
+  "emergencyStop": true,
+  "productionChanged": false,
+  "modelPromoted": false
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "sports-implementation-phase-v1",
+  "phase": "model-decision-horizon-binding",
+  "modelVersion": "OmniMod Evidence Ensemble v6.0.69",
+  "status": "in_progress",
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "items": [
+    {"id": "baseline", "status": "verified_complete", "evidence": "1247 tests reproduced before source changes"},
+    {"id": "reproduction", "status": "verified_complete", "evidence": "Two old-source failures: requested Daily journaled T-90; late slate lacked explicit chosen scope"},
+    {"id": "scope_binding", "status": "verified_complete", "evidence": "Registry selection and new permanent identity share one information-time scope; invalid declarations fail"},
+    {"id": "legacy", "status": "verified_complete", "evidence": "Old inferred identities and hash-chain bytes retained without backfill"},
+    {"id": "regressions", "status": "verified_complete", "evidence": "Nine new cases; 107 focused / 1256 full / 237 syntax files pass"},
+    {"id": "actual_current_capture", "status": "verified_complete", "evidence": "21 real pregame pairs; all 21 current declarations bound; no finals, calibration or actionable predictions"},
+    {"id": "final_collection", "status": "in_progress", "evidence": "Existing final-only heartbeat includes pinned fifth study; cadence/status/target and other schedules preserved"},
+    {"id": "source_access", "status": "blocked", "evidence": "Direct NHL boxscore HTTP403; no access workaround or invented starter schema; clinical coverage still absent"},
+    {"id": "windows_incident", "status": "pending", "evidence": "40 real-process cases each produced one successor; historical zero-successor cause not established"},
+    {"id": "independent_model_validation", "status": "pending", "evidence": "Overlapping engineering pairs cannot substitute for adequate preregistered multi-date outcomes or approve v69"},
+    {"id": "full_goal", "status": "in_progress", "evidence": "Full Sports reliability, accuracy, odds and operational requirements remain before Crypto then Stocks"}
+  ]
+}

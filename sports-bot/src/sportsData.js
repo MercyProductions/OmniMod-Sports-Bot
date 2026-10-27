@@ -1,3 +1,18 @@
+import {nativeNhlRecordEvidence} from './teamRecordEvidence.js';
+import {capturedEventTime} from './capturedEventTime.js';
+import {parseScoreboardStarterEvidence} from './scoreboardStarters.js';
+import {cdnWindowEvidence,scoreboardCoverage} from './scoreboardWindow.js';
+import {selectLineMarkets} from './lineMarketIntegrity.js';
+import {quoteTimeEpoch} from './oddsPricing.js';
+import {collectH2HBooks} from './bookmakerIntegrity.js';
+import {inspectOddsEventCandidate,inspectOddsEventMatch,matchOddsEventCohort} from './oddsEventIdentity.js';
+import {applyManualResults} from './manualResultMatching.js';
+export {applyManualResults} from './manualResultMatching.js';
+import {finalReplyMatches} from './finalResultRevision.js';
+import {sourceEventsMatch,matchSourceEvent} from './sourceEventMatching.js';
+import {espnScoreboardMappingSource,bindEspnSummaryMappings} from './espnEventMapping.js';
+import {journalGameIndex} from './journalEventMatch.js';
+import {resolveSlateGame,scopedEventKey,eventReference,scopedSlatePredictions} from './slateEventIdentity.js';
 import { config } from './config.js';
 import { enrichGamesAutomatically } from './autoEnrichment.js';
 import { attachAdvancedDatasetContext } from './advancedDatasets.js';
@@ -7,13 +22,14 @@ import { normalizeEntityName, readIntelligenceStore } from './intelligenceStore.
 import { loadModelContext } from './modelEvaluation.js';
 import { captureMarketSnapshots, readFeatureWarehouse, recordSlateSnapshot, warehouseCandidateRowsBefore, warehouseInventory } from './featureWarehouse.js';
 import { runHistoricalReplay } from './historicalReplay.js';
-import { evaluatePredictionHorizons } from './horizonEvaluation.js';
+import { evaluatePredictionHorizons, predictionHorizon } from './horizonEvaluation.js';
 import { readLocalMlModels, trainAndPersistLocalMlModels } from './localMl.js';
 import { readModelRegistry, refreshModelRegistry } from './modelRegistry.js';
 import { MODEL_VERSION, predictGame } from './predictionEngine.js';
 import { cachedFetchJson } from './providerCache.js';
+import { recordPredictionJournal } from './predictionJournal.js';
 import { sportProfile } from './sportProfiles.js';
-import { americanToProbability, finiteNumber, finalOutcomeSide, validScore } from './dataValidation.js';
+import { americanToProbability, finiteNumber, finalOutcomeSide, measuredCalculation, validScore } from './dataValidation.js';
 
 const ESPN_LEAGUES = [
   { key: 'mlb', sport: 'baseball', league: 'mlb', label: 'MLB', group: 'Baseball', priority: 100 },
@@ -136,13 +152,15 @@ function parseTeam(competitors, homeAway) {
 }
 
 export function parseEspnEvent(event, league, sourceMeta = {}) {
+  if(!event||typeof event!=='object')return null;
   const competition = Array.isArray(event.competitions) ? event.competitions[0] : null;
   if (!competition || !Array.isArray(competition.competitors)) return null;
+  const startTime = event.date || competition.date || '';
+  if(!Number.isFinite(capturedEventTime(startTime)))return null;
   const status = parseStatus(event.status ?? competition.status);
   const away = parseTeam(competition.competitors, 'away');
   const home = parseTeam(competition.competitors, 'home');
-  const startTime = event.date || competition.date || '';
-  return {
+  const game = {
     id: String(event.id || competition.id || `${league.key}-${away.abbr}-${home.abbr}-${startTime}`),
     league: league.label,
     leagueKey: league.key,
@@ -174,6 +192,11 @@ export function parseEspnEvent(event, league, sourceMeta = {}) {
     source: 'ESPN public scoreboard',
     sourceMeta: { provider: 'ESPN', ...sourceMeta }
   };
+  const starters=parseScoreboardStarterEvidence(event,game);
+  if(starters)game.scoreboardStarterEvidence=starters;
+  const mappingSource=espnScoreboardMappingSource(event,game);
+  if(mappingSource)game.summaryMappingSource=mappingSource;
+  return game;
 }
 
 export function scoreboardEventsFromCdn(payload, league = null) {
@@ -189,17 +212,20 @@ export function scoreboardEventsFromCdn(payload, league = null) {
   return events.filter((event) => String(event?.leagueId || '') === league.league);
 }
 
-export function parseNhlOfficialGame(game, league, sourceMeta = {}) {
-  if (!game?.id || !game.startTimeUTC || !game.awayTeam?.abbrev || !game.homeTeam?.abbrev) return null;
+export function parseNhlOfficialGame(game, league, sourceMeta = {}, {asOf=Date.now()}={}) {
+  if (!game?.id || !Number.isFinite(capturedEventTime(game.startTimeUTC)) || !game.awayTeam?.abbrev || !game.homeTeam?.abbrev) return null;
   const state = String(game.gameState || '').toUpperCase();
-  const statusKey = ['FINAL', 'OFF'].includes(state) ? 'final' : ['LIVE', 'CRIT'].includes(state) ? 'live' : 'scheduled';
+  const schedule=String(game.gameScheduleState||'').toUpperCase();
+  const statusKey = schedule&&schedule!=='OK'?'alert':['FINAL', 'OFF'].includes(state) ? 'final' : ['LIVE', 'CRIT'].includes(state) ? 'live' : ['FUT','PRE'].includes(state)?'scheduled':'alert';
+  const records=Object.fromEntries(['away','home'].map(side=>[side,nativeNhlRecordEvidence(game,side,sourceMeta,{asOf})]));
   const awayScore = validScore(game.awayTeam.score);
   const homeScore = validScore(game.homeTeam.score);
-  const team = (side, score, otherScore) => ({
+  const team = (side, score, otherScore, recordEvidence) => ({
     id: String(side.id || ''),
     name: side.name?.default || side.abbrev,
     abbr: side.abbrev,
-    record: '',
+    record:['parsed_native_assertion','zero_games'].includes(recordEvidence.status)?recordEvidence.raw:'',
+    recordEvidence,
     score,
     winner: statusKey === 'final' && score !== null && otherScore !== null && score > otherScore,
     logo: side.logo || ''
@@ -212,16 +238,16 @@ export function parseNhlOfficialGame(game, league, sourceMeta = {}) {
     startTimeLocal: formatLocalTime(game.startTimeUTC),
     dateKey: localDateKey(new Date(game.startTimeUTC)),
     statusKey,
-    statusLabel: statusKey === 'final' ? 'Final' : statusKey === 'live' ? 'Live' : 'Upcoming',
-    detail: state || 'Scheduled',
+    statusLabel: statusKey === 'final' ? 'Final' : statusKey === 'live' ? 'Live' : statusKey==='alert'?'Alert':'Upcoming',
+    detail: [state,schedule].filter(Boolean).join(' / ') || 'Unknown native status',
     venue: game.venue?.default || '',
     venueDetails: { id: '', name: game.venue?.default || '', address: { city: '', state: '', country: '' } },
-    neutralSite: false,
+    neutralSite: typeof game.neutralSite==='boolean'?game.neutralSite:null,
     seasonYear: Number(game.season) || null,
     seasonType: Number(game.gameType) || null,
     seasonSlug: '',
-    away: team(game.awayTeam, awayScore, homeScore),
-    home: team(game.homeTeam, homeScore, awayScore),
+    away: team(game.awayTeam, awayScore, homeScore,records.away),
+    home: team(game.homeTeam, homeScore, awayScore,records.home),
     odds: null,
     source: 'NHL official scoreboard',
     sourceMeta: { provider: 'NHL API', ...sourceMeta }
@@ -232,7 +258,7 @@ function cdnScoreboardUrl(league, dateParam) {
   const route = league.sport === 'soccer' ? `soccer/${league.league}` : league.league;
   const url = new URL(`https://cdn.espn.com/core/${route}/scoreboard`);
   url.searchParams.set('xhr', '1');
-  url.searchParams.set('dates', dateParam);
+  url.searchParams.set('date', dateParam);
   if (league.groups) url.searchParams.set('groups', league.groups);
   if (league.limit) url.searchParams.set('limit', String(league.limit));
   return url.toString();
@@ -240,7 +266,7 @@ function cdnScoreboardUrl(league, dateParam) {
 
 async function fetchEspnGames(date = new Date(), options = {}) {
   if (options.localOnly || config.localOnly) {
-    return { games: [], diagnostics: ['ESPN scoreboard: skipped because LOCAL_ONLY=true.'], externalCalls: 0 };
+    return { games: [], diagnostics: ['ESPN scoreboard: skipped because LOCAL_ONLY=true.'], externalCalls: 0,coverage:[] };
   }
   const dateParam = espnDateKey(date);
   const requestedKeys = new Set((options.leagueKeys || []).map((key) => String(key).toLowerCase()));
@@ -250,6 +276,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     .slice(0, config.maxLeaguesPerRefresh);
   const diagnostics = [];
   const allGames = [];
+  const coverage=[];
   let externalCalls = 0;
 
   await Promise.all(leagues.map(async (league) => {
@@ -267,12 +294,12 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     let provider = 'ESPN';
     if (!primary.ok || !primary.json || primary.upstreamError) {
       const cdn = await cachedFetchJson(cdnScoreboardUrl(league, dateParam), {
-        namespace: `espn-cdn-v2-${league.key}`,
+        namespace: `espn-cdn-v3-${league.key}`,
         ttlMs: config.scoreboardCacheMinutes * 60_000,
         staleMs: config.scoreboardStaleHours * 60 * 60_000,
         negativeTtlMs: 5 * 60_000,
         timeoutMs: 12_000,
-        transformJson: (payload) => ({ events: scoreboardEventsFromCdn(payload, league) })
+        transformJson: (payload) => ({ events: scoreboardEventsFromCdn(payload, league),windowEvidence:cdnWindowEvidence(payload) })
       });
       if (cdn.cacheState === 'network' || cdn.cacheState === 'revalidated') externalCalls += 1;
       if (cdn.ok && Array.isArray(cdn.json?.events)) {
@@ -296,10 +323,13 @@ async function fetchEspnGames(date = new Date(), options = {}) {
       });
       if (official.cacheState === 'network' || official.cacheState === 'revalidated') externalCalls += 1;
       if (official.ok && Array.isArray(official.json?.games)) {
+        const parsedGames=[];
         for (const game of official.json.games) {
           const parsed = parseNhlOfficialGame(game, league, { fetchedAt: official.fetchedAt, cacheState: official.cacheState, upstreamError: official.upstreamError || '' });
-          if (parsed && parsed.dateKey === localDateKey(date)) allGames.push(parsed);
+          if(parsed)parsedGames.push(parsed);
         }
+        const report=scoreboardCoverage({leagueKey:league.key,provider:'NHL API',requestedDay:localDateKey(date),reportedEvents:official.json.games.length,parsedGames,sourceMeta:official});coverage.push(report);
+        for(const game of parsedGames)if(game.dateKey===localDateKey(date)){game.sourceMeta.scoreboardWindow=report;allGames.push(game);}
         diagnostics.push(`${league.label}: ${official.json.games.length} official event(s), source=${official.cacheState}.`);
         return;
       }
@@ -307,6 +337,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
     }
     if (result.cacheState === 'network' || result.cacheState === 'revalidated') externalCalls += 1;
     if (!result.ok || !result.json) {
+      coverage.push({...scoreboardCoverage({leagueKey:league.key,provider,requestedDay:localDateKey(date),reportedEvents:null,sourceMeta:result}),windowStatus:'provider_unavailable'});
       diagnostics.push(`${league.label}: ${result.error || 'no response'}`);
       return;
     }
@@ -315,6 +346,7 @@ async function fetchEspnGames(date = new Date(), options = {}) {
           ? result.json.events.filter((event) => String(event?.leagueId || '') === league.league)
           : result.json.events)
       : [];
+    const parsedGames=[];
     for (const event of events) {
       const parsed = parseEspnEvent(event, league, {
         fetchedAt: result.fetchedAt,
@@ -322,12 +354,14 @@ async function fetchEspnGames(date = new Date(), options = {}) {
         provider,
         upstreamError: result.upstreamError || ''
       });
-      if (parsed && parsed.dateKey === localDateKey(date)) allGames.push(parsed);
+      if(parsed)parsedGames.push(parsed);
     }
-    diagnostics.push(`${league.label}: ${events.length} event(s), source=${result.cacheState}`);
+    const report=scoreboardCoverage({leagueKey:league.key,provider,requestedDay:localDateKey(date),reportedEvents:events.length,parsedGames,sourceMeta:result,windowEvidence:result.json.windowEvidence||null});coverage.push(report);
+    for(const game of parsedGames)if(game.dateKey===localDateKey(date)){game.sourceMeta.scoreboardWindow=report;allGames.push(game);}
+    diagnostics.push(`${league.label}: ${events.length} provider event(s), ${report.acceptedLocalDayGames} accepted local-day game(s), ${report.outsideLocalDayGames} outside day, ${report.invalidRows} invalid; window=${report.windowStatus}; source=${result.cacheState}`);
   }));
   allGames.sort((a, b) => new Date(a.startTime) - new Date(b.startTime) || a.league.localeCompare(b.league));
-  return { games: allGames, diagnostics, externalCalls };
+  return { games: allGames, diagnostics, externalCalls,coverage:coverage.sort((a,b)=>a.leagueKey.localeCompare(b.leagueKey)) };
 }
 
 function resolveLeague(row) {
@@ -365,19 +399,13 @@ function manualGame(row) {
   };
 }
 
-function gamesMatch(left, right) {
-  if (String(left.id) === String(right.id)) return true;
-  return normalizeName(left.away?.name) === normalizeName(right.away?.name) &&
-    normalizeName(left.home?.name) === normalizeName(right.home?.name) &&
-    normalizeName(left.leagueKey || left.league) === normalizeName(right.leagueKey || right.league);
-}
-
-function mergeLocalGames(scoreboardGames, intelligence, dateKey) {
+export function mergeLocalGames(scoreboardGames, intelligence, dateKey) {
   const games = [...scoreboardGames];
   for (const row of Object.values(intelligence?.games || {})) {
     if (String(row.dateKey || row.startTime).slice(0, 10) !== dateKey) continue;
     const local = manualGame(row);
-    const index = games.findIndex((game) => gamesMatch(game, local));
+    const match=matchSourceEvent(games,local);
+    const index=match.game?games.indexOf(match.game):-1;
     if (index === -1) games.push(local);
     else games[index] = {
       ...games[index],
@@ -394,30 +422,12 @@ function bestQuote(quotes) {
   return [...quotes].sort((a, b) => a.rawImplied - b.rawImplied)[0] || null;
 }
 
-export function bestH2HMarket(bookmakers, game) {
-  const awayAliases = [normalizeName(game.away.name), normalizeName(game.away.abbr)];
-  const homeAliases = [normalizeName(game.home.name), normalizeName(game.home.abbr)];
+export function bestH2HMarket(bookmakers, game, { oddsFormat = 'american',asOf=Date.now() } = {}) {
   const fairRows = [];
   const quoteGroups = { away: [], home: [], draw: [] };
   const twoWay = sportProfile(game).twoWay;
-  const seenBooks = new Set();
-  for (const bookmaker of bookmakers ?? []) {
-    const bookId = bookmaker.key || bookmaker.title;
-    if (!bookId || seenBooks.has(bookId)) continue;
-    const market = (bookmaker.markets ?? []).find((row) => row.key === 'h2h');
-    if (!market) continue;
-    const book = {};
-    for (const outcome of market.outcomes ?? []) {
-      const normalized = normalizeName(outcome.name);
-      const side = awayAliases.includes(normalized) ? 'away' : homeAliases.includes(normalized) ? 'home' : /draw|tie/i.test(String(outcome.name)) ? 'draw' : '';
-      const price = finiteNumber(outcome.price);
-      const rawImplied = americanToProbability(price);
-      if (!side || rawImplied === null) continue;
-      book[side] = { side, bookmaker: bookmaker.title || bookmaker.key || 'Book', bookmakerKey: bookmaker.key || bookmaker.title, name: outcome.name, price, rawImplied, lastUpdate: market.last_update || bookmaker.last_update || '', timestampSource: market.last_update ? 'provider_update' : 'bookmaker_update_unverified' };
-    }
-    if (!book.away || !book.home) continue;
-    if (twoWay ? Boolean(book.draw) : !book.draw) continue;
-    seenBooks.add(bookId);
+  const {books,audit}=collectH2HBooks(bookmakers,game,{twoWay,oddsFormat,asOf});
+  for (const book of books) {
     const total = book.away.rawImplied + book.home.rawImplied + (book.draw?.rawImplied || 0);
     if (total <= 0) continue;
     const fair = {};
@@ -429,7 +439,7 @@ export function bestH2HMarket(bookmakers, game) {
     }
     fairRows.push(fair);
   }
-  if (!fairRows.length) return { away: null, home: null, draw: null, bookmakerCount: 0, dispersion: 1, lastUpdate: '' };
+  if (!fairRows.length) return { away: null, home: null, draw: null, bookmakerCount: 0, dispersion: 1, lastUpdate: '',bookmakerIntegrity:audit };
   const output = {};
   for (const side of ['away', 'home', 'draw']) {
     const quotes = quoteGroups[side];
@@ -446,69 +456,26 @@ export function bestH2HMarket(bookmakers, game) {
   const dispersion = Math.max(...['away', 'home', 'draw'].map((side) => standardDeviation(quoteGroups[side].map((row) => row.fairProbability))));
   return {
     ...output,
+    settlementEvidence:{classificationSource:'sport_profile_and_outcome_set',bookSpecificTermsVerified:false,executionVerified:false},
     rules: !twoWay ? 'regulation_3way' : ['baseball', 'basketball', 'hockey'].includes(sportProfile(game).key) ? 'full_game_2way' : 'unverified_settlement',
     bookmakerCount: fairRows.length,
+    bookmakerIntegrity:audit,
     dispersion,
-    lastUpdate: [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).every(Boolean)
-      ? [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).sort()[0] : ''
+    lastUpdate: [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).every(value=>Number.isFinite(quoteTimeEpoch(value)))
+      ? [...Object.values(quoteGroups).flat()].map((row) => row.lastUpdate).sort((a,b)=>quoteTimeEpoch(a)-quoteTimeEpoch(b))[0] : ''
   };
 }
 
-export function bestSpreadTotalMarkets(bookmakers, game) {
-  const aliases = {
-    away: [normalizeName(game.away.name), normalizeName(game.away.abbr)],
-    home: [normalizeName(game.home.name), normalizeName(game.home.abbr)]
-  };
-  const spreadRows = { away: [], home: [] };
-  const totalRows = { over: [], under: [] };
-  for (const bookmaker of bookmakers ?? []) {
-    for (const market of bookmaker.markets ?? []) {
-      if (market.key === 'spreads') {
-        for (const outcome of market.outcomes ?? []) {
-          const normalized = normalizeName(outcome.name);
-          const side = aliases.away.includes(normalized) ? 'away' : aliases.home.includes(normalized) ? 'home' : '';
-          const point = finiteNumber(outcome.point);
-          if (!side || point === null || americanToProbability(outcome.price) === null) continue;
-          spreadRows[side].push({ side, bookmaker: bookmaker.title || bookmaker.key || 'Book', price: Number(outcome.price), point, lastUpdate: market.last_update || bookmaker.last_update || '' });
-        }
-      }
-      if (market.key === 'totals') {
-        for (const outcome of market.outcomes ?? []) {
-          const side = /over/i.test(outcome.name) ? 'over' : /under/i.test(outcome.name) ? 'under' : '';
-          const point = finiteNumber(outcome.point);
-          if (!side || point === null || americanToProbability(outcome.price) === null) continue;
-          totalRows[side].push({ bookmaker: bookmaker.title || bookmaker.key || 'Book', price: Number(outcome.price), point, lastUpdate: market.last_update || bookmaker.last_update || '' });
-        }
-      }
-    }
-  }
-  const spread = {};
-  for (const side of ['away', 'home']) {
-    const point = median(spreadRows[side].map((row) => row.point));
-    spread[side] = point === null ? null : [...spreadRows[side]].sort((a, b) => Math.abs(a.point - point) - Math.abs(b.point - point))[0];
-  }
-  spread.favorite = [spread.away, spread.home].filter(Boolean).sort((a, b) => a.point - b.point)[0] || null;
-  const total = {};
-  for (const side of ['over', 'under']) {
-    const point = median(totalRows[side].map((row) => row.point));
-    total[side] = point === null ? null : [...totalRows[side]].sort((a, b) => Math.abs(a.point - point) - Math.abs(b.point - point))[0];
-  }
-  return { spread: spread.favorite ? spread : null, total: total.over || total.under ? total : null };
+export function bestSpreadTotalMarkets(bookmakers,game,options={}){
+  return selectLineMarkets(bookmakers,game,options);
 }
 
-export function oddsEventMatches(game, event) {
-  const teams = [normalizeName(event.home_team), normalizeName(event.away_team), ...(event.teams ?? []).map(normalizeName)];
-  const start = Date.parse(game.startTime || '');
-  const eventStart = Date.parse(event.commence_time || '');
-  return Number.isFinite(start) && Number.isFinite(eventStart) && Math.abs(start - eventStart) <= 60 * 60_000 &&
-    teams.includes(normalizeName(game.away.name)) && teams.includes(normalizeName(game.home.name));
+export function oddsEventMatches(game,event){
+  return inspectOddsEventCandidate(game,event,ODDS_SPORT_KEYS[game.leagueKey]||'').eligible;
 }
 
-export function matchingOddsEvent(game, events = []) {
-  const matches = events.filter((event) => oddsEventMatches(game, event))
-    .sort((a, b) => Math.abs(Date.parse(a.commence_time) - Date.parse(game.startTime)) - Math.abs(Date.parse(b.commence_time) - Date.parse(game.startTime)));
-  if (matches.length > 1 && Math.abs(Date.parse(matches[0].commence_time) - Date.parse(game.startTime)) === Math.abs(Date.parse(matches[1].commence_time) - Date.parse(game.startTime))) return null;
-  return matches[0] || null;
+export function matchingOddsEvent(game,events=[]){
+  return inspectOddsEventMatch(game,events,ODDS_SPORT_KEYS[game.leagueKey]||'').event;
 }
 
 async function enrichWithOdds(games, options = {}) {
@@ -554,15 +521,20 @@ async function enrichWithOdds(games, options = {}) {
       diagnostics.push(`${sportKey}: live provider returned ${result.upstreamStatus}; using stale cached odds.`);
     }
     let matched = 0;
+    const matches=matchOddsEventCohort(sportGames,result.json,sportKey);
     for (const game of sportGames) {
-      const event = matchingOddsEvent(game, result.json);
+      const match=matches.get(scopedEventKey(eventReference(game)));game.oddsMatchEvidence=match.evidence;
+      const event = match.event;
       if (!event) continue;
       const h2h = bestH2HMarket(event.bookmakers, game);
+      game.oddsBookmakerEvidence=h2h.bookmakerIntegrity;
       const extra = bestSpreadTotalMarkets(event.bookmakers, game);
       const paidOdds = {
         eventId: event.id,
+        eventIdentity:match.evidence,
         commenceTime: event.commence_time,
         h2h,
+        lineMarketIntegrity:extra.integrity,
         spread: extra.spread,
         total: extra.total,
         matchStatus: h2h.away && h2h.home ? 'matched' : 'partial',
@@ -580,81 +552,98 @@ async function enrichWithOdds(games, options = {}) {
           ...game.odds,
           spread: extra.spread || game.odds.spread,
           total: extra.total || game.odds.total,
+          lineMarketIntegrity:extra.integrity,
           paidFallbackRejected: 'incomplete winner market'
         };
       }
       matched += 1;
     }
     const remaining = result.headers['x-requests-remaining'] ?? 'unknown';
-    diagnostics.push(`${sportKey}: matched ${matched}/${sportGames.length}, source=${result.cacheState}, quota remaining ${remaining}`);
+    diagnostics.push(`${sportKey}: matched ${matched}/${sportGames.length}, source=${result.cacheState}, identity rejected ${sportGames.filter(game=>game.oddsMatchEvidence?.status==='rejected').length}, quota remaining ${remaining}`);
     if (Number.parseInt(String(remaining), 10) === 0) alerts.push({ type: 'odds_api_limit', provider: 'The Odds API', sportKey, status: result.status, message: 'The Odds API reported zero requests remaining.', remaining: 0 });
   }));
   return { games, diagnostics, alerts, externalCalls };
 }
 
-function carryForwardOdds(games, cachedSlate) {
+export function carryForwardOdds(games, cachedSlate) {
   if (!cachedSlate?.games?.length) return games;
   for (const game of games) {
-    const previous = cachedSlate.games.find((row) => gamesMatch(game, row));
+    const previous=matchSourceEvent(cachedSlate.games,game).game;
     if (previous?.odds && !game.odds) game.odds = { ...previous.odds, cacheState: 'daily_snapshot' };
   }
   return games;
 }
 
-function mergeTargetedGames(freshGames, cachedSlate) {
+export function mergeTargetedGames(freshGames, cachedSlate) {
   if (!cachedSlate?.games?.length) return freshGames;
-  const merged = cachedSlate.games.map((cached) => {
-    const fresh = freshGames.find((candidate) => gamesMatch(candidate, cached));
+  freshGames=freshGames.map(game=>structuredClone(game));
+  const cachedGames=cachedSlate.games.map(game=>structuredClone(game));
+  bindEspnSummaryMappings([...freshGames,...cachedGames],[...freshGames,...cachedGames]);
+  const merged = cachedGames.flatMap((cached) => {
+    const match=matchSourceEvent(freshGames,cached),fresh=match.game;
+    if(match.observations.length>1)return [structuredClone(cached),...match.observations.map(game=>({...game,id:cached.id,upstreamEventId:game.id}))];
     if (!fresh) return structuredClone(cached);
-    return {
+    const mergedGame={
       ...cached,
       ...fresh,
+      manualResultEvidence:fresh.manualResultEvidence||null,manualResultConflict:fresh.manualResultConflict||null,
       away: { ...cached.away, ...fresh.away },
       home: { ...cached.home, ...fresh.home },
       odds: fresh.odds || cached.odds || null
     };
+    if(['ESPN','ESPN CDN'].includes(fresh.sourceMeta?.provider)){delete mergedGame.espnEventMapping;delete mergedGame.espnEventId;}
+    return mergedGame;
   });
   for (const fresh of freshGames) {
-    if (!merged.some((cached) => gamesMatch(cached, fresh))) merged.push(fresh);
+    if (!merged.some((cached) => sourceEventsMatch(cached, fresh))) merged.push(fresh);
   }
   return merged;
 }
 
-function derivedAdvancedDataset(game, awayProfile, homeProfile) {
+export function derivedAdvancedDataset(game, awayProfile, homeProfile) {
   const away = awayProfile?.advancedMetrics || {};
   const home = homeProfile?.advancedMetrics || {};
   const profile = sportProfile(game).key;
-  const difference = (name) => Number(home[name] || 0) - Number(away[name] || 0);
+  const withProvenance = values => ({ ...values, sourceReceiptTimes: [awayProfile?.sourceFetchedAt || null, homeProfile?.sourceFetchedAt || null],
+    publicationTimeVerified: false, provenancePolicy: 'derived-history-receipts-v1' });
+  const difference = (name, sign = 1) => measuredCalculation([home[name], away[name]], (h, a) => (h - a) * sign);
   const play = { playValueDifference: difference('playValue'), playSuccessDifference: difference('playSuccessRate'), playTurnoverDifference: difference('playTurnoverRate'), playShotQualityDifference: difference('playShotQuality') };
-  if (profile === 'baseball') return { awayExpectedRuns: away.expectedRunsProxy, homeExpectedRuns: home.expectedRunsProxy, bullpenDifference: -difference('bullpenRunsAllowedProxy'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'basketball') return { pace: [away.possessions, home.possessions].filter(Number.isFinite).reduce((sum, value, _, rows) => sum + value / rows.length, 0) || null, efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'football') return { epaDifference: difference('epaProxy'), driveEfficiencyDifference: difference('driveEfficiency'), yardsPerPlayDifference: difference('yardsPerPlay'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'hockey') return { xgDifference: difference('expectedGoalsProxy'), gsaxDifference: difference('goalPreventionProxy'), shotVolumeDifference: difference('shotVolume'), ...play, provider: 'cached historical box-score/play model' };
-  if (profile === 'soccer') return { awayXg: away.expectedGoals, homeXg: home.expectedGoals, shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' };
+  if (profile === 'baseball') return withProvenance({ awayExpectedRuns: finiteNumber(away.expectedRunsProxy), homeExpectedRuns: finiteNumber(home.expectedRunsProxy), bullpenDifference: difference('bullpenRunsAllowedProxy', -1), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'basketball') return withProvenance({ pace: measuredCalculation([away.possessions, home.possessions], (a, h) => (a + h) / 2), efficiencyDifference: difference('offensiveEfficiency'), turnoverRateDifference: difference('turnoverRate'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'football') return withProvenance({ epaDifference: difference('epaProxy'), driveEfficiencyDifference: difference('driveEfficiency'), yardsPerPlayDifference: difference('yardsPerPlay'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'hockey') return withProvenance({ xgDifference: difference('expectedGoalsProxy'), gsaxDifference: difference('goalPreventionProxy'), shotVolumeDifference: difference('shotVolume'), ...play, provider: 'cached historical box-score/play model' });
+  if (profile === 'soccer') return withProvenance({ awayXg: finiteNumber(away.expectedGoals), homeXg: finiteNumber(home.expectedGoals), shotQualityDifference: difference('shotQuality'), ...play, provider: 'cached historical box-score/play model' });
   return null;
 }
 
-export function attachFinalGrade(game, prediction) {
+export function attachFinalGrade(game, prediction, now = Date.now()) {
   if (game.statusKey !== 'final' || prediction.predictionMode === 'retrospective_ungraded') return prediction;
   const actualSide = finalOutcomeSide(game);
-  if (!actualSide) return { ...prediction, actualSide: '', actualWinner: '', predictionCorrect: null };
+  if (!actualSide) return { ...prediction, actualSide: '', actualWinner: '', predictionCorrect: null,finalScore:'' };
   const actualWinner = actualSide === 'draw' ? 'Draw' : game[actualSide].name;
   return {
     ...prediction,
     actualSide,
     actualWinner,
+    resultObservedAt: prediction.resultObservedAt && prediction.actualSide === actualSide && prediction.finalScore === `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
+      ? prediction.resultObservedAt : new Date(now).toISOString(),
     predictionCorrect: actualSide === prediction.predictedSide,
     finalScore: `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
   };
 }
 
-function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refreshGameIds = null) {
-  const previousGame = (cachedSlate?.games || []).find((candidate) => gamesMatch(game, candidate));
-  const previous = (cachedSlate?.predictions || []).find((prediction) =>
-    String(prediction.gameId) === String(game.id) || (previousGame && String(prediction.gameId) === String(previousGame.id)));
+function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refreshGameIds = null, refreshEventKeys = null, frozenPredictions = scopedSlatePredictions(cachedSlate||{})) {
+  const previousGame=matchSourceEvent(cachedSlate?.games||[],game).game
+    || resolveSlateGame(journalGameIndex(cachedSlate?.games||[]),{...eventReference(game),startTime:null}).game;
+  const sameLeague=previousGame&&String(previousGame.leagueKey||'').toLowerCase()===String(game.leagueKey||'').toLowerCase();
+  const legacyPrevious=sameLeague&&!Number.isFinite(Date.parse(previousGame.startTime||''))
+    ?frozenPredictions.get(scopedEventKey(eventReference(previousGame))):null;
+  const previous=frozenPredictions.get(scopedEventKey(eventReference(game)))
+    || (sameLeague&&String(previousGame.id)!==String(game.id)&&eventReference(previousGame).startTime===eventReference(game).startTime
+      ?frozenPredictions.get(scopedEventKey(eventReference(previousGame))):null)||legacyPrevious;
   const start = new Date(game.startTime).getTime();
   const hasStarted = game.statusKey === 'live' || game.statusKey === 'final' || (Number.isFinite(start) && start <= Date.now());
-  if (previous && !hasStarted && refreshGameIds && !refreshGameIds.has(String(game.id))) {
+  if (previous && !hasStarted && (refreshEventKeys?!refreshEventKeys.has(scopedEventKey(eventReference(game))):refreshGameIds&&!refreshGameIds.has(String(game.id)))) {
     return {
       ...previous,
       index: index + 1,
@@ -683,28 +672,10 @@ function frozenOrFreshPrediction(game, index, modelContext, cachedSlate, refresh
     predictionGeneratedAt: previous.predictionGeneratedAt || cachedSlate?.generatedAt || '',
     frozenAfterStart: true
   };
-  return attachFinalGrade(game, frozen);
+  const graded=attachFinalGrade(game,frozen);
+  return previous===legacyPrevious?{...graded,legacyFrozenIdentityUnverified:true,eligibleForCalibration:false,predictionCorrect:null}:graded;
 }
 
-function applyManualResults(games, intelligence, dateKey) {
-  for (const result of Object.values(intelligence?.results || {})) {
-    if (String(result.dateKey) !== String(dateKey)) continue;
-    const target = games.find((game) =>
-      normalizeName(game.leagueKey || game.league) === normalizeName(result.leagueKey || result.league) &&
-      normalizeName(game.away.name) === normalizeName(result.awayTeam) &&
-      normalizeName(game.home.name) === normalizeName(result.homeTeam));
-    if (!target || validScore(result.awayScore) === null || validScore(result.homeScore) === null) continue;
-    target.away.score = Number(result.awayScore);
-    target.home.score = Number(result.homeScore);
-    target.away.winner = target.away.score > target.home.score;
-    target.home.winner = target.home.score > target.away.score;
-    target.statusKey = 'final';
-    target.statusLabel = 'Final';
-    target.detail = 'Final (local result)';
-    target.source = `${target.source} + local result`;
-  }
-  return games;
-}
 
 function selectBalancedSlate(games, limit) {
   const max = Math.max(1, Number(limit) || 25);
@@ -747,7 +718,9 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   ]);
   let games = mergeLocalGames(scoreboard.games, intelligence, dateKey);
   if (options.targetedPregame) games = mergeTargetedGames(games, options.cachedSlate);
-  games = applyManualResults(games, intelligence, dateKey);
+  const summaryMapping=bindEspnSummaryMappings(games,[...scoreboard.games,...(options.cachedSlate?.games||[])]);
+  const manualResultAudit=[];
+  games = applyManualResults(games, intelligence, dateKey,{audit:manualResultAudit});
   games = carryForwardOdds(games, options.cachedSlate);
   games = selectBalancedSlate(games, config.maxGamesPerPost);
   const automatic = await enrichGamesAutomatically(games, date, {
@@ -773,7 +746,8 @@ export async function buildDailySlate(date = new Date(), options = {}) {
   const modelContext = await loadModelContext(options.guildId || '', config.predictionHistoryDays, {
     intelligence,
     externalResults: automatic.historyResults,
-    asOfDateKey: dateKey
+    asOfDateKey: dateKey,
+    asOf: localDateKey(new Date()) <= dateKey ? Date.now() : undefined
   });
   modelContext.modelRegistry = modelRegistry;
   modelContext.localMlModels = localMlModels;
@@ -787,16 +761,23 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     game.autoHistory = {
       awayGames: Number(awayAuto?.sampleSize || 0),
       homeGames: Number(homeAuto?.sampleSize || 0),
-      fetchedAt: awayAuto?.updatedAt || homeAuto?.updatedAt || '',
+      fetchedAt: awayAuto?.sourceFetchedAt && homeAuto?.sourceFetchedAt
+        ? [awayAuto.sourceFetchedAt, homeAuto.sourceFetchedAt].sort()[0] : '',
+      fetchedAtBySide: { away: awayAuto?.sourceFetchedAt || '', home: homeAuto?.sourceFetchedAt || '' },
       cacheState: awayAuto?.sourceCacheState === 'stale' || homeAuto?.sourceCacheState === 'stale'
         ? 'stale'
         : awayAuto?.sourceCacheState || homeAuto?.sourceCacheState || 'unknown',
       truncated: Boolean(awayAuto?.sourceTruncated || homeAuto?.sourceTruncated)
     };
     game.autoTeamMetrics = { away: awayAuto || null, home: homeAuto || null };
+    const derived = derivedAdvancedDataset(game, awayAuto, homeAuto), external = game.advancedDataset;
     game.advancedDataset = {
-      ...(derivedAdvancedDataset(game, awayAuto, homeAuto) || {}),
-      ...(game.advancedDataset || {})
+      ...(derived || {}), ...(external || {}),
+      sourceReceiptTimes: [...(derived?.sourceReceiptTimes || []),
+        ...(Array.isArray(external?.sourceReceiptTimes) ? external.sourceReceiptTimes : external && Object.keys(external).length ? [null] : [])],
+      publicationTimeVerified: false,
+      provenancePolicy: derived && external ? 'mixed-derived-and-external-receipts-v1'
+        : external?.provenancePolicy || derived?.provenancePolicy || 'unknown_legacy'
     };
   }
   const includeOdds = options.includeOdds !== false && !localOnly;
@@ -812,21 +793,25 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         stage: options.marketStage || 'daily',
         stages: options.marketStages || {},
         gameIds: options.refreshGameIds || [],
+        events: options.refreshEvents || [],
         capturedAt: new Date().toISOString()
       })
     : 0;
   const refreshGameIds = options.refreshGameIds?.length ? new Set(options.refreshGameIds.map(String)) : null;
-  const predictions = games.map((game, index) => frozenOrFreshPrediction(game, index, modelContext, options.cachedSlate, refreshGameIds));
+  const refreshEventKeys=options.refreshEvents?.length?new Set(options.refreshEvents.map(scopedEventKey)):null;
+  const frozenPredictions=scopedSlatePredictions(options.cachedSlate||{});
+  const predictions = games.map((game, index) => {
+    const stage=options.marketStages?.['event:'+scopedEventKey(eventReference(game))] || options.marketStages?.[String(game.id)] || options.marketStage || 'daily';
+    const forecastNow=Date.now();
+    return frozenOrFreshPrediction(game,index,{...modelContext,now:forecastNow,
+      forecastHorizon:predictionHorizon({snapshotStage:stage,minutesToStart:(Date.parse(game.startTime)-forecastNow)/60000})},
+      options.cachedSlate,refreshGameIds,refreshEventKeys,frozenPredictions);
+  });
   for (const prediction of predictions) {
-    const refreshed = !options.cachedSlate || !refreshGameIds || refreshGameIds.has(String(prediction.gameId));
-    if (refreshed) prediction.snapshotStage = options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';
+    const refreshed = !options.cachedSlate || (refreshEventKeys?refreshEventKeys.has(scopedEventKey(prediction)):!refreshGameIds||refreshGameIds.has(String(prediction.gameId)));
+    if (refreshed) prediction.snapshotStage = options.marketStages?.['event:'+scopedEventKey(prediction)] || options.marketStages?.[String(prediction.gameId)] || options.marketStage || 'daily';
   }
   const finalReplies = { ...(options.cachedSlate?.finalReplies || {}) };
-  for (const prediction of predictions) {
-    if (prediction.originalGameId && finalReplies[prediction.originalGameId] && !finalReplies[prediction.gameId]) {
-      finalReplies[prediction.gameId] = finalReplies[prediction.originalGameId];
-    }
-  }
   const inventory = intelligence;
   const warehouse = config.featureWarehouseEnabled ? await warehouseInventory() : null;
   const warehouseData = config.featureWarehouseEnabled && config.horizonEvaluationEnabled ? await readFeatureWarehouse() : null;
@@ -840,9 +825,11 @@ export async function buildDailySlate(date = new Date(), options = {}) {
     source: localOnly
       ? 'Local schedule, team/player/context database, and imported history'
       : includeOdds ? 'Cached schedules/history/box scores/lineups + official corroboration + local overrides + optional de-vigged market consensus' : 'Cached schedules/history/box scores/lineups + official corroboration + local overrides + durable market snapshot',
-    disclaimer: 'Probabilistic research only—not a guarantee or wagering advice. Confidence must be validated against the bot’s calibration report.',
+    disclaimer: 'Probabilistic research onlyâ€”not a guarantee or wagering advice. Confidence must be validated against the botâ€™s calibration report.',
     games,
     predictions,
+    scoreboardCoverage:scoreboard.coverage||[],
+    summaryEventMapping:summaryMapping,
     modelSummary: {
       version: MODEL_VERSION,
       frozenLegacyPredictions: predictions.filter((prediction) => !/^OmniMod Evidence Ensemble v(?:3|4|5|6)/.test(String(prediction.modelVersion || ''))).length,
@@ -865,10 +852,12 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         brierImprovement: row.evaluation?.brierImprovement ?? null
       }])),
       replay: replay ? {
+        version:replay.version,protocol:replay.replayProtocol,inputAudit:replay.inputAudit,
+        retrospectiveOnly:replay.retrospectiveOnly,promotionAllowed:replay.promotionAllowed,
         results: replay.resultCount,
         predictions: replay.predictionCount,
         asOfDateKey: replay.asOfDateKey,
-        timeIntegrity: true
+        timeIntegrity: replay.timeIntegrity
       } : null,
       localMl: Object.fromEntries(Object.entries(localMlModels.sports || {}).map(([sport, row]) => [sport, {
         modelId: row.modelId,
@@ -880,8 +869,9 @@ export async function buildDailySlate(date = new Date(), options = {}) {
       }])),
       horizonEvaluation: horizonEvaluation ? {
         sampleSize: horizonEvaluation.overall.sampleSize,
+        forecastCount: horizonEvaluation.overall.forecastCount,
         byHorizon: Object.fromEntries(Object.entries(horizonEvaluation.byHorizon).map(([horizon, row]) => [horizon, {
-          sampleSize: row.sampleSize,
+          sampleSize: row.sampleSize, forecastCount: row.forecastCount,
           accuracy: row.accuracy,
           brierScore: row.brierScore,
           meanModelVsCloseEdge: row.meanModelVsCloseEdge
@@ -910,13 +900,15 @@ export async function buildDailySlate(date = new Date(), options = {}) {
         historicalBoxscores: automatic.historicalBoxscores,
         learnedInjuries: automatic.learnedInjuries,
         confirmedLineups: automatic.confirmedLineups,
+        officialProbableStarters: automatic.officialProbableStarters || 0,
         officialMatches: automatic.officialMatches,
         officialStarters: automatic.officialStarters,
         starterRestMatches: automatic.starterRestMatches,
         playByPlayGames: automatic.playByPlayGames || 0,
         officialProfileMatches: automatic.officialProfileMatches || 0,
         historyLeagues: automatic.historyLeagues,
-        summaryGames: automatic.summaryGames
+        summaryGames: automatic.summaryGames,
+        summaryCoverage:automatic.summaryCoverage||null
       },
       externalCalls: scoreboard.externalCalls + automatic.externalCalls + odds.externalCalls + advancedDatasets.externalCalls
     },
@@ -927,14 +919,18 @@ export async function buildDailySlate(date = new Date(), options = {}) {
       ...odds.diagnostics,
       `Local intelligence: ${Object.keys(inventory.teams || {}).length} teams, ${Object.keys(inventory.players || {}).length} players, ${Object.keys(inventory.contexts || {}).length} contexts, ${Object.keys(inventory.results || {}).length} results.`,
       `Automatic intelligence: ${automatic.historyResults.length} historical finals, ${Object.keys(automatic.teamProfiles).length} team profiles, ${Object.keys(automatic.playerProfiles || {}).length} learned player profiles, ${automatic.playByPlayGames || 0} play-by-play game(s), ${automatic.confirmedLineups} confirmed lineup side(s), ${automatic.officialMatches + (advancedDatasets.sourceCorroborations || 0)} corroborated source match(es).`,
+      `Manual result audit: ${manualResultAudit.filter(row=>row.status==='applied').length} applied, ${manualResultAudit.filter(row=>row.status==='rejected').length} rejected.`,
       `Calibration history: ${modelContext.history.overall.sampleSize} eligible pregame prediction(s).`
     ],
     alerts: odds.alerts ?? [],
     messageId: options.cachedSlate?.messageId || '',
     channelId: options.cachedSlate?.channelId || '',
-    finalReplies
+    finalReplies,manualResultAudit,
+    lastFinalCorrectionCheckAt:options.cachedSlate?.lastFinalCorrectionCheckAt||''
   };
-  if (config.featureWarehouseEnabled) await recordSlateSnapshot(slate);
+  await recordPredictionJournal(slate, { lifecycle: options.targetedPregame ? 'provisional' : 'issued' });
+  // Targeted refreshes are not learner evidence until the caller validates completion.
+  if (config.featureWarehouseEnabled && !options.targetedPregame) await recordSlateSnapshot(slate);
   return slate;
 }
 
@@ -944,26 +940,40 @@ export async function refreshFinalGrades(cachedSlate, options = {}) {
   const leagueKeys = [...new Set((cachedSlate.games || []).map((game) => game.leagueKey).filter(Boolean))];
   const scoreboard = await fetchEspnGames(date, { ...options, leagueKeys });
   let freshGames = mergeLocalGames(scoreboard.games, modelContext.intelligence, cachedSlate.dateKey);
-  freshGames = applyManualResults(freshGames, modelContext.intelligence, cachedSlate.dateKey);
-  const freshById = new Map(freshGames.map((game) => [game.id, game]));
+  const manualResultAudit=[];
+  freshGames = applyManualResults(freshGames, modelContext.intelligence, cachedSlate.dateKey,{audit:manualResultAudit});
+  const cachedIndex=journalGameIndex(cachedSlate.games||[]),associations=new Map(),rejections=[];
+  for(const cachedGame of cachedSlate.games||[]){
+    const match=matchSourceEvent(freshGames,cachedGame),key=scopedEventKey(eventReference(cachedGame));
+    associations.set(key,match);
+    if(match.reason)rejections.push({...eventReference(cachedGame),reason:match.reason,observationCount:match.observations.length});
+  }
   const finals = [];
   const predictions = (cachedSlate.predictions ?? []).map((oldPrediction) => {
-    const cachedGame = (cachedSlate.games ?? []).find((game) => game.id === oldPrediction.gameId);
-    const freshGame = freshById.get(oldPrediction.gameId) || freshGames.find((game) => cachedGame && gamesMatch(game, cachedGame));
-    if (!freshGame || freshGame.statusKey !== 'final') return oldPrediction;
-    const graded = attachFinalGrade(freshGame, oldPrediction);
-    const alreadyReplied = Boolean(cachedSlate.finalReplies?.[oldPrediction.gameId]);
-    if (!alreadyReplied && typeof graded.predictionCorrect === 'boolean') finals.push({ game: freshGame, prediction: graded });
+    const cachedGame=resolveSlateGame(cachedIndex,oldPrediction).game;
+    if(!cachedGame){rejections.push({gameId:String(oldPrediction.gameId),leagueKey:oldPrediction.leagueKey||'',startTime:oldPrediction.startTime||null,reason:'cached_forecast_event_not_unique'});return {...oldPrediction,predictionCorrect:null,actualSide:'',actualWinner:''};}
+    const match=associations.get(scopedEventKey(eventReference(cachedGame)));
+    if(match.observations.length>1)return {...oldPrediction,predictionCorrect:null,actualSide:'',actualWinner:'',finalScore:''};
+    const freshGame=match.game||(cachedGame.statusKey==='final'?cachedGame:null);
+    if(!freshGame||freshGame.statusKey!=='final'||oldPrediction.legacyFrozenIdentityUnverified)return oldPrediction;
+    const graded=attachFinalGrade(freshGame,oldPrediction);
+    const alreadyReplied=finalReplyMatches({...cachedSlate,games:[{...freshGame,id:oldPrediction.gameId}]},graded);
+    if(!alreadyReplied&&typeof graded.predictionCorrect==='boolean')finals.push({game:freshGame,prediction:graded});
     return graded;
   });
-  const games = (cachedSlate.games ?? []).map((cachedGame) => freshById.get(cachedGame.id) || freshGames.find((game) => gamesMatch(game, cachedGame)) || cachedGame);
-  return {
-    ...cachedSlate,
-    refreshedAt: new Date().toISOString(),
-    games,
-    predictions,
-    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.'],
-    alerts: [],
-    newFinals: finals
-  };
+  const games=(cachedSlate.games||[]).flatMap(cachedGame=>{
+    const match=associations.get(scopedEventKey(eventReference(cachedGame)));
+    if(match.observations.length>1)return match.observations.map(game=>({...game,id:cachedGame.id,upstreamEventId:game.id}));
+    const fresh=match.game;
+    return !fresh?cachedGame:String(fresh.id)===String(cachedGame.id)?fresh:{...fresh,id:cachedGame.id,upstreamEventId:fresh.id};
+  });
+  const refreshed = { ...cachedSlate, refreshedAt: new Date().toISOString(), games, predictions,
+    finalScoreboardCoverage:scoreboard.coverage||[],
+    finalAssociationRejections:rejections,manualResultAudit,
+    diagnostics: [...scoreboard.diagnostics, 'Final-grade refresh used frozen predictions; Odds API was not requested.',`Final source association rejections: ${rejections.length}`,`Manual result audit: ${manualResultAudit.filter(row=>row.status==='applied').length} applied, ${manualResultAudit.filter(row=>row.status==='rejected').length} rejected.`],
+    alerts: [], newFinals: finals };
+  // Save outcomes before Discord delivery: a transport failure cannot erase the result observation.
+  await recordPredictionJournal(refreshed, { lifecycle: 'results_only' });
+  if (config.featureWarehouseEnabled) await recordSlateSnapshot(refreshed);
+  return refreshed;
 }

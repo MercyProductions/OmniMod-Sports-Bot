@@ -1,0 +1,26 @@
+{
+  "phase": "current-source-paired-research",
+  "modelVersion": "v6.0.59",
+  "sourceCommit": "fd7d86ef8f7385bbaecd8de82384bd80a80f7f2f",
+  "overallSportsStatus": "in progress",
+  "items": [
+    {"item": "Reproduce baseline", "status": "verified complete", "testsPassed": 1049},
+    {"item": "Enforce flags, public request policy, bounded calls and frozen request audit", "status": "verified complete"},
+    {"item": "Regression and archived-source checks", "status": "verified complete", "fullTestsPassed": 1057, "postcommitTestsPassed": 42, "syntaxFiles": 213},
+    {"item": "Preplanned current-time source-isolated paired collection", "status": "verified complete", "pairedForecasts": 12, "requests": 39, "paidRequests": 0},
+    {"item": "Preserve original trial and identify sample overlap", "status": "verified complete", "overlappingGames": 12, "independentHoldout": false},
+    {"item": "Grade current-source forecasts from later observed finals", "status": "pending"},
+    {"item": "Resolve actual provider date/window coverage", "status": "in progress"},
+    {"item": "Current injury and confirmed-starter coverage", "status": "in progress"},
+    {"item": "Adequate independent current-version predictive/economic validation", "status": "pending"},
+    {"item": "Original frozen v52 trial collection", "status": "in progress"},
+    {"item": "Full queued Crypto then Stocks specifications", "status": "pending"}
+  ],
+  "newTests": 8,
+  "selectionLedgerChanged": false,
+  "originalTrialChanged": false,
+  "liveTradingEnabled": false,
+  "modelPromoted": false,
+  "productionChanged": false,
+  "stocksScheduleChanged": false
+}

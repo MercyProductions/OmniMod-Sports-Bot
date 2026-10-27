@@ -117,7 +117,7 @@ test('unknown-sport calibration rows count once and post-start predictions are e
 });
 
 test('horizon scoring preserves probabilities below one percent and excludes post-start closing quotes', () => {
-  const row = { gameId: 'game', predictionGeneratedAt: '2099-01-02T18:00:00Z', startTime: game().startTime, predictionMode: 'pregame', predictedSide: 'home', actualSide: 'home', outcomeProbabilities: { away: 0.8, home: 99.2 } };
+  const row = { gameId: 'game', leagueKey:'nba', predictionGeneratedAt: '2099-01-02T18:00:00Z', startTime: game().startTime, predictionMode: 'pregame', predictedSide: 'home', actualSide: 'home', modeledOutcomes: ['away','home'], outcomeProbabilities: { away: 0.8, home: 99.2 } };
   const report = evaluatePredictionHorizons([row], [{ gameId: 'game', stage: 'closing', capturedAt: '2099-01-02T19:10:00Z', away: 0.01, home: 0.99 }]);
   assert.ok(Math.abs(report.overall.brierScore - 0.008 ** 2) < 1e-10);
   assert.equal(report.overall.closingSampleSize, 0);

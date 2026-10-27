@@ -1,3 +1,6 @@
+import {selectionFixture} from '../test-support/selection-fixture.mjs';
+import {hybridArtifactId} from '../src/hybridArtifact.js';
+import {CURRENT_MODEL_VERSION} from '../src/modelIdentity.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -137,14 +140,16 @@ test('candidate scoring recognizes a materially better challenger', () => {
   assert.ok(evaluation.logLossImprovement > 0);
 });
 
-test('champion registry promotes only proven improvement and rolls back recent degradation', () => {
+test('champion registry promotes only proven improvement and rolls back recent degradation', async () => {
+  const proof=await selectionFixture({finalizedAt:'2098-12-31T00:00:00Z'});
   const good = {
     evidence: { sampleSize: 100, brierScore: 0.2, logLoss: 0.65 },
     hybrid: { sampleSize: 100, brierScore: 0.19, logLoss: 0.64 },
     brierImprovement: 0.01,
     logLossImprovement: 0.01
   };
-  const promoted = applyCandidateDecision({}, 'basketball', good, good, { minimum: 75, now: '2099-01-01T00:00:00Z' });
+  const promoted = applyCandidateDecision({}, 'basketball', good, good, { minimum: 75, now: '2099-01-01T00:00:00Z', allowPromotion: true,
+    selectionReview: proof.review() });
   assert.equal(promoted.entry.champion, 'hybrid');
   assert.equal(promoted.action, 'promoted_hybrid');
   const badRecent = {

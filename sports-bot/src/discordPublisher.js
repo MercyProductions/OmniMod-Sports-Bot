@@ -1,13 +1,21 @@
+import {prepareFinalRevision} from './finalResultRevision.js';
+import {finalResultFooter,finalResultKey,legacyFinalMessageMatches,matchesFinalResultFooter} from './finalResultIdentity.js';
+import {journalGameIndex} from './journalEventMatch.js';
+import {resolveSlateGame} from './slateEventIdentity.js';
+import { recordPredictionJournal } from './predictionJournal.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  RESTJSONErrorCodes
 } from 'discord.js';
 import { config } from './config.js';
 import { writeDailyCache } from './storage.js';
+import { withDailyPublication } from './dailyPublication.js';
+import { findInChannelHistory } from './discordHistory.js';
 import { getGuildSettings } from './guildSettings.js';
 import { refreshPredictionValue, valueOpportunityLine } from './oddsValue.js';
 
@@ -161,6 +169,7 @@ function compactText(value, maxLength, fallback = 'n/a') {
 }
 
 function predictionField(prediction, game = null) {
+  if(prediction.eventAssociationRejected)return {name:compactText(`#${prediction.index} ${prediction.league||'Sports'} | Event data unavailable`,120),value:`${compactText(prediction.matchup,72)}\nEvent observations could not be matched uniquely. Forecast and price details are hidden pending reconciliation.`,inline:false};
   if (['retrospective_ungraded', 'late_pregame', 'in_play'].includes(prediction.predictionMode)) {
     const score = game?.statusKey === 'final' && Number.isFinite(game.away?.score) && Number.isFinite(game.home?.score)
       ? `${game.away.abbr} ${game.away.score} - ${game.home.abbr} ${game.home.score}`
@@ -175,7 +184,7 @@ function predictionField(prediction, game = null) {
     ? `\nFinal: ${compactText(prediction.finalScore, 60, 'score unavailable')} | ${prediction.predictionCorrect === true ? 'Correct' : prediction.predictionCorrect === false ? 'Missed' : 'Not eligible for grading'}`
     : '';
   const uncertainty = Number.isFinite(Number(prediction.predictionUncertaintyPoints))
-    ? ` | Unc: ±${Number(prediction.predictionUncertaintyPoints).toFixed(1)}pt`
+    ? ` | Unc: Ã‚Â±${Number(prediction.predictionUncertaintyPoints).toFixed(1)}pt`
     : '';
   const qualityNote = prediction.recommendationStatus === 'withheld'
     ? `\nHigh uncertainty: ${compactText(prediction.abstentionReason, 170, 'The leading outcome did not clear the uncertainty and evidence checks.')}`
@@ -191,9 +200,12 @@ function predictionField(prediction, game = null) {
   };
 }
 
-export function formatSlateEmbeds(slate) {
-  const games = new Map((slate.games || []).map((game) => [String(game.id), game]));
-  const predictions = (slate.predictions ?? []).map((prediction) => games.has(String(prediction.gameId)) ? refreshPredictionValue(prediction, games.get(String(prediction.gameId))) : prediction);
+function formatSlatePresentation(slate) {
+  const games=journalGameIndex(slate.games||[]);
+  const predictions=(slate.predictions??[]).map(prediction=>{
+    const association=resolveSlateGame(games,prediction);
+    return association.game?refreshPredictionValue(prediction,association.game):{...prediction,eventAssociationRejected:association.reason};
+  });
   const displayedPredictions = predictions.slice(0, 25);
   const embeds = [];
   const total = predictions.length;
@@ -228,7 +240,7 @@ export function formatSlateEmbeds(slate) {
         inline: false
       });
     } else {
-      embed.addFields(chunk.map((prediction) => predictionField(prediction, games.get(String(prediction.gameId)))));
+      embed.addFields(chunk.map((prediction) => predictionField(prediction, resolveSlateGame(games,prediction).game)));
     }
 
     embeds.push(embed);
@@ -285,7 +297,11 @@ export function formatSlateEmbeds(slate) {
     throw new Error(`Daily slate formatter exceeded Discord's embed limit (${finalLength}/${DISCORD_EMBED_TOTAL_LIMIT}).`);
   }
 
-  return embeds;
+  return { embeds, displayedPredictions: predictions.slice(0, shownCount).filter(row=>!row.eventAssociationRejected) };
+}
+
+export function formatSlateEmbeds(slate) {
+  return formatSlatePresentation(slate).embeds;
 }
 
 export function alertRoleButtons() {
@@ -303,66 +319,80 @@ export function alertRoleButtons() {
   ];
 }
 
-export async function findDailySlateMessage(client, dateKey, guildId = '') {
+export async function findDailySlateMessage(client, dateKey, guildId = '', { strict = false } = {}) {
   try {
     const resources = await setupGuildResources(client, guildId);
     const expectedTitle = `OmniMod Sports Daily Slate | ${dateKey}`;
-    let before;
-    for (let page = 0; page < 5; page += 1) {
-      const messages = await resources.sportsChannel.messages.fetch({ limit: 100, before });
-      const match = messages.find((message) =>
+    return await findInChannelHistory(resources.sportsChannel,(message) =>
         message.author?.id === client.user?.id &&
         message.embeds?.some((embed) => embed.title === expectedTitle)
       );
-      if (match) return match;
-      if (messages.size < 100) break;
-      before = messages.last()?.id;
-      if (!before) break;
-    }
-    return null;
-  } catch {
+  } catch (error) {
+    if (strict) throw Object.assign(new Error('Cannot verify daily slate history; publication deferred.', { cause: error }),
+      { code: ['DISCORD_HISTORY_CURSOR_INVALID','DISCORD_HISTORY_LIMIT_REACHED'].includes(error?.code)
+        ? error.code.replace('DISCORD_','DAILY_') : 'DAILY_HISTORY_UNAVAILABLE' });
     return null;
   }
 }
 
 export async function postDailySlate(client, slate, options = {}) {
-  const resources = await setupGuildResources(client, options.guildId || slate.guildId);
+  const snapshot = structuredClone(slate), settings = structuredClone(options);
+  const resources = await setupGuildResources(client, settings.guildId || snapshot.guildId);
+  return withDailyPublication(snapshot.dateKey, resources.guild.id, snapshot.cacheRevision ?? 0,
+    verify => publishDailySlate(client, snapshot, settings, resources, verify));
+}
+
+async function publishDailySlate(client, slate, options, resources, verify) {
+  const presentation = formatSlatePresentation(slate);
   const mention = resources.notifyRole ? `<@&${resources.notifyRole.id}> ` : '';
   const content = `${mention}Daily OmniMod Sports slate for **${slate.dateKey}**. Informational only; not wagering advice.`;
   const payload = {
     content,
-    embeds: formatSlateEmbeds(slate),
+    embeds: presentation.embeds,
     components: alertRoleButtons(),
     allowedMentions: resources.notifyRole ? { roles: [resources.notifyRole.id] } : { parse: [] }
   };
 
   let message = null;
   let created = false;
+  let payloadWritten = false;
   if (!options.forceNew && slate.messageId && slate.channelId) {
+    let existing;
     try {
       const channel = await client.channels.fetch(slate.channelId);
-      const existing = await channel.messages.fetch(slate.messageId);
+      existing = await channel.messages.fetch(slate.messageId);
+    } catch (error) {
+      // Only a confirmed missing resource permits discovery/replacement.
+      if (![RESTJSONErrorCodes.UnknownChannel, RESTJSONErrorCodes.UnknownMessage].includes(Number(error?.code))) {
+        throw new Error('Cannot verify cached slate message; publication deferred.', { cause: error });
+      }
+    }
+    if (existing) {
+      if (options.reuseExisting === false) await verify();
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
-    } catch {
-      message = null;
+      payloadWritten = options.reuseExisting === false;
     }
   }
 
   // The Discord channel is the final duplicate guard when a cache file is
-  // missing, moved, or a second cPanel app root starts with the same token.
+  // missing, moved, or a second app root starts with the same token.
   if (!message && options.allowDuplicate !== true) {
-    const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id);
+    const existing = await findDailySlateMessage(client, slate.dateKey, resources.guild.id, { strict: true });
     if (existing) {
+      if (options.reuseExisting === false) await verify();
       message = options.reuseExisting === false ? await existing.edit(payload) : existing;
+      payloadWritten = options.reuseExisting === false;
     }
   }
 
   if (!message) {
+    await verify();
     message = await resources.sportsChannel.send(payload);
     created = true;
+    payloadWritten = true;
   }
 
-  const updated = {
+  let updated = {
     ...slate,
     guildId: resources.guild.id,
     messageId: message.id,
@@ -370,7 +400,9 @@ export async function postDailySlate(client, slate, options = {}) {
     notifyRoleId: resources.notifyRole?.id ?? slate.notifyRoleId ?? '',
     postedAt: new Date().toISOString()
   };
-  await writeDailyCache(updated.dateKey, updated, updated.guildId);
+  // Transport evidence must survive a subsequent cache conflict.
+  if (payloadWritten) await recordPredictionJournal({ ...updated, predictions: presentation.displayedPredictions }, { lifecycle: 'delivered' });
+  updated = await writeDailyCache(updated.dateKey, updated, updated.guildId);
   if (created) {
     await logBotEvent(client, `Posted OmniMod Sports slate ${updated.dateKey} with ${updated.predictions.length} prediction(s).`, updated.guildId);
   }
@@ -380,48 +412,66 @@ export async function postDailySlate(client, slate, options = {}) {
 export async function findFinalResultMessage(client, slate, prediction, existingResources = null) {
   let resources;
   try { resources = existingResources || await setupGuildResources(client, slate.guildId); }
-  catch { return null; }
+  catch { throw Object.assign(new Error('Final-result history is unavailable; a new send is blocked'),{code:'FINAL_HISTORY_UNAVAILABLE'}); }
   const channels = [];
+  let uncertain=false,failureCode='FINAL_HISTORY_UNAVAILABLE';
   for (const channelId of [slate.channelId, resources.resultsChannel?.id]) {
     if (!channelId || channels.some((channel) => channel.id === channelId)) continue;
     const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel?.isTextBased?.()) channels.push(channel);
+    if(channel?.isTextBased?.()&&(!channel.guildId||channel.guildId===slate.guildId))channels.push(channel);else uncertain=true;
   }
-  const title = `Final result #${prediction.index}: ${prediction.matchup}`;
-  const footer = `OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`;
+  if(!channels.length)throw Object.assign(new Error('Final-result history has no readable channel; a new send is blocked'),{code:'FINAL_HISTORY_UNAVAILABLE'});
   for (const channel of channels) {
     try {
-      let before;
-      for (let page = 0; page < 5; page += 1) {
-        const messages = await channel.messages.fetch({ limit: 100, before });
-        const found = messages.find((message) => {
+      const found = await findInChannelHistory(channel,(message) => {
           if (message.author?.id !== client.user?.id) return false;
           return message.embeds.some((embed) => {
-            if (embed.footer?.text === footer) return true;
-            const sameLegacyResult = embed.title === title && String(embed.description || '').includes(`Final score: **${prediction.finalScore}**`);
-            return sameLegacyResult && (!slate.messageId || message.reference?.messageId === slate.messageId);
+            if (matchesFinalResultFooter(embed.footer?.text,slate,prediction)) return true;
+            if(legacyFinalMessageMatches(message,embed,slate,prediction))return true;
+            if(embed.footer?.text===`OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}`){
+              const fields=embed.fields||[],league=fields.find(row=>row.name==='League')?.value,started=fields.find(row=>row.name==='Started')?.value;
+              const game=resolveSlateGame(journalGameIndex(slate.games||[]),prediction).game;
+              if(!game||!league||!started||(league===game.league&&started===prediction.startTimeLocal)){
+                uncertain=true;failureCode='FINAL_HISTORY_EVENT_AMBIGUOUS';
+              }
+            }
+            return false;
           });
         });
-        if (found) return found;
-        if (messages.size < 100) break;
-        before = messages.last()?.id;
-      }
-    } catch {
-      // A missing history permission/channel should not stop the other result channel being checked.
+      if (found) return found;
+    } catch(error) {
+      uncertain=true; // Still search the other channel for a definitive match.
+      failureCode=['DISCORD_HISTORY_CURSOR_INVALID','DISCORD_HISTORY_LIMIT_REACHED'].includes(error?.code)
+        ? error.code.replace('DISCORD_','FINAL_') : 'FINAL_HISTORY_UNAVAILABLE';
     }
   }
+  if(uncertain)throw Object.assign(new Error('Final-result history is incomplete; a new send is blocked'),{code:failureCode});
   return null;
 }
 
 export async function postFinalResult(client, slate, final) {
+  finalResultKey(slate,final.prediction);
   const resources = await setupGuildResources(client, slate.guildId);
   const prediction = final.prediction;
   const game = final.game;
   const correct = prediction.predictionCorrect === true;
   const graded = typeof prediction.predictionCorrect === 'boolean';
   const highUncertainty = prediction.recommendationStatus === 'withheld';
-  const duplicate = await findFinalResultMessage(client, slate, prediction, resources);
-  if (duplicate) return duplicate;
+  const revision=prepareFinalRevision(slate,final),context=final.deliveryRevision||{};
+  if(context.digest&&context.digest!==revision.digest)throw new Error('Final revision digest does not match the frozen result');
+  const revisionFooter=finalResultFooter(slate,prediction)+' | result: '+revision.digest;
+  if(context.editOnly&&(!context.previousMessageId||!context.previousChannelId||!/^[a-f0-9]{64}$/.test(context.previousResultDigest||''))){const error=new Error('Correction requires its bound previous revision');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
+  let duplicate;
+  if(context.previousMessageId&&context.previousChannelId){
+    const channel=await client.channels.fetch(context.previousChannelId);
+    if(channel.guildId&&channel.guildId!==slate.guildId)throw new Error('Correction target guild mismatch');
+    duplicate=await channel.messages.fetch(context.previousMessageId);
+    if(duplicate.author?.id!==client.user?.id||!duplicate.embeds.some(embed=>matchesFinalResultFooter(embed.footer?.text,slate,prediction)))throw new Error('Correction target does not match this event');
+  }else duplicate=await findFinalResultMessage(client,slate,prediction,resources);
+  if(duplicate?.embeds.some(embed=>embed.footer?.text===revisionFooter))return duplicate;
+  if(duplicate&&context.editOnly&&!duplicate.embeds.some(embed=>embed.footer?.text===finalResultFooter(slate,prediction)+' | result: '+context.previousResultDigest)){const error=new Error('Correction target is not the verified preceding revision');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
+  if(duplicate&&!context.editOnly){const error=new Error('Existing final result lacks a verified correction baseline; preserve the original message for review');error.code='CORRECTION_BASELINE_UNVERIFIED';throw error;}
+  if(context.editOnly&&!duplicate)throw new Error('Original final message is unavailable; a correction cannot create a replacement');
   const uncertaintyWhy = [prediction.abstentionReason, ...(prediction.uncertaintyReasons || []).slice(0, 3)]
     .filter(Boolean).join(' ').slice(0, 1024) || 'The leading outcome did not clear the uncertainty and evidence gates.';
   const embed = new EmbedBuilder()
@@ -432,7 +482,8 @@ export async function postFinalResult(client, slate, final) {
       `Pregame model pick: **${prediction.predictedWinner}** (${prediction.predictionConfidence || prediction.confidence}; ${prediction.predictionUncertainty || 'uncertainty not measured'})\n` +
       `API data quality at prediction time: **${prediction.apiConfidence || 'not measured'}**\n` +
       `Actual winner: **${prediction.actualWinner}**\n` +
-      `Result: **${!graded ? 'Not gradeable' : correct ? 'Pregame forecast matched' : 'Pregame forecast missed'}**${highUncertainty ? ' (high uncertainty at prediction time)' : ''}`
+      `Result: **${!graded ? 'Not gradeable' : correct ? 'Pregame forecast matched' : 'Pregame forecast missed'}**${highUncertainty ? ' (high uncertainty at prediction time)' : ''}` +
+      (context.editOnly?'\nUpdated after a later final-score observation.':'')
     )
     .addFields(
       { name: 'League', value: game.league, inline: true },
@@ -442,23 +493,24 @@ export async function postFinalResult(client, slate, final) {
       { name: 'Risk', value: prediction.riskTier ?? 'Unknown', inline: true },
       ...(highUncertainty ? [{ name: 'Pregame uncertainty', value: uncertaintyWhy, inline: false }] : [])
     )
-    .setFooter({ text: `OmniMod Sports result | ${slate.dateKey} | ${prediction.gameId}` })
+    .setFooter({ text: revisionFooter })
     .setTimestamp(new Date());
 
+  if(duplicate)return duplicate.edit({embeds:[embed],allowedMentions:{parse:[]}});
   let replyMessage = null;
   if (slate.messageId && slate.channelId) {
+    let dailyMessage;
     try {
-      const channel = await client.channels.fetch(slate.channelId);
-      const dailyMessage = await channel.messages.fetch(slate.messageId);
-      replyMessage = await dailyMessage.reply({ embeds: [embed], allowedMentions: { parse: [] } });
-    } catch {
-      replyMessage = null;
+      const channel=await client.channels.fetch(slate.channelId);
+      if(channel.guildId&&channel.guildId!==slate.guildId)throw new Error('Final result channel guild mismatch');
+      dailyMessage=await channel.messages.fetch(slate.messageId);
+    } catch(error) {
+      if(error?.code!==RESTJSONErrorCodes.UnknownMessage)throw new Error('Daily-message access is uncertain; final-result send is blocked');
     }
+    // A reply rejection can follow remote acceptance. Never turn it into another send.
+    if(dailyMessage)replyMessage=await dailyMessage.reply({embeds:[embed],allowedMentions:{parse:[]}});
   }
-
-  if (!replyMessage) {
-    replyMessage = await resources.resultsChannel.send({ embeds: [embed], allowedMentions: { parse: [] } });
-  }
+  if(!replyMessage)replyMessage=await resources.resultsChannel.send({embeds:[embed],allowedMentions:{parse:[]}});
 
   return replyMessage;
 }

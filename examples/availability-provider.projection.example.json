@@ -1,0 +1,18 @@
+{
+  "schema": "sports-player-availability-v1",
+  "provider": "Your authorized provider",
+  "sourceReference": "https://example.com/replace-with-permitted-source-reference",
+  "observedAt": "2099-01-01T12:00:00Z",
+  "expiresAt": "2099-01-01T12:20:00Z",
+  "records": [
+    {
+      "kind": "goalie_projection",
+      "eventId": "nhl-REPLACE_NATIVE_GAME_ID",
+      "startTime": "2099-01-01T18:00:00Z",
+      "teamAbbr": "REPLACE_TEAM",
+      "playerId": "REPLACE_NATIVE_PLAYER_ID",
+      "playerIdNamespace": "nhl",
+      "name": "Replace projected goalie name"
+    }
+  ]
+}

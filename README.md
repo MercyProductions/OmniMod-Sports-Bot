@@ -82,7 +82,7 @@ Add the project’s own destination/provider fields from its template. Do not sh
 Review this mode skeleton; blank credentials intentionally do not authenticate:
 
 ```dotenv
-ODDS_API_KEY=
+# Configure your own odds key privately when needed.
 ODDS_API_REGION=us
 POST_ON_START=false
 REGISTER_COMMANDS=false
@@ -123,9 +123,9 @@ Runtime stores can contain private server settings and credentials saved by admi
 
 ## Sports audit and development status
 
-The source before this audit is preserved by the baseline tag below. The [technical audit](docs/SPORTS_ACCURACY_AUDIT.md), [prediction-record specification](docs/PREDICTION_RECORDS.md) and [implementation checklist](docs/AUDIT_CHECKLIST.md) describe the **v6.0.1 development branch**, `docs/setup-and-prediction-audit-2026-10-20`. Those behavior changes are under review, not deployed. On the main branch, documentation does not itself enable the new journal or audit command. Switch to the review branch to inspect/test that implementation.
+The source before this audit is preserved by the baseline tag below. The [technical audit](docs/SPORTS_ACCURACY_AUDIT.md), [prediction-record specification](docs/PREDICTION_RECORDS.md) and [implementation checklist](docs/AUDIT_CHECKLIST.md) describe the development branch, `docs/setup-and-prediction-audit-2026-10-20`. The initial v6.0.1 audit has subsequent repairs; current forecast identity is **v6.0.67**. These changes remain under review; this work has not deployed them. The user confirmed Sports is offline; installed source and startup remain unverified. On the main branch, documentation does not itself enable the new journal or audit command. Switch to the review branch to inspect/test that implementation.
 
-The repaired branch has 134 passing tests and adds immutable pregame probabilities, available odds/timestamps and linked final results, plus evaluation/provenance fixes. It does not prove improved prediction accuracy. Available local history is insufficient for a fair historical before/after comparison. `FINAL_LOOKBACK_DAYS` in the configuration reference is a development addition.
+The initial v6.0.1 verification passed 134 tests and added immutable pregame probabilities, available odds/timestamps and linked final results, plus evaluation/provenance fixes. That initial verification did not prove improved prediction accuracy. Available local history is insufficient for a fair historical before/after comparison. `FINAL_LOOKBACK_DAYS` in the configuration reference is a development addition.
 
 ## Baseline and contributing
 
@@ -140,6 +140,8 @@ Fork, create a development branch and use your own local credentials. Add regres
 `npm test` runs this primary project’s tests. `npm run check` runs configured syntax checks. `npm run test:all` is the standalone Sports suite. Submit the problem/change/checks/limits in your PR; share sanitized diagnostics rather than private state.
 
 ## Source map
+
+Sports research updates add immutable forecast lifecycle records, per-game evidence coverage, matched game-weighted evaluation and [preregistered ML holdout review](docs/SPORTS_SELECTION_PROTOCOL.md). Runtime registry refreshes do not automatically promote challengers. Development validation and synthetic tests do not establish accuracy improvement or profitable wagering; production changes require separate review.
 
 - [Prediction engine](sports-bot/src/predictionEngine.js)
 - [Data lifecycle](sports-bot/src/sportsData.js)
@@ -158,3 +160,106 @@ Fork, create a development branch and use your own local credentials. Add regres
 - [The Odds API v4](https://the-odds-api.com/liveapi/guides/v4/)
 
 References checked on 2026-10-20. Confirm current region, licensing, quota and endpoint entitlement in your own account before enabling a paid selector. Each contributor needs their own provider account; this code does not redistribute the maintainer’s data subscriptions.
+
+Original-price research is documented in [frozen-price audits](docs/SPORTS_PRICE_RESEARCH.md). It preserves offered prices and linked quote updates, requires explicit cost assumptions, and separates hypothetical outcomes from actual paper performance. The latest default-parallel Sports suite has 1,114 passing tests. Earlier Windows exclusive-create/lost-update defects have targeted repairs; the intermittent old zero-successor failure has not been reproduced or fully explained. No improved forecasting or wagering performance has been established.
+
+Journal event-association repair: [scoped identities, conflict quarantine and eligibility](docs/SPORTS_JOURNAL_EVENT_INTEGRITY.md). Development v6.0.32; original forecasts remain immutable. These are source and synthetic-regression improvements, not proof of forecasting or wagering improvement.
+
+Scoped refresh and publication continuation: [event-bound windows, targeted forecast preservation and Discord delivery](docs/SPORTS_REFRESH_EVENT_IDENTITY.md), development v6.0.33. The full scope and remaining upstream identity work are documented there.
+
+Source/final-refresh continuation: [league/start-bound merging, quote isolation and disputed final preservation](docs/SPORTS_SOURCE_EVENT_ASSOCIATION.md), development v6.0.34. Actual-host verification and predictive improvement remain unproven.
+
+Final delivery continuation: [scoped result claims, message recovery and uncertain transport](docs/SPORTS_FINAL_DELIVERY_INTEGRITY.md), development v6.0.35. Synthetic transport verification does not establish host deployment or exactly-once multi-worker delivery.
+
+Claim ownership continuation: [owner-bound generations, atomic decisions and crash recovery](docs/SPORTS_FINAL_CLAIM_OWNERSHIP.md), development v6.0.36. Extensions must pass the returned lease when finishing or releasing a claim. Hosting and filesystem requirements are explicit.
+
+Final correction continuation: [edit existing result messages while preserving original forecasts](docs/SPORTS_FINAL_RESULT_CORRECTIONS.md), development v6.0.37. Optional acknowledged-final rechecks default to hourly within 24 hours of scheduled start; configuration, source gates and legacy limits are documented there.
+
+Manual result integrity: [scoped doubleheaders, local receipts and conflict quarantine](docs/SPORTS_MANUAL_RESULT_INTEGRITY.md), development v6.0.38. Administrator event scope and source-check inputs are documented there; immutable raw edit history and actual host/prospective validation remain unfinished.
+
+Accepted manual edits: [append-only result revisions, replay and backup requirements](docs/SPORTS_MANUAL_RESULT_HISTORY.md), development v6.0.39. Current snapshots are projections; keep the private result ledgers with backups. No deployment or improved prediction performance is claimed.
+
+Quote refresh identity: [event-bound selection, frozen models and delayed response merging](docs/SPORTS_QUOTE_REFRESH_IDENTITY.md), development v6.0.40. Seven baseline regressions reproduced; no provider credits were used by the tests. Actual host and predictive improvement remain unverified.
+
+Provider event identity: [ordered teams, bound event IDs and cohort conflicts](docs/SPORTS_PROVIDER_EVENT_IDENTITY.md), development v6.0.41. Seven old-matcher failures reproduced; injected daily-builder/quote-refresh and durable evidence paths verified. Native source truth and predictive improvement remain unproven.
+
+Bookmaker integrity: [complete books, conflict quarantine and frozen audit evidence](docs/SPORTS_BOOKMAKER_INTEGRITY.md), development v6.0.42. Nine old-parser failures reproduced; malformed provider data no longer crashes the tested daily-builder path. Predictive improvement remains unproven.
+
+Quote time integrity: [explicit timestamps, contributor ages and consistent inference cutoff](docs/SPORTS_QUOTE_TIMESTAMP_INTEGRITY.md), development v6.0.43. Seven old-source timing/normalization failures reproduced. Original quote text and timing evidence are preserved; independent publication truth and predictive improvement remain unproven.
+
+Quote attempt auditing: [durable request intent, terminal evidence and read-only diagnostics](docs/SPORTS_QUOTE_ATTEMPT_AUDIT.md), development v6.0.44. Six old-workflow failures reproduced; interrupted calls remain outcome-unknown, and prepared snapshots do not imply Discord delivery.
+
+Observed line markets: [single-book spread/total pairs, partial context and settlement provenance](docs/SPORTS_LINE_MARKET_INTEGRITY.md), development v6.0.45. Ten old-selector failures reproduced; selected lines and assumptions are frozen. No spread/total execution or verified bookmaker settlement is claimed.
+
+Current prospective evidence: [new isolated v6.0.45 collection and scoped comparison repair](docs/SPORTS_CURRENT_PROSPECTIVE_VALIDATION.md). Two NHL pairs were frozen before their starts and have now resolved with identical baseline/challenger scores (1/2 correct); no improvement is established. The requirement matrix now separates current fixture/process evidence from actual host and performance gaps.
+
+Legacy result protection: [verified predecessor digests and safe lost-ack recovery](docs/SPORTS_LEGACY_FINAL_PROTECTION.md). Four old-publisher overwrite failures reproduced. Unverifiable old messages remain untouched; current cached picks cannot become reconstructed historical baselines.
+
+Next-day real-data coverage: [13 matched NHL/NFL pairs and local runtime inventory](docs/SPORTS_NEXTDAY_OPERATIONAL_EVIDENCE.md). All outcomes were pending at the timestamped report, evidence coverage was incomplete, and no wager was qualified. Three studies contain 17 pair records but only 15 distinct games; differently pinned studies are not pooled as independent performance evidence. Actual Sports deployment remains unverified.
+
+Operational monitoring v2: [canonical model/horizon cohorts, result conflict quarantine and explicit modeled outcomes](docs/SPORTS_OPERATIONAL_DRIFT_INTEGRITY.md). The read-only audit accepts an explicit-zone --as-of cutoff. Legacy outcome-space ambiguity stays visible; frozen research records are not rewritten, and descriptive drift does not authorize promotion.
+
+Input observation clocks: [strict clocks and declared learning cutoffs](docs/SPORTS_INPUT_OBSERVATION_CLOCKS.md), development v6.0.46. Full 818 tests pass; older prospective studies retain their frozen source versions.
+
+Coverage clock verification: [separate fetch/native clocks and completed frozen finals](docs/SPORTS_COVERAGE_OBSERVATION_CLOCKS.md), development v6.0.47. Full 826 tests pass. Frozen v6.0.45 next-day study resolved 13 games: both versions 10/13 correct with identical probability scores; no improvement or after-cost edge established.
+
+Model availability: [chronological champion/ML guards and missing-data causes](docs/SPORTS_MODEL_AVAILABILITY_VALIDATION.md), development v6.0.48. Full 837 tests pass. Invalid/future/missing approval clocks cannot activate a champion; native-ID mapping failures stay explicit. No current-version predictive improvement established.
+
+Missing NHL history: [bounded official recent-final fallback](docs/SPORTS_NATIVE_NHL_HISTORY.md), development v6.0.49. A real isolated seven-date run restored 47 finals and 32 thin team profiles (1-4 games each); full 850 tests pass. Injuries/goalies remain unverified and no predictive improvement is claimed.
+
+Goalies and injuries: [free context, unknown health and optional provider setup](docs/SPORTS_GOALIE_INJURY_PROVIDERS.md), development v6.0.50. Native season leaders remain unconfirmed; omitted health no longer defaults to available. Provider-neutral exports can supply explicitly scoped assertions; no vendor subscription is required by default. Full serialized 875/focused 61 pass; parallel Windows failures remain open.
+
+Windows locks and selection clocks: [bounded exclusive-create retries, strict research clocks and unknown injury status](docs/SPORTS_WINDOWS_LOCK_SELECTION_VALIDATION.md), development v6.0.51. Focused 97 tests pass; the earlier zero-successor failure remains undiagnosed, and independent model/source validation remains open.
+
+Model approval evidence: [recomputed local trial proof and exact league/horizon eligibility](docs/SPORTS_SELECTION_EVIDENCE_BINDING.md), development v6.0.52. Nonbaseline champions require verified plan/artifact/journal evidence; serialized flags alone cannot activate them. Optional verification paths are blank by default. Forward performance and confirmed availability remain unverified.
+
+Automatic forward collection: [pinned hourly research collector, safety checks and availability diagnostics](docs/SPORTS_AUTOMATIC_FORWARD_COLLECTOR.md). The existing v6.0.52 NHL Daily trial keeps its archived source while the collector records real first issues and finals. No account tokens, paid requests, Discord posts or orders are enabled; the first actual run captured 12 NHL forecasts with no finals yet.
+
+Registry persistence integrity: [preserved first issues, consistent recent cohorts and cooperative write ownership](docs/SPORTS_REGISTRY_REFRESH_INTEGRITY.md), development v6.0.53. Ten old-path failures reproduced; full926 tests pass. The automatic forward trial stays frozen at v6.0.52 and cannot establish current-version superiority yet.
+
+Journal/operation clocks: [strict issuance, qualified result/delivery timing and operational report v3](docs/SPORTS_JOURNAL_OPERATION_CLOCKS.md), development v6.0.54. Eleven old-source failures reproduced; full 939 tests pass. A read-only audit confirms 13 resolved old-study journal outcomes while retaining unknown legacy outcome-space exclusions; no frozen study or production state changed.
+
+Forward evidence: [capture receipts, provider versions and first real run](docs/SPORTS_FORWARD_EVIDENCE_RECEIPTS.md). Full 945 tests pass. All 12 evidence reports remain incomplete; zero actionable opportunities or confirmed goalie starters. This verifies collection, not predictive improvement.
+
+Availability integrity: [source-preserving reconciliation and primary health scoring](docs/SPORTS_AVAILABILITY_RECONCILIATION.md), development v6.0.55. Fifteen reproduced failure scenarios; twenty-one added tests/full966 pass. Unknown health no longer receives full observed coverage. Missing external injury/confirmed-goalie inputs and independent current-version performance remain unresolved.
+
+Price cohort integrity: [canonical issues, original quotes, outcome conflicts and historical scopes](docs/SPORTS_PRICE_COHORT_INTEGRITY.md), report v2. Twelve old-reporter failures reproduced;20 tests added/full986 pass. Both inspected real journals have no qualified price scenarios; no profitability estimate is supported. Forecast modelv6.0.55 and the frozenv52 trial are unchanged.
+
+NHL priced-data recovery: [scoped native names, real quote capture and timing limits](docs/SPORTS_NHL_ODDS_IDENTITY.md), development v6.0.56. Four prior-path failures reproduced;12 added tests/full998 pass. Separate research associated12 games and saved12 price observations at one existing usage credit; only3 starts agree exactly, all opportunities remain withheld, and no performance improvement is established.
+
+Native records and availability freshness: [scoped NHL records, OTL semantics and retained-input checks](docs/SPORTS_NATIVE_RECORD_AVAILABILITY.md), development v6.0.57. An actual free scoreboard check retained 24 team records across 12 games. The saved landing review has 47 goalie season-candidate rows and zero confirmed starters/injury assertions. Stale coverage no longer appears current; full 1,016 tests pass. The hourly v52 forward trial remains frozen and the Stocks schedule unchanged.
+
+Specialist availability: [shared health assertions, selected manual status and frozen role diagnostics](docs/SPORTS_SPECIALIST_HEALTH_EVIDENCE.md), development v6.0.58. Unknown role priors no longer act as medical evidence, current restrictions cap stored workload, and team/duplicate/clock checks are explicit. Full 1,031 tests pass; independent forward performance remains unverified.
+
+Forecast cutoff and critical roles: [deterministic uncertainty, actual role evidence and strict start eligibility](docs/SPORTS_UNCERTAINTY_CUTOFF_LINEUPS.md), development v6.0.59. Zero confirmed starters cannot skip the existing late-role check; replay time no longer changes its decision. Full 1,049 tests pass. The unchanged frozen collector has three checked captures, twelve games and zero finals; current-version predictive validation remains unfinished.
+
+Current-source observation: [source-isolated v59/baseline pairs and sealed public-request receipts](docs/SPORTS_CURRENT_SOURCE_PAIRED_RESEARCH.md). Twelve real NHL pairs were captured with a 1,875 ms issuance gap; all overlap the original frozen trial and remain ungraded. Full 1,057 tests pass. Provider date-window and medical coverage remain incomplete; no independent selection or profitability claim is supported.
+
+CDN date recovery: [provider-declared selector, local-day coverage and actual expanded slate](docs/SPORTS_CDN_DATE_SELECTION.md), development v6.0.60. The fallback now requests the intended day; an isolated run captured 12 NHL, 8 NBA and 1 MLB pregame forecasts. Quality/risk gates remain, all calibration counts are zero, and no prediction was actionable. Full 1,066 tests pass; broader coverage and predictive improvement remain unverified.
+
+Starter recovery: [event-bound MLB scoreboard projections and automatic final checks](docs/SPORTS_SCOREBOARD_STARTER_RECOVERY.md), development v6.0.61. A failed summary no longer discards fresh probable pitchers already returned by the scoreboard. The real isolated scan retained two projections, zero confirmations and unknown injury coverage. Full1,079 tests pass; medical/goalie coverage and predictive performance remain unfinished.
+
+Summary identity: [response/source binding and accepted-coverage diagnostics](docs/SPORTS_SUMMARY_SOURCE_IDENTITY.md), development v6.0.62. Contradictory event/team inputs are excluded from current and historical enrichment; request slots, accepted responses, failures and cap omissions are distinct. Full1,100 tests pass. Actual medical/confirmed-goalie coverage and predictive improvement remain unresolved.
+
+Player-source reconciliation: [critical roles, injury restrictions and retained observations](docs/SPORTS_SUMMARY_PLAYER_EVIDENCE.md), development v6.0.63. Injury updates no longer erase same-player role/measurement evidence, and contradictory reports are conservative rather than array-order dependent. Full1,114 tests pass. Actual medical-source coverage and independent forecasting improvement remain unfinished.
+
+Preferred-provider projections: [explicit projected goalies and injury interaction](docs/SPORTS_PROVIDER_GOALIE_PROJECTIONS.md), development v6.0.64. The optional local exporter can report a projection without confirming the starter or clearing health. Full1,126 tests pass; no external medical feed or current-version predictive improvement is established.
+
+Independent availability inputs: [summary-parent isolation and original provider bindings](docs/SPORTS_INDEPENDENT_AVAILABILITY_INPUTS.md), development v6.0.65. Rejected summaries no longer erase independently valid provider or scoreboard observations. Full1,142 tests pass; real medical-source coverage and current-model predictive improvement remain unverified.
+
+Official schedules: [exact event identity, fresh pitcher inputs and independent-source accounting](docs/SPORTS_OFFICIAL_SCHEDULE_INTEGRITY.md), development v6.0.66. Doubleheaders and player namespaces stay separate; expired projections cannot block current observations. Full1,170 tests pass. The one real-response diagnostic recovered projected inputs at its original receipt time; it was not a forecast or accuracy result.
+
+- [Exact current-candidate trial and retained prior plans](docs/SPORTS_PRETRIAL_SUPERSESSION.md): guarded pre-start replacement, 1,292 tests, scheduled November window and pending forward evidence.
+- [Native NHL/ESPN summary mapping](docs/SPORTS_NATIVE_SUMMARY_MAPPING.md): exact fresh event/team bindings, injury/goalie semantics, chronological checks and the remaining actual feed-access limit.
+- [Actual validation readiness and measured data blockers](docs/SPORTS_VALIDATION_READINESS.md): mapping, access and cap omissions; exact trial/source limits and unfinished model validation.
+- [Historical replay date ordering and verification](docs/SPORTS_REPLAY_DATE_ORDER.md): 1,272 tests; future-label isolation, explicit unknown clocks and unchanged real-history scores.
+- [Local price-receipt chronology and report v3](docs/SPORTS_PRICE_RECEIPT_CHRONOLOGY.md): 1,264 tests; original fetch clocks, unchanged legacy records and unfinished value validation.
+Model scope: [v6.0.69 decision-horizon binding and real pregame verification](docs/SPORTS_DECISION_HORIZON_BINDING.md), with a [phase checklist](docs/SPORTS_DECISION_HORIZON_CHECKLIST.json). Model selection and permanent forecasts now share the chosen information-time horizon. Full 1,256 tests and 237 syntax checks pass. A separately pinned real-data study has 21 matched pairs and no finals; predictive improvement remains unverified.
+
+Preferred-provider refreshes: [v6.0.68 NHL availability acceptance](docs/SPORTS_AVAILABILITY_REFRESH.md), with [phase checklist](docs/SPORTS_AVAILABILITY_REFRESH_CHECKLIST.json). Fresh, new, event-bound inputs actually selected by the predictor can complete a pregame refresh independently of ESPN, subject to the existing issuance and risk gates. Full 1,247 tests and 235 syntax checks pass. No actual alternate feed is connected; clinical coverage and v68 forward performance remain unverified.
+
+Refresh diagnostics: [durable cache/source rejection reasons and legacy coverage](docs/SPORTS_REFRESH_REJECTION_EVIDENCE.md), with a [structured checklist](docs/SPORTS_REFRESH_REJECTION_CHECKLIST.json). Full 1,222 tests and 233 syntax checks pass. Existing freshness/issuance gates remain, and actual injury/confirmed-goalie coverage is still missing.
+
+Current validation: [governed v67 forward collection and the read-only injury/goalie audit](docs/SPORTS_GOVERNED_FORWARD_FAMILY.md), with a [structured phase checklist](docs/SPORTS_GOVERNED_FORWARD_CHECKLIST.json). Full 1,211 tests and 231 syntax checks pass. The later registered trial has no collected samples yet; missing clinical inputs and actual predictive performance remain unfinished.
+
+Specialist arithmetic: [coherent score means, numeric missingness and current-source research](docs/SPORTS_SPECIALIST_SCORE_CONSISTENCY.md), development v6.0.67. Football score means use their probability margin once; invalid point inputs abstain and new journal entries freeze specialist assumptions. Full1,190 tests pass. A separately pinned12-pair NHL diagnostic has no finals and cannot establish improvement or model selection.

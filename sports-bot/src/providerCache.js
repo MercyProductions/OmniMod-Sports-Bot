@@ -68,7 +68,7 @@ export async function cachedFetchJson(rawUrl, options = {}) {
     const staleMs = Math.max(ttlMs, Number(options.staleMs) || ttlMs);
     const cached = await readJson(file, null);
     const fetchedTime = new Date(cached?.fetchedAt || '').getTime();
-    const age = Number.isFinite(fetchedTime) ? now - fetchedTime : Infinity;
+    const age = Number.isFinite(fetchedTime) && fetchedTime <= now ? now - fetchedTime : Infinity;
     if (!options.force && cached?.json !== undefined && age <= ttlMs) return fromCache(cached, 'fresh');
     const negativeTtlMs = Math.max(0, Number(options.negativeTtlMs) || 0);
     if (!options.force && cached?.failure === true && negativeTtlMs > 0 && age <= negativeTtlMs) {
@@ -86,11 +86,11 @@ export async function cachedFetchJson(rawUrl, options = {}) {
         accept: 'application/json',
         'user-agent': 'OmniModSportsBot/6.0 (+https://omnimod.cc)'
       };
-      if (cached?.headers?.etag) headers['if-none-match'] = cached.headers.etag;
-      if (cached?.headers?.['last-modified']) headers['if-modified-since'] = cached.headers['last-modified'];
+      if (Number.isFinite(age) && cached?.headers?.etag) headers['if-none-match'] = cached.headers.etag;
+      if (Number.isFinite(age) && cached?.headers?.['last-modified']) headers['if-modified-since'] = cached.headers['last-modified'];
       const fetcher = options.fetch || globalThis.fetch;
       const response = await fetcher(rawUrl, { signal: controller.signal, headers });
-      if (response.status === 304 && cached?.json !== undefined) {
+      if (response.status === 304 && cached?.json !== undefined && Number.isFinite(age)) {
         const refreshed = {
           ...cached,
           json: typeof options.transformJson === 'function' ? options.transformJson(cached.json) : cached.json,

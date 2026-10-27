@@ -1,0 +1,25 @@
+{
+  "phase": "uncertainty-cutoff-and-critical-lineups",
+  "modelVersion": "v6.0.59",
+  "overallSportsStatus": "in progress",
+  "items": [
+    {"item": "Reproduce pre-edit full suite", "status": "verified complete", "testsPassed": 1031},
+    {"item": "Use forecast cutoff consistently in uncertainty and primary inference", "status": "verified complete"},
+    {"item": "Critical-role missingness and multiple-identity checks", "status": "verified complete"},
+    {"item": "Strict event time and start-boundary eligibility", "status": "verified complete"},
+    {"item": "Freeze uncertainty context with original forecasts", "status": "verified complete"},
+    {"item": "Controlled source-bound counterexamples", "status": "verified complete", "qualification": "Synthetic implementation checks, not real-game performance evidence."},
+    {"item": "Final full regression and syntax checks", "status": "verified complete", "testsPassed": 1049, "syntaxFiles": 211},
+    {"item": "Due frozen-collector invocation", "status": "verified complete", "completedAt": "2026-10-24T08:03:07.820Z", "sourceVersion": "v6.0.52", "games": 12, "finals": 0, "captureReceipts": 3, "providerBlobs": 34},
+    {"item": "Adequate independent forward and economic validation", "status": "in progress", "limitation": "Current v59 requires independent evidence; original v52 study remains separate and has one date/no finals."},
+    {"item": "Current medical and confirmed-goalie source coverage", "status": "in progress"},
+    {"item": "Full queued Crypto and Stocks specifications", "status": "pending"}
+  ],
+  "newTests": 18,
+  "focusedTestsPassed": 74,
+  "liveTradingEnabled": false,
+  "productionChanged": false,
+  "modelPromoted": false,
+  "frozenTrialSourceChanged": false,
+  "stocksScheduleChanged": false
+}

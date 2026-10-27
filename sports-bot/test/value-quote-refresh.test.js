@@ -13,7 +13,8 @@ const { refreshPredictionValue } = await import('../src/oddsValue.js');
 const { buildCommands } = await import('../src/commands.js');
 const { collectGradedRows, buildCalibrationModel, buildOutcomeValidation } = await import('../src/modelEvaluation.js');
 
-const now = Date.now();
+// All quote scenarios inject their clock; use midday so retry offsets do not cross a daily reset.
+const now = Date.parse('2026-10-20T18:00:00Z');
 const modelAsOf = new Date(now - 3_600_000).toISOString();
 const startTime = new Date(now + 3_600_000).toISOString();
 const quoteTime = new Date(now - 30_000).toISOString();
@@ -40,11 +41,13 @@ test('ordinary reads, disabled budgets, non-admins and missing keys never call a
 });
 
 test('durable request slots enforce cooldown and daily cap across repeated callers', async () => {
-  const args = { now, dailyCap: 2, cooldownMinutes: 5, directory: path.join(directory, 'budget') };
+  // Keep these claims on one local date even when the suite runs near midnight.
+  const budgetNow=Date.parse('2026-10-20T18:00:00Z');
+  const args = { now:budgetNow, dailyCap: 2, cooldownMinutes: 5, directory: path.join(directory, 'budget') };
   assert.equal((await claimValueRefresh(args)).claimed, true);
-  assert.equal((await claimValueRefresh({ ...args, now: now + 1 })).status, 'cooldown');
-  assert.equal((await claimValueRefresh({ ...args, now: now + 6 * 60_000 })).claimed, true);
-  assert.equal((await claimValueRefresh({ ...args, now: now + 12 * 60_000 })).status, 'daily_cap');
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 1 })).status, 'cooldown');
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 6 * 60_000 })).claimed, true);
+  assert.equal((await claimValueRefresh({ ...args, now: budgetNow + 12 * 60_000 })).status, 'daily_cap');
   const claims = await fs.readdir(path.join(args.directory, 'value-refresh-claims'));
   assert.equal(claims.filter((name) => name.endsWith('.json')).length, 2);
 });
@@ -53,6 +56,16 @@ test('concurrent claims reserve at most one request, including the cooldown cons
   const args = { now, dailyCap: 5, cooldownMinutes: 5, directory: path.join(directory, 'concurrent') };
   const results = await Promise.all(Array.from({ length: 8 }, () => claimValueRefresh(args)));
   assert.equal(results.filter((row) => row.claimed).length, 1);
+});
+
+test('local date rollover resets the daily cap while retaining the cross-midnight cooldown',async()=>{
+  // October in America/Chicago: 04:59 UTC is 23:59 local, 05:00 UTC is the next date.
+  const beforeMidnight=Date.parse('2026-10-21T04:59:00Z');
+  const args={now:beforeMidnight,dailyCap:1,cooldownMinutes:5,directory:path.join(directory,'rollover-budget')};
+  assert.equal((await claimValueRefresh(args)).claimed,true);
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+2*60_000})).status,'cooldown');
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+6*60_000})).claimed,true);
+  assert.equal((await claimValueRefresh({...args,now:beforeMidnight+12*60_000})).status,'daily_cap');
 });
 
 test('provider failure consumes its reservation and never exposes raw key-bearing errors', async () => {
@@ -153,3 +166,28 @@ test('existing value command exposes optional explicit refresh and league select
 });
 
 test.after(async () => { await fs.rm(directory, { recursive: true, force: true }); });
+
+
+test('actual quote refresh journal events remain linked prices rather than new winner forecasts',async()=>{
+  const {recordPredictionJournal,readPredictionJournal}=await import('../src/predictionJournal.js');
+  const value=slate();value.predictions[0].modelVersion='OmniMod Evidence Ensemble v6.0.2';
+  const file=path.join(directory,'immutable-quote-events.jsonl');
+  await recordPredictionJournal(value,{file,now});
+  const changed=await refreshValueQuotes(value,options('journal-refresh',{fetchJson:async()=>providerResult()}));
+  assert.ok(changed.issuedSlate);
+  assert.equal(changed.issuedSlate.predictions[0].originalForecastGeneratedAt,modelAsOf);
+  await recordPredictionJournal(changed.issuedSlate,{file,now:now+1000,lifecycle:'prices_only'});
+  await recordPredictionJournal(changed.issuedSlate,{file,now:now+2000,lifecycle:'prices_only'});
+  let records=await readPredictionJournal(file);
+  assert.equal(records.filter(row=>row.type==='forecast').length,1);
+  assert.equal(records.filter(row=>row.type==='price_observation').length,1);
+  const issued=records.find(row=>row.type==='forecast');
+  const price=records.find(row=>row.type==='price_observation');
+  assert.equal(price.payload.sourceForecastId,issued.payload.forecastId);
+  assert.equal(issued.payload.predictionGeneratedAt,modelAsOf);
+  const foreign=structuredClone(changed.issuedSlate);foreign.predictions[0].modelVersion='unknown-model';
+  await recordPredictionJournal(foreign,{file,now:now+3000,lifecycle:'prices_only'});
+  records=await readPredictionJournal(file);
+  assert.equal(records.filter(row=>row.type==='unlinked_price_observation').length,1);
+  assert.equal(records.filter(row=>row.type==='forecast').length,1);
+});
